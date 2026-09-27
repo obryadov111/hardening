@@ -513,23 +513,23 @@ def test_several_packs_are_evaluated_in_one_ingest_with_one_snapshot(client, db,
 
     body = client.post("/api/ingest", json=payload, headers={"X-Agent-Api-Key": key}).json()
 
-    assert body["checks"] == {"total": 20, "passed": 19, "failed": 1, "errors": 0}  # 13 от ОС-пака + 7 от docker (6 pass + privileged fail)
+    assert body["checks"] == {"total": 21, "passed": 20, "failed": 1, "errors": 0}  # 14 от ОС-пака + 7 от docker (6 pass + privileged fail)
     by_pack = {p["id"]: p for p in body["packs"]}
     assert (by_pack["docker"]["total"], by_pack["docker"]["failed"], by_pack["docker"]["maturity"]) == (7, 1, "baseline")
-    assert (by_pack["ubuntu-server"]["total"], by_pack["ubuntu-server"]["passed"]) == (13, 13)
+    assert (by_pack["ubuntu-server"]["total"], by_pack["ubuntu-server"]["passed"]) == (14, 14)
     assert db.execute(text("SELECT COUNT(*) FROM scan_snapshots")).scalar() == 1
     rows = db.execute(text("SELECT pack_id, COUNT(*) FROM hardening_checks GROUP BY pack_id ORDER BY pack_id")).all()
-    assert [tuple(r) for r in rows] == [("docker", 7), ("ubuntu-server", 13)]
+    assert [tuple(r) for r in rows] == [("docker", 7), ("ubuntu-server", 14)]
 
 
 def test_a_later_run_without_a_pack_drops_that_packs_current_state(client, db, make_org, make_agent_key):
     key = make_agent_key(make_org("Drop Org"))
     client.post("/api/ingest", json=_run_payload(docker_host({})), headers={"X-Agent-Api-Key": key})
-    assert db.execute(text("SELECT COUNT(*) FROM hardening_checks")).scalar() == 20  # 13 от ОС-пака + 7 от docker (0 контейнеров -> все проверки pass)
+    assert db.execute(text("SELECT COUNT(*) FROM hardening_checks")).scalar() == 21  # 14 от ОС-пака + 7 от docker (0 контейнеров -> все проверки pass)
 
     client.post("/api/ingest", json=_run_payload(docker_host(with_socket=False)), headers={"X-Agent-Api-Key": key})
 
-    assert db.execute(text("SELECT COUNT(*) FROM hardening_checks")).scalar() == 13  # docker удалён с хоста — его проверок нет
+    assert db.execute(text("SELECT COUNT(*) FROM hardening_checks")).scalar() == 14  # docker удалён с хоста — его проверок нет
     assert db.execute(text("SELECT COUNT(*) FROM scan_snapshots")).scalar() == 2  # история сохранена
 
 

@@ -385,9 +385,9 @@ def test_default_registry_ships_ubuntu_server_pack():
     pack = get_pack_registry().get("ubuntu-server")
 
     assert pack is not None and pack.maturity == "baseline" and pack.transport == "local"
-    assert pack.version == "1.2.0"
-    # 12 перенесённых из старого агента + auditd из методики ФСТЭК (1.1.0); проверка Samba с 1.2.0 — в паке samba
-    assert len(pack.checks) == 13
+    assert pack.version == "1.3.0"
+    # 12 перенесённых из старого агента + auditd (1.1.0) + pam_pwquality (1.3.0); Samba с 1.2.0 — в паке samba
+    assert len(pack.checks) == 14
     assert "ubuntu" in pack.tags and "linux-server" in pack.tags
 
 

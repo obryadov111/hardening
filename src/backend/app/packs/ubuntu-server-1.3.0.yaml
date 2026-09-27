@@ -1,0 +1,219 @@
+# Пак «Ubuntu Server» — перенос проверок старого агента (collector.py + 14 правил hardening_rules).
+#
+# Проверки повторяют коды и смысл прежних правил (ssh.*, firewall.*, updates.*, password_policy.*,
+# kernel.*), но там, где старая логика давала неверный результат, поведение исправлено. Каждое
+# отличие помечено «ОТЛИЧИЕ ОТ СТАРОГО АГЕНТА» и покрыто тестом (tests/test_ubuntu_pack_regression.py).
+#
+# Не перенесены (остаются на старом пути до многопаковой поддержки, этап 2):
+#   docker.no_privileged_containers — требует двух шагов (docker ps -> docker inspect по каждому id);
+#       относится к отдельному паку docker.
+#   postgres.ssl_enabled — сборщика для него никогда не существовало; относится к паку postgresql.
+#
+# 1.1.0 (сверка с «Методикой анализа защищённости информационных систем», ФСТЭК России 25.11.2025,
+# раздел ОПС — операционные системы): добавлены две проверки, которых не было в старом агенте —
+# logging.auditd_active (ОПС.1.11 методики — логирование событий безопасности) и
+# filesharing.smb_no_guest_access (ОПС.1.12 — гостевые/общие папки без ограничений).
+# ЧЕСТНО: обе проверки покрыты юнит/регрессионными тестами (FakeHost-симуляция), но ЕЩЁ НЕ
+# прогонялись живым агентом на реальном хосте с установленными auditd/Samba — в отличие от
+# остальных 12 проверок пака, подтверждённых на реальном сервере при выпуске 1.0.0. Статус
+# верификации отслеживается в 05-agents плана (vault), а не понижением maturity всего пака:
+# 12 из 14 проверок реально подтверждены, снижать baseline -> draft для всего пака избыточно.
+#
+# 1.3.0 (2026-09-27): по итогам первого реального прогона агента (как служба, на тестовый сервер).
+# На хосте была только библиотека libpwquality1, без PAM-модуля pam_pwquality: настройки
+# /etc/security/pwquality.conf там ни на что не влияют, даже minlen = 14. Проверка длины пароля
+# смотрела на недействующую настройку, а при незаданном minlen давала «не проверено».
+#   * новая password_policy.pwquality_enabled — pam_pwquality подключён в /etc/pam.d/common-password
+#     (без этого правила pwquality.conf не действуют);
+#   * password_policy.pass_min_len: default "8" — значение libpwquality, когда minlen не задан
+#     (так и записано в комментарии поставляемого pwquality.conf); вместо «не проверено» — честное
+#     «нарушено: 8 < 14». Нет самого файла — по-прежнему «не проверено».
+#
+# 1.2.0 (2026-09-27): по итогам сверки severity с методикой оценки критичности ФСТЭК от 30.06.2025
+# (правило выбора — README паков, раздел «Критичность (severity) и методики ФСТЭК»):
+#   * firewall.ufw_enabled: critical -> high — отсутствие межсетевого экрана само по себе доступа не
+#     даёт, опасность зависит от открытых служб;
+#   * ssh.permit_root_login: critical -> high — для входа под root всё равно нужны пароль или ключ;
+#   * filesharing.smb_no_guest_access вынесена в отдельный пак samba: без установленной Samba нет
+#     smb.conf, и здесь проверка давала error («не проверено»), хотя гостевых папок нет в принципе —
+#     на большинстве серверов это занижало покрытие. Теперь проверка применяется только там, где
+#     Samba есть. Прочие проверки не менялись.
+#
+# Источник правил: CIS Benchmark для Ubuntu Linux (адаптировано), как и в исходном наборе;
+# новые две проверки — также «Методика анализа защищённости информационных систем»,
+# ФСТЭК России, утв. 25.11.2025 (раздел ОПС, таблица 3).
+
+pack: ubuntu-server
+version: 1.3.0
+maturity: baseline
+verified_on: ["Ubuntu 24.04.4 LTS"]
+tags: [linux-server, debian-family, ubuntu]
+transport: local
+asset_type: linux-server
+
+detect:
+  - probe: { type: file_kv, path: /etc/os-release, key: ID, separator: equals }
+    equals: ubuntu
+
+checks:
+  # --- SSH ------------------------------------------------------------------------------------
+  # Все ssh-проверки читают sshd_config с раскрытием Include (на Ubuntu 22.04+ настройки лежат и в
+  # sshd_config.d/*.conf; первое найденное значение побеждает, как в sshd). Строки после Match
+  # условные и не учитываются. Значения по умолчанию — реальные значения OpenSSH.
+  #
+  # ОТЛИЧИЕ ОТ СТАРОГО АГЕНТА (все ssh-проверки): старый разбор не понимал Include, брал ПОСЛЕДНЕЕ
+  # вхождение (sshd берёт первое) и читал строки внутри Match как глобальные.
+
+  - id: ssh.permit_root_login
+    title: Запрет входа по SSH под root
+    probe: { type: file_kv, path: /etc/ssh/sshd_config, key: PermitRootLogin, follow_include: true, default: prohibit-password }
+    # ОТЛИЧИЕ: старый агент считал значением по умолчанию "no", хотя у OpenSSH оно prohibit-password
+    # (вход root по ключу разрешён). Из-за этого конфигурация без явной настройки ложно проходила.
+    assert: { op: eq, value: "no" }
+    severity: high
+    remediation: В sshd_config установить PermitRootLogin no и перезапустить sshd.
+    refs: [{ source: "CIS Benchmark (Ubuntu Linux, адаптировано)" }]
+
+  - id: ssh.password_authentication
+    title: Запрет входа по SSH-паролю (только по ключу)
+    probe: { type: file_kv, path: /etc/ssh/sshd_config, key: PasswordAuthentication, follow_include: true, default: "yes" }
+    assert: { op: eq, value: "no" }
+    severity: high
+    remediation: В sshd_config установить PasswordAuthentication no.
+    refs: [{ source: "CIS Benchmark (Ubuntu Linux, адаптировано)" }]
+
+  - id: ssh.permit_empty_passwords
+    title: Запрет пустых паролей по SSH
+    probe: { type: file_kv, path: /etc/ssh/sshd_config, key: PermitEmptyPasswords, follow_include: true, default: "no" }
+    assert: { op: eq, value: "no" }
+    severity: critical
+    remediation: В sshd_config установить PermitEmptyPasswords no.
+    refs: [{ source: "CIS Benchmark (Ubuntu Linux, адаптировано)" }]
+
+  - id: ssh.x11_forwarding
+    title: Отключить X11-форвардинг по SSH
+    probe: { type: file_kv, path: /etc/ssh/sshd_config, key: X11Forwarding, follow_include: true, default: "no" }
+    assert: { op: eq, value: "no" }
+    severity: low
+    remediation: В sshd_config установить X11Forwarding no.
+    refs: [{ source: "CIS Benchmark (Ubuntu Linux, адаптировано)" }]
+
+  - id: ssh.max_auth_tries
+    title: Ограничить число попыток аутентификации SSH
+    probe: { type: file_kv, path: /etc/ssh/sshd_config, key: MaxAuthTries, follow_include: true, default: "6" }
+    # ОТЛИЧИЕ: старое правило требовало РОВНО 4, поэтому более строгое значение (3) считалось нарушением.
+    assert: { op: lte, value: 4 }
+    severity: medium
+    remediation: В sshd_config установить MaxAuthTries 4 (или меньше).
+    refs: [{ source: "CIS Benchmark (Ubuntu Linux, адаптировано)" }]
+
+  # --- Firewall (ufw) ---------------------------------------------------------------------------
+  # `ufw status` требует root; без него состояние берётся из файлов конфигурации (как в старом агенте).
+
+  - id: firewall.ufw_enabled
+    title: Firewall (ufw) активен
+    probe:
+      type: first_of
+      probes:
+        - { type: cmd_regex, cmd: [ufw, status, verbose], pattern: "(?i)Status:\\s*(active|inactive)" }
+        - { type: file_kv, path: /etc/ufw/ufw.conf, key: ENABLED, separator: equals }
+    assert: { op: in, value: [active, "yes"] }
+    severity: high
+    remediation: "Выполнить `ufw enable` и проверить `ufw status`."
+    refs: [{ source: "CIS Benchmark (Ubuntu Linux, адаптировано)" }]
+
+  - id: firewall.default_incoming_policy
+    title: Политика по умолчанию для входящих — deny
+    probe:
+      type: first_of
+      probes:
+        - { type: cmd_regex, cmd: [ufw, status, verbose], pattern: "(?i)Default:\\s*(deny|allow|reject)\\s*\\(incoming\\)" }
+        - { type: file_kv, path: /etc/default/ufw, key: DEFAULT_INPUT_POLICY, separator: equals }
+    # ОТЛИЧИЕ: старое правило требовало строку deny. Но в /etc/default/ufw запрет записывается как DROP,
+    # и правильно настроенный хост считался нарушителем; reject и drop — тоже запрет входящих.
+    assert: { op: in, value: [deny, reject, drop] }
+    severity: high
+    remediation: "Выполнить `ufw default deny incoming`."
+    refs: [{ source: "CIS Benchmark (Ubuntu Linux, адаптировано)" }]
+
+  # --- Обновления -------------------------------------------------------------------------------
+
+  - id: updates.unattended_upgrades_enabled
+    title: Автоматические обновления безопасности включены
+    probe: { type: file_regex, path: /etc/apt/apt.conf.d/20auto-upgrades, pattern: 'Unattended-Upgrade\s+"(\d)"' }
+    assert: { op: eq, value: "1" }
+    severity: medium
+    remediation: "Установить и настроить unattended-upgrades (`dpkg-reconfigure -plow unattended-upgrades`)."
+    refs: [{ source: "CIS Benchmark (Ubuntu Linux, адаптировано)" }]
+
+  # --- Парольная политика -----------------------------------------------------------------------
+
+  - id: password_policy.pass_max_days
+    title: Максимальный срок действия пароля — не более 90 дней
+    probe: { type: file_kv, path: /etc/login.defs, key: PASS_MAX_DAYS }
+    # ОТЛИЧИЕ: старое правило требовало РОВНО 90; срок 60 дней (строже) считался нарушением.
+    assert: { op: lte, value: 90 }
+    severity: medium
+    remediation: В /etc/login.defs установить PASS_MAX_DAYS 90 (или меньше).
+    refs: [{ source: "CIS Benchmark (Ubuntu Linux, адаптировано)" }]
+
+  - id: password_policy.pass_min_len
+    title: Минимальная длина пароля — не менее 14 символов
+    # default "8": значение libpwquality, если minlen не задан (1.3.0)
+    probe: { type: file_kv, path: /etc/security/pwquality.conf, key: minlen, separator: equals, default: "8" }
+    # ОТЛИЧИЕ: старое правило требовало РОВНО 14; пароль длиной 16 (строже) считался нарушением.
+    assert: { op: gte, value: 14 }
+    severity: medium
+    remediation: В /etc/security/pwquality.conf установить minlen=14 (или больше).
+    refs: [{ source: "CIS Benchmark (Ubuntu Linux, адаптировано)" }]
+
+  # 1.3.0: без pam_pwquality в PAM-стеке правила pwquality.conf (длина, сложность) не применяются.
+  - id: password_policy.pwquality_enabled
+    title: Проверка сложности паролей (pam_pwquality) подключена к PAM
+    probe: { type: file_regex, path: /etc/pam.d/common-password, pattern: '^[^#\n]*\b(pam_pwquality)\.so' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "Установить libpam-pwquality (`apt install libpam-pwquality`) и проверить строку `password requisite pam_pwquality.so` в /etc/pam.d/common-password."
+    refs:
+      - { source: "CIS Benchmark (Ubuntu Linux, адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.2" }
+
+  - id: password_policy.lockout_on_failure
+    title: Блокировка после неудачных попыток входа
+    # Признак — действующая (не закомментированная) строка pam_faillock / pam_tally2 в PAM-стеке.
+    probe: { type: file_regex, path: /etc/pam.d/common-auth, pattern: '^[^#\n]*\b(pam_faillock|pam_tally2)\b' }
+    # ОТЛИЧИЕ: старый агент считал блокировку включённой, если файл /etc/security/faillock.conf просто
+    # непустой. На стандартной Ubuntu он состоит из одних комментариев, а pam_faillock в PAM не
+    # подключён — блокировки нет, но старый агент выставлял «включена» (ложное прохождение).
+    assert: { op: exists }
+    severity: high
+    remediation: Настроить pam_faillock (deny=5, unlock_time=900).
+    refs: [{ source: "CIS Benchmark (Ubuntu Linux, адаптировано)" }]
+
+  # --- Ядро -------------------------------------------------------------------------------------
+
+  - id: kernel.ip_forward
+    title: IP-форвардинг отключён (хост не является роутером)
+    probe: { type: file_regex, path: /proc/sys/net/ipv4/ip_forward, pattern: '^\s*(\d)' }
+    assert: { op: eq, value: "0" }
+    severity: low
+    remediation: Установить net.ipv4.ip_forward=0 в /etc/sysctl.conf и применить `sysctl -p`.
+    refs: [{ source: "CIS Benchmark (Ubuntu Linux, адаптировано)" }]
+
+  # --- Логирование (новое в 1.1.0) -------------------------------------------------------------
+  # ОПС.1.11 методики ФСТЭК: «Поиск уязвимостей, связанных с отсутствием логирования событий
+  # безопасности». auditd не входит в базовую установку Ubuntu Server — на хосте без него
+  # проба не находит службу, и проверка получает статус error (нет факта — не нарушение), а не
+  # ложный fail/pass.
+
+  - id: logging.auditd_active
+    title: Аудит событий безопасности (auditd) активен
+    probe: { type: service_state, service: auditd, field: active }
+    assert: { op: eq, value: active }
+    severity: high
+    remediation: "Установить пакет auditd (`apt install auditd`) и включить службу (`systemctl enable --now auditd`)."
+    refs:
+      - { source: "CIS Benchmark (Ubuntu Linux, адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.11" }
+
+  # --- Общие ресурсы (новое в 1.1.0) -----------------------------------------------------------

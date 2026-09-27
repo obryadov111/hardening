@@ -51,7 +51,7 @@ SHARED = sorted(check.id for check in PACK.checks if check.id in _LEGACY_CODES)
 # Проверки без аналога в старом агенте (добавлены в 1.1.0 по методике ФСТЭК от 25.11.2025, раздел ОПС) —
 # не сравниваются со старой логикой и тестируются отдельно ниже. filesharing.smb_no_guest_access
 # с 1.2.0 — в отдельном паке samba (образцы: pack_tests/samba.yaml).
-NEW_CHECKS = {"logging.auditd_active"}
+NEW_CHECKS = {"logging.auditd_active", "password_policy.pwquality_enabled"}  # 1.3.0: pam_pwquality
 # Намеренные отличия критичности от сида старого агента: 1.2.0, сверка с методикой оценки
 # критичности ФСТЭК от 30.06.2025 (правило — README паков). Любое другое расхождение — провал.
 SEVERITY_CHANGES = {
@@ -104,6 +104,7 @@ HARDENED_FILES = {
     "/etc/login.defs": "PASS_MAX_DAYS\t90\nPASS_MIN_DAYS\t0\n",
     "/etc/security/pwquality.conf": "# comment\nminlen = 14\n",
     "/etc/pam.d/common-auth": "auth required pam_faillock.so preauth deny=5\nauth [success=1] pam_unix.so\n",
+    "/etc/pam.d/common-password": "password requisite pam_pwquality.so retry=3\npassword [success=1] pam_unix.so obscure\n",
     "/proc/sys/net/ipv4/ip_forward": "0\n",
 }
 HARDENED_COMMANDS = {"ufw status verbose": (UFW_ACTIVE, "", 0), "systemctl is-active auditd": ("active\n", "", 0)}

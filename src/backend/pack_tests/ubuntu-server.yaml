@@ -19,6 +19,9 @@ base:  # укреплённый хост; сценарии ниже меняют
       APT::Periodic::Unattended-Upgrade "1";
     /etc/login.defs: "PASS_MAX_DAYS\t90\nPASS_MIN_DAYS\t0\n"
     /etc/security/pwquality.conf: "# comment\nminlen = 14\n"
+    /etc/pam.d/common-password: |
+      password requisite pam_pwquality.so retry=3
+      password [success=1 default=ignore] pam_unix.so obscure use_authtok try_first_pass yescrypt
     /etc/pam.d/common-auth: |
       auth required pam_faillock.so preauth deny=5
       auth [success=1] pam_unix.so
@@ -41,6 +44,7 @@ cases:
       updates.unattended_upgrades_enabled: pass
       password_policy.pass_max_days: pass
       password_policy.pass_min_len: pass
+      password_policy.pwquality_enabled: pass
       password_policy.lockout_on_failure: pass
       kernel.ip_forward: pass
       logging.auditd_active: pass
@@ -58,6 +62,7 @@ cases:
       /etc/apt/apt.conf.d/20auto-upgrades: "APT::Periodic::Unattended-Upgrade \"0\";\n"
       /etc/login.defs: "PASS_MAX_DAYS\t99999\n"
       /etc/security/pwquality.conf: "minlen = 8\n"
+      /etc/pam.d/common-password: "password [success=1 default=ignore] pam_unix.so obscure yescrypt\n"
       /etc/pam.d/common-auth: "auth [success=1] pam_unix.so nullok\n"
       /proc/sys/net/ipv4/ip_forward: "1\n"
     commands:
@@ -74,6 +79,7 @@ cases:
       updates.unattended_upgrades_enabled: fail
       password_policy.pass_max_days: fail
       password_policy.pass_min_len: fail
+      password_policy.pwquality_enabled: fail
       password_policy.lockout_on_failure: fail
       kernel.ip_forward: fail
       logging.auditd_active: fail
@@ -93,6 +99,16 @@ cases:
       ssh.password_authentication: fail  # по умолчанию yes
       ssh.permit_empty_passwords: pass   # по умолчанию no
       ssh.max_auth_tries: fail           # по умолчанию 6
+
+  # 1.3.0 — как на реальном хосте первого прогона: библиотека libpwquality1 есть (файл с
+  # закомментированным minlen), PAM-модуля pam_pwquality нет.
+  - name: pwquality.conf без minlen и pam_pwquality не подключён — две честные ошибки, не «не проверено»
+    files:
+      /etc/security/pwquality.conf: "# minlen = 8\n"
+      /etc/pam.d/common-password: "password [success=1 default=ignore] pam_unix.so obscure yescrypt\n# password requisite pam_pwquality.so\n"
+    expect:
+      password_policy.pass_min_len: fail      # умолчание libpwquality — 8 < 14
+      password_policy.pwquality_enabled: fail # закомментированная строка не считается
 
   - name: нет файлов — «не проверено», а не «соблюдено»
     drop: [/etc/ssh/sshd_config, /etc/security/pwquality.conf]
