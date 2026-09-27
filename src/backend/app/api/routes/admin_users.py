@@ -7,7 +7,8 @@
   * сброс пароля отзывает все сессии пользователя (password_changed_at);
   * блокировка действует сразу — get_current_user проверяет статус на каждом запросе;
     «Разблокировать» снимает и временную блокировку после серии неудачных входов (login_guard);
-  * нельзя заблокировать или сбросить пароль самому себе (для своего пароля — /auth/change-password);
+  * нельзя заблокировать, сбросить пароль или 2FA самому себе (для своего — /auth/change-password,
+    /auth/2fa/disable);
   * суперадмина через API не создать: это делается командой create_admin на сервере, чтобы
     украденная сессия суперадмина не могла размножить учётки с полными правами.
 """
@@ -131,6 +132,20 @@ def reset_password(
     user.updated_at = now
     db.commit()
     return {"id": user.id, "must_change_password": True}
+
+
+@router.post("/users/{user_id}/reset-2fa")
+def reset_2fa(user_id: UUID, actor: User = Depends(require_superadmin), db: Session = Depends(get_db)):
+    """Для пользователя, потерявшего и телефон, и резервные коды: 2FA отключается, при следующем
+    входе достаточно пароля, после чего пользователь подключает 2FA заново. Себе — через
+    «Двухфакторная защита» (нужны пароль и код)."""
+    user = _target(db, user_id, actor, "сбросить 2FA")
+    removed = db.execute(text("DELETE FROM user_2fa WHERE user_id = :uid RETURNING id"), {"uid": str(user.id)}).first()
+    if removed is None:
+        raise HTTPException(status_code=409, detail="У пользователя не подключена 2FA")
+    user.updated_at = datetime.now(UTC)
+    db.commit()
+    return {"id": user.id, "two_factor_enabled": False}
 
 
 @router.post("/users/{user_id}/{action}")

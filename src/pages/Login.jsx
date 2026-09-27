@@ -156,20 +156,20 @@ export default function Login() {
         ) : (
           <form onSubmit={handleVerify2FA} className="space-y-4">
             <p className="text-sm text-zinc-400">
-              Введите 6-значный код из приложения-аутентификатора
+              Введите 6-значный код из приложения-аутентификатора или один из резервных кодов
             </p>
 
             <div>
-              <label className="mb-1 block text-sm text-zinc-300">Код 2FA</label>
+              <label className="mb-1 block text-sm text-zinc-300">Код 2FA или резервный код</label>
               <input
                 type="text"
-                inputMode="numeric"
                 autoFocus
+                autoComplete="one-time-code"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 className="field-input text-center text-lg tracking-[0.4em]"
                 placeholder="000000"
-                maxLength={6}
+                maxLength={11}
               />
             </div>
 

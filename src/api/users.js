@@ -63,6 +63,11 @@ export async function adminSetUserBlocked(userId, blocked) {
   });
 }
 
+/** Для потерявшего и телефон, и резервные коды: 2FA отключается, пользователь подключит заново. */
+export async function adminResetUserTwoFactor(userId) {
+  return apiFetch(`/admin/users/${userId}/reset-2fa`, { method: "POST" });
+}
+
 /** Временный пароль для выдачи пользователю: 16 символов из криптостойкого генератора. */
 export function generateTemporaryPassword(length = 16) {
   // без похожих символов (0/O, 1/l/I) и знаков, которые путаются при передаче (_ выглядит как пробел)

@@ -5,10 +5,10 @@ from jose import jwt
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user_allow_password_change, get_db
+from app.api.routes.twofa import check_second_factor
 from app.core.config import settings
 from app.core.security import (
     create_access_token,
-    decrypt_totp_secret,
     hash_password,
     password_problem,
     verify_password,
@@ -17,7 +17,6 @@ from app.models.user import User
 from app.models.user_2fa import User2FA
 from app.schemas.auth import ChangePasswordRequest, LoginRequest, LoginResponse, MeResponse, Verify2FARequest
 from app.services.login_guard import check_password, ensure_not_locked, register_failure, register_success
-from app.services.twofa_service import verify_totp_code
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -77,8 +76,8 @@ def verify_2fa(payload: Verify2FARequest, db: Session = Depends(get_db)):
     if not user.is_active or user.account_status != "active":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Пользователь не активен")
 
-    secret = decrypt_totp_secret(twofa.secret_encrypted)
-    if not verify_totp_code(secret, payload.code.strip()):
+    # код из приложения или одноразовый резервный код (если телефона нет под рукой)
+    if not check_second_factor(db, twofa, payload.code):
         register_failure(db, user)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный код 2FA")
 

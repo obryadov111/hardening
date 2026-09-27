@@ -10,6 +10,7 @@ from app.api.routes.ingest import router as ingest_router
 from app.api.routes.members import router as members_router
 from app.api.routes.policies import router as policies_router
 from app.api.routes.snapshots import router as snapshots_router
+from app.api.routes.twofa import router as twofa_router
 from app.core.config import settings
 
 app = FastAPI(title=settings.APP_NAME)
@@ -23,6 +24,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router, prefix=settings.API_PREFIX)
+app.include_router(twofa_router, prefix=settings.API_PREFIX)
 app.include_router(data_router, prefix=settings.API_PREFIX)
 app.include_router(ingest_router, prefix=settings.API_PREFIX)
 app.include_router(agent_router, prefix=settings.API_PREFIX)

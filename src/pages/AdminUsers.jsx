@@ -6,6 +6,7 @@ import {
   adminCreateUser,
   adminListUsers,
   adminResetUserPassword,
+  adminResetUserTwoFactor,
   adminSetUserBlocked,
   generateTemporaryPassword,
   getCurrentUserProfile,
@@ -123,6 +124,11 @@ export default function AdminUsers() {
     });
   }
 
+  function handleReset2FA(user) {
+    if (!window.confirm(`Сбросить 2FA ${user.email}? Делайте это, только убедившись, что обращается сам пользователь (он потерял телефон и резервные коды). После сброса вход — по одному паролю, пока 2FA не подключат заново.`)) return;
+    run(`2fa-${user.id}`, () => adminResetUserTwoFactor(user.id));
+  }
+
   function handleBlock(user, blocked) {
     const question = blocked
       ? `Заблокировать ${user.email}? Доступ прекратится сразу, в том числе в открытых сессиях.`
@@ -217,6 +223,11 @@ export default function AdminUsers() {
                           <button type="button" disabled={!!busy} onClick={() => handleReset(user)} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800 disabled:opacity-50">
                             Сбросить пароль
                           </button>
+                          {user.two_factor_enabled ? (
+                            <button type="button" disabled={!!busy} onClick={() => handleReset2FA(user)} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800 disabled:opacity-50">
+                              Сбросить 2FA
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             disabled={!!busy}
