@@ -1,0 +1,12 @@
+# Расписание агента: раз в сутки со случайной задержкой до часа — чтобы хосты не приходили на
+# сервер одновременно. Persistent=yes — пропущенный прогон (хост был выключен) выполнится при запуске.
+[Unit]
+Description=Hardening agent (%i): ежедневный прогон
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=yes
+
+[Install]
+WantedBy=timers.target

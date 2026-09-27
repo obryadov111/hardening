@@ -1,0 +1,53 @@
+# Агент «Харденинг» как служба systemd. Шаблон: экземпляр = файл настроек.
+#   hardening-agent@local.service   -> /etc/hardening-agent/local.env   (этот хост)
+#   hardening-agent@sw-core.service -> /etc/hardening-agent/sw-core.env (устройство по SSH)
+# Запускается таймером hardening-agent@.timer; вручную — systemctl start hardening-agent@local.
+#
+# Агент только читает. Работает от отдельного непривилегированного пользователя: где не хватает
+# прав (например, `ufw status` требует root), проба честно отдаёт «не проверено» или берёт данные
+# из файла конфигурации — а не «всё хорошо». Ужесточение ниже закрывает запись в систему,
+# повышение привилегий и capabilities: даже подменённый агент не сможет ничего изменить.
+[Unit]
+Description=Hardening agent (%i): сбор конфигурации по пакам и отправка на сервер
+Documentation=file:///opt/hardening-agent/README.md
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/hardening-agent/%i.env
+
+[Service]
+Type=oneshot
+User=hardening-agent
+Group=hardening-agent
+EnvironmentFile=/etc/hardening-agent/%i.env
+# ${VAR} — одним аргументом; $HARDENING_EXTRA_ARGS — разбивается по пробелам (--ssh-host … и т. п.)
+ExecStart=/usr/bin/python3 /opt/hardening-agent/collector.py \
+    --api-url ${HARDENING_API_URL} \
+    --environment ${HARDENING_ENVIRONMENT} \
+    --criticality ${HARDENING_CRITICALITY} \
+    --scan-label ${HARDENING_SCAN_LABEL} \
+    --use-packs $HARDENING_EXTRA_ARGS
+TimeoutStartSec=15min
+
+# --- ужесточение: агенту нужно только читать систему и ходить в сеть ---
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+# AF_UNIX — для сокета Docker (если агент добавлен в группу docker, см. README)
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
