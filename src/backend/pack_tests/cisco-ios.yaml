@@ -1,0 +1,108 @@
+# Образцы для пака cisco-ios (transport: ssh). Конфигурации синтетические: пак в статусе draft
+# и на реальном устройстве не подтверждён — фикстура проверяет логику проверок, а не железо.
+pack: cisco-ios
+
+base:
+  cli:
+    show version: "Cisco IOS Software, C2960 Software (C2960-LANBASEK9-M), Version 15.0(2)SE11, RELEASE SOFTWARE (fc3)\n"
+    show running-config: |
+      Building configuration...
+      !
+      version 15.2
+      service password-encryption
+      !
+      hostname sw-core-01
+      !
+      enable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0
+      !
+      aaa new-model
+      !
+      ip ssh version 2
+      no ip http server
+      no ip http secure-server
+      !
+      snmp-server community K7x9Qm2 RO 10
+      !
+      ntp server 10.0.0.1
+      !
+      line con 0
+       logging synchronous
+      line vty 0 4
+       access-class 10 in
+       transport input ssh
+      line vty 5 15
+       access-class 10 in
+       transport input ssh
+      !
+      end
+
+cases:
+  - name: укреплённый коммутатор — всё соблюдено
+    detect: true
+    expect:
+      cisco_ios.service_password_encryption: pass
+      cisco_ios.enable_secret_used: pass
+      cisco_ios.enable_password_absent: pass
+      cisco_ios.aaa_new_model: pass
+      cisco_ios.snmp_default_community_absent: pass
+      cisco_ios.ssh_version2_only: pass
+      cisco_ios.http_server_disabled: pass
+      cisco_ios.vty_telnet_disabled: pass
+      cisco_ios.vty_ssh_only: pass
+      cisco_ios.vty_acl_set: pass
+      cisco_ios.ntp_configured: pass
+
+  - name: слабый коммутатор — нарушено всё
+    cli:
+      show running-config: |
+        Building configuration...
+        !
+        version 15.2
+        no service password-encryption
+        !
+        hostname sw-edge-07
+        !
+        enable password 7 0822455D0A16
+        !
+        ip http server
+        !
+        snmp-server community public RO
+        !
+        line con 0
+        line vty 0 4
+         transport input all
+        line vty 5 15
+         transport input telnet ssh
+        !
+        end
+    expect:
+      cisco_ios.service_password_encryption: fail
+      cisco_ios.enable_secret_used: fail
+      cisco_ios.enable_password_absent: fail
+      cisco_ios.aaa_new_model: fail
+      cisco_ios.snmp_default_community_absent: fail
+      cisco_ios.ssh_version2_only: fail
+      cisco_ios.http_server_disabled: fail
+      cisco_ios.vty_telnet_disabled: fail
+      cisco_ios.vty_ssh_only: fail
+      cisco_ios.vty_acl_set: fail
+      cisco_ios.ntp_configured: fail
+
+  - name: у учётки нет прав на running-config — «не проверено», а не «соблюдено»
+    cli:
+      show running-config: "% Invalid input detected at '^' marker.\n"
+    expect:
+      cisco_ios.enable_password_absent: error
+      cisco_ios.http_server_disabled: error
+      cisco_ios.vty_telnet_disabled: error
+
+  - name: обрезанный вывод без завершающего end — «не проверено»
+    cli:
+      show running-config: "Building configuration...\n!\nversion 15.2\n"
+    expect:
+      cisco_ios.enable_password_absent: error
+
+  - name: не Cisco — пак не применяется
+    cli:
+      show version: "Huawei Versatile Routing Platform Software\n"
+    detect: false

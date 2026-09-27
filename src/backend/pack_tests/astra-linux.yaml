@@ -1,0 +1,12 @@
+# Пак astra-linux — только обнаружение платформы (maturity: inventory), проверок нет.
+pack: astra-linux
+
+cases:
+  - name: Astra Linux SE — распознаётся
+    files:
+      /etc/os-release: "PRETTY_NAME=\"Astra Linux\"\nNAME=\"Astra Linux\"\nID=astra\nVERSION_ID=1.7_x86-64\n"
+    detect: true
+  - name: Ubuntu — не распознаётся
+    files:
+      /etc/os-release: "ID=ubuntu\nNAME=\"Ubuntu\"\n"
+    detect: false

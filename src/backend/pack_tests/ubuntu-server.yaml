@@ -1,0 +1,118 @@
+# Образцы для пака ubuntu-server: файлы и вывод команд хоста без живого хоста.
+# Значения взяты из регрессионного теста этапа 1 (tests/test_ubuntu_pack_regression.py).
+pack: ubuntu-server
+
+base:  # укреплённый хост; сценарии ниже меняют только нужное
+  files:
+    /etc/os-release: "ID=ubuntu\nVERSION_ID=\"24.04\"\n"
+    /etc/ssh/sshd_config: |
+      PermitRootLogin no
+      PasswordAuthentication no
+      PermitEmptyPasswords no
+      X11Forwarding no
+      MaxAuthTries 4
+    /etc/ufw/ufw.conf: "ENABLED=yes\n"
+    /etc/default/ufw: "DEFAULT_INPUT_POLICY=\"DROP\"\n"
+    /etc/apt/apt.conf.d/20auto-upgrades: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+    /etc/login.defs: "PASS_MAX_DAYS\t90\nPASS_MIN_DAYS\t0\n"
+    /etc/security/pwquality.conf: "# comment\nminlen = 14\n"
+    /etc/pam.d/common-auth: |
+      auth required pam_faillock.so preauth deny=5
+      auth [success=1] pam_unix.so
+    /proc/sys/net/ipv4/ip_forward: "0\n"
+    /etc/samba/smb.conf: "[global]\n   workgroup = WORKGROUP\n   security = user\n"
+  commands:
+    ufw status verbose: "Status: active\nLogging: on (low)\nDefault: deny (incoming), allow (outgoing), disabled (routed)\n"
+    systemctl is-active auditd: "active\n"
+
+cases:
+  - name: укреплённый хост — всё соблюдено
+    detect: true
+    expect:
+      ssh.permit_root_login: pass
+      ssh.password_authentication: pass
+      ssh.permit_empty_passwords: pass
+      ssh.x11_forwarding: pass
+      ssh.max_auth_tries: pass
+      firewall.ufw_enabled: pass
+      firewall.default_incoming_policy: pass
+      updates.unattended_upgrades_enabled: pass
+      password_policy.pass_max_days: pass
+      password_policy.pass_min_len: pass
+      password_policy.lockout_on_failure: pass
+      kernel.ip_forward: pass
+      logging.auditd_active: pass
+      filesharing.smb_no_guest_access: pass
+
+  - name: слабый хост — нарушено всё
+    files:
+      /etc/ssh/sshd_config: |
+        PermitRootLogin yes
+        PasswordAuthentication yes
+        PermitEmptyPasswords yes
+        X11Forwarding yes
+        MaxAuthTries 6
+      /etc/ufw/ufw.conf: "ENABLED=no\n"
+      /etc/default/ufw: "DEFAULT_INPUT_POLICY=\"ACCEPT\"\n"
+      /etc/apt/apt.conf.d/20auto-upgrades: "APT::Periodic::Unattended-Upgrade \"0\";\n"
+      /etc/login.defs: "PASS_MAX_DAYS\t99999\n"
+      /etc/security/pwquality.conf: "minlen = 8\n"
+      /etc/pam.d/common-auth: "auth [success=1] pam_unix.so nullok\n"
+      /proc/sys/net/ipv4/ip_forward: "1\n"
+      /etc/samba/smb.conf: "[public]\n   path = /srv/share\n   guest ok = yes\n"
+    commands:
+      ufw status verbose: "Status: inactive\n"
+      systemctl is-active auditd: { stdout: "inactive\n", code: 3 }
+    expect:
+      ssh.permit_root_login: fail
+      ssh.password_authentication: fail
+      ssh.permit_empty_passwords: fail
+      ssh.x11_forwarding: fail
+      ssh.max_auth_tries: fail
+      firewall.ufw_enabled: fail
+      firewall.default_incoming_policy: fail
+      updates.unattended_upgrades_enabled: fail
+      password_policy.pass_max_days: fail
+      password_policy.pass_min_len: fail
+      password_policy.lockout_on_failure: fail
+      kernel.ip_forward: fail
+      logging.auditd_active: fail
+      filesharing.smb_no_guest_access: fail
+
+  - name: агент без root — ufw status отказал, состояние берётся из файлов конфигурации
+    commands:
+      ufw status verbose: { stdout: "", stderr: "ERROR: You need to be root to run this script", code: 1 }
+    expect:
+      firewall.ufw_enabled: pass
+      firewall.default_incoming_policy: pass
+
+  - name: параметры не заданы — действуют значения по умолчанию OpenSSH
+    files:
+      /etc/ssh/sshd_config: "# пусто: всё по умолчанию\n"
+    expect:
+      ssh.permit_root_login: fail        # по умолчанию prohibit-password, а требуется no
+      ssh.password_authentication: fail  # по умолчанию yes
+      ssh.permit_empty_passwords: pass   # по умолчанию no
+      ssh.max_auth_tries: fail           # по умолчанию 6
+
+  - name: нет файлов — «не проверено», а не «соблюдено»
+    drop: [/etc/ssh/sshd_config, /etc/security/pwquality.conf]
+    expect:
+      ssh.permit_root_login: error
+      ssh.permit_empty_passwords: error
+      password_policy.pass_min_len: error
+
+  # ИЗВЕСТНОЕ ОГРАНИЧЕНИЕ 1.1.0: без установленной Samba нет smb.conf, и проверка даёт error,
+  # хотя гостевого доступа нет в принципе — на большинстве серверов это занижает покрытие.
+  # Исправлять — в следующей версии пака (detect-условие на наличие smb.conf или отдельный пак samba).
+  - name: Samba не установлена — сейчас error (см. комментарий)
+    drop: [/etc/samba/smb.conf]
+    expect:
+      filesharing.smb_no_guest_access: error
+
+  - name: не Ubuntu — пак не применяется
+    files:
+      /etc/os-release: "ID=debian\n"
+    detect: false

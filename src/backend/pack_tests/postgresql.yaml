@@ -1,0 +1,62 @@
+# Образцы для пака postgresql (Ubuntu + пакет postgresql-16, стандартные пути).
+# Слабый вариант pg_hba.conf — реальные строки с контейнера diploma_db этого хоста (2026-09-24).
+pack: postgresql
+
+base:
+  files:
+    /etc/postgresql/16/main/postgresql.conf: |
+      listen_addresses = 'localhost'
+      ssl = on
+      ssl_min_protocol_version = 'TLSv1.2'
+    /etc/postgresql/16/main/pg_hba.conf: |
+      local   all all                trust
+      host    all all 127.0.0.1/32 scram-sha-256
+      host    all all ::1/128     scram-sha-256
+  stats:
+    /etc/postgresql/16/main/postgresql.conf: "644"
+    /var/log/postgresql/postgresql-16-main.log: "640"
+    /var/lib/postgresql/16/main: "700"
+
+cases:
+  - name: укреплённая СУБД — всё соблюдено
+    detect: true
+    expect:
+      postgres.pg_hba_no_unrestricted_host: pass
+      postgres.listen_addresses_not_all_interfaces: pass
+      postgres.ssl_enabled: pass
+      postgres.ssl_min_protocol_version_modern: pass
+      postgres.log_directory_not_world_readable: pass
+      postgres.data_directory_permissions: pass
+
+  - name: реальная слабая конфигурация diploma_db — нарушено всё
+    files:
+      /etc/postgresql/16/main/postgresql.conf: |
+        listen_addresses = '*'
+        ssl = off
+        ssl_min_protocol_version = 'TLSv1'
+      /etc/postgresql/16/main/pg_hba.conf: |
+        local   all             all                                     trust
+        host    all             all             127.0.0.1/32            trust
+        host    all             all             ::1/128                 trust
+        host all all all scram-sha-256
+    stats:
+      /var/log/postgresql/postgresql-16-main.log: "644"
+      /var/lib/postgresql/16/main: "755"
+    expect:
+      postgres.pg_hba_no_unrestricted_host: fail
+      postgres.listen_addresses_not_all_interfaces: fail
+      postgres.ssl_enabled: fail
+      postgres.ssl_min_protocol_version_modern: fail
+      postgres.log_directory_not_world_readable: fail
+      postgres.data_directory_permissions: fail
+
+  - name: ssl не задан — по умолчанию off, это нарушение, а не «соблюдено»
+    files:
+      /etc/postgresql/16/main/postgresql.conf: "listen_addresses = 'localhost'\n"
+    expect:
+      postgres.ssl_enabled: fail
+      postgres.ssl_min_protocol_version_modern: pass  # по умолчанию TLSv1.2
+
+  - name: другая версия PostgreSQL — пак не применяется (известное ограничение 1.0.0)
+    drop: [/etc/postgresql/16/main/postgresql.conf]
+    detect: false
