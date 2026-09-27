@@ -180,7 +180,13 @@ def build(kind):
     return {
         "pack": f"windows-{kind}",
         "version": "1.0.0",
-        "maturity": "draft",
+        # Сервер — подтверждён прогоном агента на настоящих Windows Server (CI, workflow windows-packs.yml):
+        # все 40 проб выполнились, 33 значения реально найдены в реестре/политиках. Клиентской Windows в CI нет.
+        "maturity": "baseline" if server else "draft",
+        **({"verified_on": [
+            "Windows Server 2022 Datacenter (21H2, сборка 20348) — GitHub Actions windows-2022",
+            "Windows Server 2025 Datacenter (24H2, сборка 26100) — GitHub Actions windows-2025",
+        ]} if server else {}),
         "tags": ["windows", f"windows-{kind}"],
         "transport": "local",
         "asset_type": "windows-server" if server else "windows-workstation",
@@ -203,9 +209,18 @@ HEADER = {
 # Права: secedit и auditpol требуют администратора — агент на Windows работает от SYSTEM (задача
 # планировщика). Без прав эти проверки получают «не проверено», а не «соблюдено».
 #
-# maturity=draft: проверки написаны по документации Microsoft и CIS и проверены на образцах; прогон на
-# реальных Windows Server 2022/2025 — в CI (GitHub Actions). Контроллер домена: политика паролей берётся
-# из доменной политики — пак описывает рядовой сервер и отдельно контроллер домена не проверяет.
+# maturity=baseline: прогон агента на настоящих Windows Server 2022 и 2025 (CI, windows-packs.yml): все пробы
+# выполнились, распознавание верное; 33 из 40 значений реально найдены в реестре/политиках — пути, ключи
+# secedit и GUID аудита подтверждены живой системой. Остальные 7 параметров на чистой системе в реестре
+# отсутствуют (LmCompatibilityLevel, SMB1, EnableMulticast, UseLogonCredential, NoDriveTypeAutoRun,
+# NoAutorun, mrxsmb10) — берутся умолчания Windows; их пути — стандартные (CIS), живой проверкой не
+# подтверждаемы. Контроллер домена: политика паролей берётся из доменной политики — пак описывает рядовой
+# сервер и отдельно контроллер домена не проверяет.
+#
+# Известное ограничение: подпись SMB (RequireSecuritySignature). На Windows Server 2022 значение записано в
+# реестре, на 2025 — отсутствует: у 2025 / Windows 11 24H2 другие умолчания подписи SMB. При отсутствии
+# значения пак консервативно считает 0 (нарушение); на 2025 это может быть ложным срабатыванием — проверить
+# `Get-SmbServerConfiguration` / `Get-SmbClientConfiguration` и при необходимости оформить исключение.
 #
 # Генерируется из pack_sources/windows.py вместе с windows-client — правки там, не здесь.
 """,

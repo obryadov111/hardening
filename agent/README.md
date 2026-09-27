@@ -101,6 +101,53 @@ python3 collector.py --api-url https://hardening.example.com --environment net -
 каждым прогоном — паки, не подошедшие в этот раз, из него выпадают (история остаётся в снимках);
 ключ подписи симметричный — см. `probes.py`.
 
+## Windows (паки `windows-server`, `windows-client`)
+
+На Windows-хостах нет Python, поэтому агент собирается в один файл `hardening-agent.exe` (PyInstaller) —
+тот же `collector.py` + `probes.py`, только стандартная библиотека (реестр — модуль `winreg`). Готовый
+файл — артефакт `hardening-agent-exe` каждого прогона workflow **Windows packs** в GitHub Actions; собрать
+самому:
+
+```powershell
+pip install pyinstaller==6.11.1
+pyinstaller --onefile --name hardening-agent --paths agent --hidden-import probes agent/collector.py
+```
+
+Запуск — только в режиме паков, **от имени администратора или SYSTEM**: `secedit` (политика паролей и
+блокировки) и `auditpol` (политика аудита) без этих прав недоступны — такие проверки получают
+«не проверено», а не «соблюдено».
+
+```powershell
+$env:HARDENING_AGENT_API_KEY = '<ключ агента>'
+$env:HARDENING_PACK_KEY = '<ключ проверки подписи>'
+.\hardening-agent.exe --api-url https://hardening.example.com --environment prod --use-packs
+```
+
+По расписанию — задача планировщика от SYSTEM (ключи — в переменных среды системы, доступных только
+администраторам, а не в командной строке задачи):
+
+```powershell
+schtasks /Create /TN "Hardening agent" /RU SYSTEM /SC DAILY /ST 03:00 /RL HIGHEST `
+  /TR "C:\Program Files\Hardening\hardening-agent.exe --api-url https://hardening.example.com --environment prod --use-packs"
+```
+
+Что читает агент на Windows и почему не `net accounts` / `netsh` / `auditpol /get`: на русской Windows их
+вывод русский, разбор ломается. Источники, не зависящие от языка:
+
+| Проба | Источник | Права |
+|---|---|---|
+| `reg_value` | реестр, только `HKLM`; кусты `SAM` и `SECURITY` (хэши паролей, секреты LSA) запрещены | пользователь |
+| `win_secpol` | `secedit /export` — ключи вида `MinimumPasswordLength` | администратор |
+| `win_auditpol` | `auditpol /backup` — GUID подкатегорий и числа 0–3 | администратор |
+| `service_state` | `sc query` (состояние — число и константа) и `Start` службы в реестре | пользователь |
+
+`secedit` и `auditpol` пишут результат во временный файл в новом временном каталоге агента — он читается
+и сразу удаляется; системная конфигурация не меняется. Пустой экспорт — «не проверено», а не «не задано».
+
+Проверено на **настоящих** Windows Server 2022 и 2025 (CI, `.github/workflows/windows-packs.yml`): все пробы
+выполняются, распознавание верное, собранный `.exe` работает по подписанным манифестам и отказывает при
+неверном ключе подписи. Windows 10/11 в CI нет — пак `windows-client` в статусе `draft`.
+
 ## Установка как служба systemd (`deploy/`)
 
 Регулярный прогон по расписанию — шаблон `hardening-agent@.service` + таймер. Экземпляр = файл
