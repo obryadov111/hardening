@@ -27,8 +27,11 @@ from app.services.twofa_service import (
     build_totp_uri,
     generate_backup_codes,
     generate_totp_secret,
+    match_totp_step,
     verify_totp_code,
 )
+
+TOTP_INTERVAL = 30  # секунд, стандарт RFC 6238 (pyotp по умолчанию)
 
 router = APIRouter(prefix="/auth/2fa", tags=["2fa"])
 
@@ -60,11 +63,32 @@ def use_backup_code(db: Session, user_id, code: str) -> bool:
     return used is not None
 
 
+def use_totp_code(db: Session, twofa: User2FA, code: str) -> bool:
+    """Код из приложения засчитывается один раз. В last_used_at хранится начало интервала последнего
+    принятого кода; код того же или более раннего интервала отклоняется — подсмотренный код нельзя
+    ввести повторно, пока он ещё «живой» (окно ±30 с). Одним UPDATE: два параллельных запроса с
+    одним кодом не пройдут оба."""
+    step = match_totp_step(decrypt_totp_secret(twofa.secret_encrypted), code)
+    if step is None:
+        return False
+    step_start = datetime.fromtimestamp(step * TOTP_INTERVAL, UTC)
+    accepted = db.execute(
+        text("""
+            UPDATE user_2fa SET last_used_at = :step_start, updated_at = now()
+            WHERE user_id = :uid AND (last_used_at IS NULL OR last_used_at < :step_start)
+            RETURNING id
+        """),
+        {"step_start": step_start, "uid": str(twofa.user_id)},
+    ).first()
+    return accepted is not None
+
+
 def check_second_factor(db: Session, twofa: User2FA, code: str) -> bool:
-    """Код из приложения (6 цифр) или резервный код (одноразовый — при успехе списывается)."""
+    """Код из приложения (6 цифр, одноразовый в пределах своего интервала) или резервный код
+    (одноразовый — при успехе списывается)."""
     code = code.strip()
     if code.isdigit() and len(code) == 6:
-        return verify_totp_code(decrypt_totp_secret(twofa.secret_encrypted), code)
+        return use_totp_code(db, twofa, code)
     return use_backup_code(db, twofa.user_id, code)
 
 

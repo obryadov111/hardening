@@ -102,3 +102,23 @@ def test_reset_2fa_rules(client, db, session, make_user, auth_header):
     users = {u["email"]: u["id"] for u in client.get("/api/admin/users", headers=root).json()}
     assert client.post(f"/api/admin/users/{users['root@example.com']}/reset-2fa", headers=root).status_code == 400  # себе — нельзя
     assert client.post(f"/api/admin/users/{users['tfa@example.com']}/reset-2fa", headers=session).status_code == 403  # не суперадмин
+
+
+# ---------- повтор кода приложения ----------
+
+def test_app_code_cannot_be_replayed(client, session):
+    """Подсмотренный код нельзя ввести повторно, пока он ещё «живой» (окно ±30 с)."""
+    totp, _ = enable(client, session)
+    code = totp.now()
+    assert second_factor(client, code).status_code == 200
+    replay = second_factor(client, code)
+    assert replay.status_code == 401 and replay.json()["detail"] == "Неверный код 2FA"
+
+
+def test_older_code_is_rejected_after_a_newer_one_and_next_code_passes(client, session):
+    from datetime import datetime, timedelta
+    totp, _ = enable(client, session)
+    now = datetime.now()
+    assert second_factor(client, totp.at(now)).status_code == 200
+    assert second_factor(client, totp.at(now - timedelta(seconds=30))).status_code == 401  # предыдущий интервал
+    assert second_factor(client, totp.at(now + timedelta(seconds=30))).status_code == 200  # следующий — новый код

@@ -83,8 +83,7 @@ def verify_2fa(payload: Verify2FARequest, db: Session = Depends(get_db)):
 
     register_success(user)
     user.last_login_at = datetime.now(UTC)
-    twofa.last_used_at = datetime.now(UTC)
-    db.commit()
+    db.commit()  # twofa.last_used_at уже записан при приёме кода (защита от повтора)
 
     return LoginResponse(access_token=create_access_token(str(user.id)))
 
