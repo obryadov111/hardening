@@ -57,6 +57,26 @@ export function clearStoredAccessToken() {
   setStoredAccessToken(null);
 }
 
+// FastAPI отдаёт ошибки валидации (422) как массив объектов в detail; без разбора
+// new Error(detail) превращал его в строку "[object Object]".
+const FIELD_NAMES = { email: "Email", password: "Пароль" };
+
+function formatErrorDetail(detail) {
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        const field = Array.isArray(item?.loc) ? item.loc[item.loc.length - 1] : null;
+        const msg = item?.loc?.includes("email") && item?.type === "value_error"
+          ? "некорректный адрес электронной почты"
+          : item?.msg || JSON.stringify(item);
+        return field ? `${FIELD_NAMES[field] || field}: ${msg}` : msg;
+      })
+      .join("; ");
+  }
+  if (detail && typeof detail === "object") return detail.message || JSON.stringify(detail);
+  return detail;
+}
+
 export async function apiFetch(path, options = {}) {
   const headers = {
     ...(options.headers || {}),
@@ -88,7 +108,7 @@ export async function apiFetch(path, options = {}) {
     try {
       if (contentType.includes("application/json")) {
         const data = await response.json();
-        detail = data.detail || data.message || detail;
+        detail = formatErrorDetail(data.detail || data.message) || detail;
       } else {
         detail = await response.text();
       }
