@@ -80,7 +80,10 @@ class DashboardSummaryOut(BaseModel):
     assetsCount: int = 0
     softwareCount: int = 0
     checksCount: int = 0
+    passedChecks: int = 0
     failedChecks: int = 0
+    notEvaluatedChecks: int = 0  # error: проверка не выполнилась, в score не входит
+    coverage: float | None = None  # доля выполненных (pass/fail) проверок, %
     reportsCount: int = 0
     latestReport: LatestReportOut | None = None
     environmentsCount: int = 0

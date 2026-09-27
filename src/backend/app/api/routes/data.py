@@ -368,25 +368,25 @@ def get_dashboard_summary(organization_id: str, _: User = Depends(require_org_ac
         {"org_id": organization_id},
     ).scalar()
 
-    checks_count = db.execute(
+    # error (проверка не выполнилась) — отдельная категория: раньше фронт считал
+    # passed = total - failed, и невыполненные проверки выглядели как пройденные.
+    checks = db.execute(
         text("""
-            SELECT COUNT(*) FROM hardening_checks hc
+            SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE hc.status = 'pass') AS passed,
+                COUNT(*) FILTER (WHERE hc.status = 'fail') AS failed
+            FROM hardening_checks hc
             JOIN assets a ON a.id = hc.asset_id
             JOIN environments e ON e.id = a.environment_id
             WHERE e.organization_id = :org_id
         """),
         {"org_id": organization_id},
-    ).scalar()
-
-    failed_checks = db.execute(
-        text("""
-            SELECT COUNT(*) FROM hardening_checks hc
-            JOIN assets a ON a.id = hc.asset_id
-            JOIN environments e ON e.id = a.environment_id
-            WHERE e.organization_id = :org_id AND hc.status = 'fail'
-        """),
-        {"org_id": organization_id},
-    ).scalar()
+    ).mappings().first()
+    checks_count = checks["total"] or 0
+    passed_checks = checks["passed"] or 0
+    failed_checks = checks["failed"] or 0
+    evaluated = passed_checks + failed_checks
 
     reports_count = db.execute(
         text("SELECT COUNT(*) FROM hardening_reports WHERE organization_id = :org_id"),
@@ -407,8 +407,11 @@ def get_dashboard_summary(organization_id: str, _: User = Depends(require_org_ac
     return {
         "assetsCount": assets_count or 0,
         "softwareCount": software_count or 0,
-        "checksCount": checks_count or 0,
-        "failedChecks": failed_checks or 0,
+        "checksCount": checks_count,
+        "passedChecks": passed_checks,
+        "failedChecks": failed_checks,
+        "notEvaluatedChecks": checks_count - evaluated,
+        "coverage": round(evaluated / checks_count * 100, 2) if checks_count else None,
         "reportsCount": reports_count or 0,
         "latestReport": dict(latest_report) if latest_report else None,
         "environmentsCount": environments_count or 0,

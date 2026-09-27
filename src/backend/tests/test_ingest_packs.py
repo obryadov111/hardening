@@ -119,6 +119,30 @@ def test_pack_check_without_probe_result_is_error_and_lowers_coverage(client, pa
     assert body["coverage"]["ratio"] == 50.0
 
 
+def test_dashboard_shows_not_evaluated_checks_separately_from_passed(
+    client, pack_registry, make_org, make_agent_key, make_user, add_membership, auth_header
+):
+    org_id = make_org("Dashboard Org")
+    key = make_agent_key(org_id)
+    payload = pack_payload(probe_results={"ssh.max_auth_tries": {"found": True, "value": "3"}})
+    assert client.post("/api/ingest", json=payload, headers={"X-Agent-Api-Key": key}).status_code == 200
+    user_id = make_user("dash-viewer@example.com")
+    add_membership(user_id, org_id)
+
+    body = client.get(f"/api/organizations/{org_id}/dashboard", headers=auth_header("dash-viewer@example.com")).json()
+
+    # раньше фронт считал passed = checksCount - failedChecks, и error шёл в «пройдено»
+    assert (body["checksCount"], body["passedChecks"], body["failedChecks"], body["notEvaluatedChecks"]) == (2, 1, 0, 1)
+    assert body["coverage"] == 50.0
+
+
+def test_dashboard_coverage_is_none_without_checks(client, make_org, make_user, add_membership, auth_header):
+    org_id = make_org("Empty Org")
+    add_membership(make_user("empty-viewer@example.com"), org_id)
+    body = client.get(f"/api/organizations/{org_id}/dashboard", headers=auth_header("empty-viewer@example.com")).json()
+    assert body["checksCount"] == 0 and body["coverage"] is None
+
+
 def test_probe_that_could_not_run_is_recorded_as_error(client, pack_registry, agent_key):
     payload = pack_payload(probe_results={
         "ssh.permit_root_login": {"found": False, "error": "не удалось прочитать /etc/ssh/sshd_config"},

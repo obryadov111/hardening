@@ -21,7 +21,10 @@ const EMPTY_SUMMARY = {
   assetsCount: 0,
   softwareCount: 0,
   checksCount: 0,
+  passedChecks: 0,
   failedChecks: 0,
+  notEvaluatedChecks: 0,
+  coverage: null,
   reportsCount: 0,
   latestReport: null,
   environmentsCount: 0,
@@ -72,7 +75,7 @@ export default function Dashboard() {
     }
   }, [selectedOrganizationId, orgLoading]);
 
-  const passedChecks = Math.max((summary.checksCount || 0) - (summary.failedChecks || 0), 0);
+  const notEvaluated = summary.notEvaluatedChecks || 0;
 
   const trendData = [...reportsHistory]
     .filter((report) => report.generated_at)
@@ -107,8 +110,32 @@ export default function Dashboard() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
-        <AppCard title="Соответствие" subtitle="Доля пройденных проверок харденинга">
-          {loading ? <Skeleton className="h-[220px] w-full" /> : <ComplianceChart passed={passedChecks} failed={summary.failedChecks || 0} />}
+        <AppCard title="Соответствие" subtitle="Доля пройденных среди выполненных проверок харденинга">
+          {loading ? (
+            <Skeleton className="h-[220px] w-full" />
+          ) : (
+            <>
+              <ComplianceChart
+                passed={summary.passedChecks || 0}
+                failed={summary.failedChecks || 0}
+                notEvaluated={notEvaluated}
+              />
+              {summary.coverage != null ? (
+                <div
+                  className={`mt-4 rounded-xl border px-4 py-3 text-sm ${
+                    notEvaluated > 0
+                      ? "border-amber-500/20 bg-amber-500/10 text-amber-300"
+                      : "border-zinc-800 bg-zinc-950/70 text-zinc-300"
+                  }`}
+                >
+                  Покрытие: {Math.round(summary.coverage)}%
+                  {notEvaluated > 0
+                    ? ` — ${notEvaluated} из ${summary.checksCount} проверок не выполнены (нет прав, файла или ответа от устройства); оценка по ним неизвестна`
+                    : " — все проверки выполнены"}
+                </div>
+              ) : null}
+            </>
+          )}
         </AppCard>
 
         <AppCard title="Динамика соответствия" subtitle="Compliance score по последним отчётам">
