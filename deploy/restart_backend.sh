@@ -29,6 +29,8 @@ if docker ps -a --format '{{.Names}}' | grep -qx "$CONTAINER"; then
   docker rm "$CONTAINER" >/dev/null
 fi
 
+# Лимиты ресурсов: проверки docker.memory_limit_set / docker.cpu_limit_set (ФСТЭК СКО.1.5).
+# Обычное потребление — около 100 МБ; 1 ГБ с запасом покрывает выгрузку PDF/Excel.
 echo "==> Запускаю ${CONTAINER} на default bridge (для host-port-forward)..."
 docker run -d \
   --name "$CONTAINER" \
@@ -36,6 +38,7 @@ docker run -d \
   -p 8000:8000 \
   --env-file ./src/backend/.env \
   --restart unless-stopped \
+  --memory 1g --cpus 2 \
   "$IMAGE"
 
 echo "==> Подключаю к ${DB_NETWORK} (резолв diploma_db по имени)..."
