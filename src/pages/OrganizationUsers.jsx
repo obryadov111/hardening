@@ -37,13 +37,11 @@ export default function OrganizationUsers() {
       setLoading(true);
       setActionError("");
 
-      const [users, myRole] = await Promise.all([
-        getUsersByOrganization(selectedOrganizationId),
-        getCurrentUserRoleInOrganization(selectedOrganizationId),
-      ]);
-
-      setRows(users);
+      // Сначала роль: не-админу список не запрашивается (сервер всё равно ответит 403),
+      // и страница показывает «Недостаточно прав», а не текст ошибки запроса.
+      const myRole = await getCurrentUserRoleInOrganization(selectedOrganizationId);
       setCurrentRole(myRole);
+      setRows(myRole === "admin" ? await getUsersByOrganization(selectedOrganizationId) : []);
     } catch (error) {
       console.error("Ошибка загрузки пользователей:", error.message);
       setRows([]);
@@ -78,6 +76,8 @@ export default function OrganizationUsers() {
   }
 
   async function handleDeleteUser(userId) {
+    const member = rows.find((item) => item.id === userId);
+    if (!window.confirm(`Убрать ${member?.email || "пользователя"} из организации?`)) return;
     try {
       setActionError("");
       await removeUserFromOrganization(userId, selectedOrganizationId);

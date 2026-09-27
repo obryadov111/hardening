@@ -87,6 +87,15 @@ def require_org_access(organization_id: str, current_user: User = Depends(get_cu
     return current_user
 
 
+def require_org_admin(organization_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> User:
+    """Dependency: как require_org_access, но нужна роль admin в организации (superadmin — везде).
+    Для изменений: участники организации, политики."""
+    require_org_access(organization_id, current_user, db)
+    if get_user_role_in_org(db, current_user, organization_id) != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нужна роль администратора организации")
+    return current_user
+
+
 def get_accessible_org_ids(db: Session, user: User) -> list[str] | None:
     """Список organization_id, доступных пользователю. None = доступны все (superadmin)."""
     if user.is_superadmin:
