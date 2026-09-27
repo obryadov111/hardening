@@ -453,7 +453,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _utf8_console() -> None:
+    """Вывод в UTF-8 на Windows: консоль и перенаправление там по умолчанию в cp1252/cp866, и кириллица в
+    отчёте и журнале роняла собранный .exe (UnicodeEncodeError; PYTHONUTF8 на него не действует)."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    if os.name == "nt":
+        _utf8_console()
     args = parse_args(argv if argv is not None else sys.argv[1:])
 
     if not args.dry_run and not args.api_key:

@@ -152,3 +152,12 @@ def test_transport_without_windows_capabilities_gives_probe_error_not_a_crash():
                   {"type": "win_auditpol", "subcategory": "{0CCE9215-69AE-11D9-BED3-505054503030}"}):
         result = run_probe(Bare(), probe)
         assert result["found"] is False and "не поддерживает" in result["error"]
+
+
+@pytest.mark.skipif(not probes.IS_WINDOWS, reason="настоящий secedit/auditpol есть только на Windows")
+def test_real_windows_exports_are_parsed():
+    """На раннере Windows (CI): экспорт политик непустой и разбирается; повторный вызов — из кэша."""
+    local = probes.LocalTransport()
+    assert "MinimumPasswordLength" in local.secpol()["System Access"]
+    assert "{0CCE9215-69AE-11D9-BED3-505054503030}" in local.auditpol()
+    assert local.secpol() is local.secpol()

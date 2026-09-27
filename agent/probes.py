@@ -281,18 +281,24 @@ class LocalTransport:
         читается и сразу удаляется. Системная конфигурация не меняется."""
         if not IS_WINDOWS:
             raise ProbeError(f"{what} доступен только на Windows")
-        fd, path = tempfile.mkstemp(prefix="hardening-", suffix=".tmp")
-        os.close(fd)
+        # Файла заранее быть не должно: auditpol /backup отказывается перезаписывать существующий
+        # (код 80, «Failed to open file»), а secedit в том же случае мог «успешно» не записать ничего.
+        # Поэтому — новый временный каталог, путь к ещё не созданному файлу в нём.
+        workdir = tempfile.mkdtemp(prefix="hardening-")
+        path = os.path.join(workdir, "export.txt")
         try:
             out = self._execute(build_argv(path))
             if out.code != 0:
                 raise ProbeError(f"{what}: код {out.code} (нужны права администратора?) {out.text.strip()[:150]}")
-            raw = open(path, "rb").read()
-        finally:
             try:
-                os.remove(path)
-            except OSError:
-                pass
+                raw = open(path, "rb").read()
+            except OSError as exc:
+                raise ProbeError(f"{what}: результат не записан ({exc.strerror or exc})") from exc
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+        if not raw.strip(b"\x00\r\n \t\xff\xfe\xef\xbb\xbf"):
+            # Пустой экспорт — сбой, а не «ничего не задано»: иначе все проверки молча ушли бы в умолчания.
+            raise ProbeError(f"{what}: пустой результат")
         for encoding in ("utf-16", "utf-8-sig", "cp1251"):
             try:
                 return raw.decode(encoding)
@@ -302,15 +308,21 @@ class LocalTransport:
 
     def secpol(self) -> dict:
         if self._secpol is None:
-            self._secpol = parse_secedit(self._export(
+            parsed = parse_secedit(self._export(
                 lambda path: ["secedit", "/export", "/cfg", path, "/areas", "SECURITYPOLICY", "/quiet"],
                 "экспорт политики безопасности"))
+            if "System Access" not in parsed:
+                raise ProbeError("экспорт политики безопасности: нет раздела [System Access]")
+            self._secpol = parsed
         return self._secpol
 
     def auditpol(self) -> dict:
         if self._auditpol is None:
-            self._auditpol = parse_auditpol_backup(self._export(
+            parsed = parse_auditpol_backup(self._export(
                 lambda path: ["auditpol", "/backup", f"/file:{path}"], "резервная копия политики аудита"))
+            if not parsed:
+                raise ProbeError("резервная копия политики аудита: подкатегории не найдены")
+            self._auditpol = parsed
         return self._auditpol
 
     def run_cli(self, command: str) -> CmdOutput:
