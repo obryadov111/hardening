@@ -98,7 +98,7 @@ export default function ScanCompare() {
     return <div className="text-zinc-500">Не удалось загрузить данные сравнения</div>;
   }
 
-  const { beforeSnapshot, afterSnapshot, summary } = data;
+  const { beforeSnapshot, afterSnapshot, summary, commonAssets, onlyBeforeAssets, onlyAfterAssets } = data;
 
   return (
     <div className="space-y-6">
@@ -109,12 +109,24 @@ export default function ScanCompare() {
         </p>
       </div>
 
+      {commonAssets === 0 ? (
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+          У этих снимков нет общих активов — сравнивать нечего. Снимок создаётся на каждый прогон агента и
+          обычно покрывает один сервер: сравнивайте снимки одного и того же сервера.
+        </div>
+      ) : onlyBeforeAssets || onlyAfterAssets ? (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 px-4 py-3 text-sm text-zinc-400">
+          Сравниваются только общие активы ({commonAssets}). Активы, которые сканировались лишь в одном из
+          снимков ({onlyBeforeAssets + onlyAfterAssets}), в сравнение не входят: они не «удалены» и не «новые».
+        </div>
+      ) : null}
+
       <div className="grid gap-4 md:grid-cols-5">
         <StatCard label="Исправлено" value={summary.fixed} hint="fail → pass" tone="success" />
         <StatCard label="Ухудшилось" value={summary.regressed} hint="pass → fail" tone="danger" />
         <StatCard label="Не исправлено" value={summary.stillFailed} hint="fail → fail" tone="warning" />
-        <StatCard label="Новые проблемы" value={summary.newIssues} hint="Новые fail" tone="info" />
-        <StatCard label="Удалено" value={summary.removed} hint="Записи отсутствуют в новом скане" tone="default" />
+        <StatCard label="Новые проблемы" value={summary.newIssues} hint="Проверка появилась и провалена" tone="info" />
+        <StatCard label="Удалено" value={summary.removed} hint="Проверки нет в новом снимке (например, изменилась версия пака)" tone="default" />
       </div>
 
       <AppCard title="Итоги сравнения" subtitle="Сравнение метрик двух snapshot">

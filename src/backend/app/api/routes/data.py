@@ -316,7 +316,28 @@ def get_hardening_by_asset(asset_id: str, current_user: User = Depends(get_curre
 @router.get("/organizations/{organization_id}/snapshots", response_model=list[ScanSnapshotOut])
 def get_snapshots_by_organization(organization_id: str, _: User = Depends(require_org_access), db: Session = Depends(get_db)):
     query = db.query(ScanSnapshot).filter(ScanSnapshot.organization_id == organization_id)
-    return query.order_by(ScanSnapshot.scan_number.desc()).all()
+    snapshots = query.order_by(ScanSnapshot.scan_number.desc()).all()
+    # Снимок создаётся на каждый прогон агента и обычно покрывает один актив, поэтому соседний по
+    # номеру снимок может быть про другой сервер. Для сравнения нужен предыдущий снимок с общим активом.
+    previous = dict(db.execute(
+        text("""
+            WITH sa AS (
+                SELECT DISTINCT scr.snapshot_id, scr.asset_id, s.scan_number
+                FROM scan_check_results scr
+                JOIN scan_snapshots s ON s.id = scr.snapshot_id
+                WHERE s.organization_id = :org_id
+            )
+            SELECT DISTINCT ON (cur.snapshot_id) cur.snapshot_id, prev.snapshot_id AS previous_id
+            FROM sa cur
+            JOIN sa prev ON prev.asset_id = cur.asset_id AND prev.scan_number < cur.scan_number
+            ORDER BY cur.snapshot_id, prev.scan_number DESC
+        """),
+        {"org_id": organization_id},
+    ).all())
+    return [
+        ScanSnapshotOut.model_validate(snapshot).model_copy(update={"previous_snapshot_id": previous.get(snapshot.id)})
+        for snapshot in snapshots
+    ]
 
 
 @router.get("/organizations/{organization_id}/reports")

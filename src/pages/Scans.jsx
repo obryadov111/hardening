@@ -115,12 +115,6 @@ export default function Scans() {
     }
   }
 
-  const previousByRow = useMemo(() => {
-    const map = new Map();
-    rows.forEach((item, index) => map.set(item.id, rows[index + 1] || null));
-    return map;
-  }, [rows]);
-
   const { sortedRows, activeKey, sortDir, toggleSort } = useSort(rows, {
     snapshot: (row) => row.snapshot_label || row.scan_number || "",
     date: (row) => row.created_at || "",
@@ -206,7 +200,8 @@ export default function Scans() {
               </thead>
               <tbody>
                 {sortedRows.map((item) => {
-                  const previous = previousByRow.get(item.id) || null;
+                  // Предыдущий снимок того же актива (считает бэкенд): соседняя строка может быть про другой сервер.
+                  const previousId = item.previous_snapshot_id || null;
                   const pdfBusy = busyKey === `${item.id}-pdf`;
                   const excelBusy = busyKey === `${item.id}-excel`;
 
@@ -269,9 +264,9 @@ export default function Scans() {
                       </td>
 
                       <td className="px-4 py-3">
-                        {previous ? (
+                        {previousId ? (
                           <Link
-                            to={`/scan-compare?before=${previous.id}&after=${item.id}`}
+                            to={`/scan-compare?before=${previousId}&after=${item.id}`}
                             className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800"
                           >
                             Сравнить

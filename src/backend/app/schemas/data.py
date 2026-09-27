@@ -67,6 +67,7 @@ class ScanSnapshotOut(BaseModel):
     total_assets: int
     total_software: int
     created_at: datetime | None = None
+    previous_snapshot_id: UUID | None = None  # предыдущий снимок с общим активом — для сравнения
 
 
 class LatestReportOut(BaseModel):
