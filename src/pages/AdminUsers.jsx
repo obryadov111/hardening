@@ -23,6 +23,14 @@ function StatusBadge({ user }) {
   if (user.account_status === "blocked" || !user.is_active) {
     return <span className="rounded-full border border-rose-500/20 bg-rose-500/10 px-2 py-0.5 text-xs text-rose-300">заблокирован</span>;
   }
+  if (user.locked_until) {
+    const until = new Date(user.locked_until).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    return (
+      <span title="Серия неудачных попыток входа; блокировка снимется сама или кнопкой «Разблокировать»" className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300">
+        вход закрыт до {until}
+      </span>
+    );
+  }
   if (user.must_change_password) {
     return <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300">временный пароль</span>;
   }
@@ -181,7 +189,8 @@ export default function AdminUsers() {
             <tbody>
               {users.map((user) => {
                 const self = user.id === me?.id;
-                const blocked = user.account_status === "blocked" || !user.is_active;
+                // «Разблокировать» снимает и ручную блокировку, и временную (после неудачных входов)
+                const blocked = user.account_status === "blocked" || !user.is_active || Boolean(user.locked_until);
                 return (
                   <tr key={user.id} className="border-b border-zinc-800/60 align-top text-zinc-200">
                     <td className="px-4 py-3">

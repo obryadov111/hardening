@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import jwt
@@ -16,6 +16,7 @@ from app.core.security import (
 from app.models.user import User
 from app.models.user_2fa import User2FA
 from app.schemas.auth import ChangePasswordRequest, LoginRequest, LoginResponse, MeResponse, Verify2FARequest
+from app.services.login_guard import check_password, ensure_not_locked, register_failure, register_success
 from app.services.twofa_service import verify_totp_code
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -24,7 +25,10 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/login", response_model=LoginResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == payload.email.lower().strip()).first()
-    if not user or not verify_password(payload.password, user.password_hash):
+    # Блокировка — до проверки пароля: во время неё подбор ничего не даёт (services/login_guard.py).
+    ensure_not_locked(user)
+    if not check_password(user, payload.password):
+        register_failure(db, user)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный логин или пароль")
 
     if not user.is_active or user.account_status != "active":
@@ -32,13 +36,20 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 
     twofa = db.query(User2FA).filter(User2FA.user_id == user.id).first()
     if twofa and twofa.is_enabled:
+        # Счётчик неудач не сбрасывается до верного кода: иначе, зная пароль, можно было бы
+        # бесконечно подбирать код, чередуя попытки с верным паролем. Токен — короткоживущий.
         temp_token = jwt.encode(
-            {"sub": str(user.id), "type": "pre_2fa"},
+            {
+                "sub": str(user.id),
+                "type": "pre_2fa",
+                "exp": datetime.now(UTC) + timedelta(minutes=settings.PRE_2FA_TOKEN_EXPIRE_MINUTES),
+            },
             settings.JWT_SECRET_KEY,
             algorithm=settings.JWT_ALGORITHM,
         )
         return LoginResponse(two_factor_required=True, temp_token=temp_token)
 
+    register_success(user)
     user.last_login_at = datetime.now(UTC)
     db.commit()
     return LoginResponse(access_token=create_access_token(str(user.id)))
@@ -51,7 +62,8 @@ def verify_2fa(payload: Verify2FARequest, db: Session = Depends(get_db)):
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Недействительный временный токен") from exc
 
-    if token_payload.get("type") != "pre_2fa":
+    if token_payload.get("type") != "pre_2fa" or "exp" not in token_payload:
+        # без exp — токен выдан до ограничения срока; такие не принимаются
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный тип токена")
 
     user_id = token_payload.get("sub")
@@ -61,10 +73,16 @@ def verify_2fa(payload: Verify2FARequest, db: Session = Depends(get_db)):
     if not user or not twofa or not twofa.is_enabled:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="2FA не настроен")
 
+    ensure_not_locked(user)
+    if not user.is_active or user.account_status != "active":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Пользователь не активен")
+
     secret = decrypt_totp_secret(twofa.secret_encrypted)
     if not verify_totp_code(secret, payload.code.strip()):
+        register_failure(db, user)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный код 2FA")
 
+    register_success(user)
     user.last_login_at = datetime.now(UTC)
     twofa.last_used_at = datetime.now(UTC)
     db.commit()

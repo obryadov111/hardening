@@ -13,6 +13,13 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 8
 
+    # Защита от подбора: после LOGIN_MAX_FAILED_ATTEMPTS неудачных попыток подряд (пароль или код 2FA)
+    # вход блокируется на LOGIN_LOCKOUT_MINUTES. Временный токен между паролем и кодом 2FA живёт
+    # PRE_2FA_TOKEN_EXPIRE_MINUTES.
+    LOGIN_MAX_FAILED_ATTEMPTS: int = 5
+    LOGIN_LOCKOUT_MINUTES: int = 15
+    PRE_2FA_TOKEN_EXPIRE_MINUTES: int = 5
+
     TOTP_ISSUER: str = "Hardening"
     TOTP_SECRET_ENCRYPTION_KEY: str
 

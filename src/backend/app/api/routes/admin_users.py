@@ -6,6 +6,7 @@
     суперадмин не знает действующего пароля пользователя;
   * сброс пароля отзывает все сессии пользователя (password_changed_at);
   * блокировка действует сразу — get_current_user проверяет статус на каждом запросе;
+    «Разблокировать» снимает и временную блокировку после серии неудачных входов (login_guard);
   * нельзя заблокировать или сбросить пароль самому себе (для своего пароля — /auth/change-password);
   * суперадмина через API не создать: это делается командой create_admin на сервере, чтобы
     украденная сессия суперадмина не могла размножить учётки с полными правами.
@@ -70,6 +71,7 @@ def list_users(db: Session = Depends(get_db)):
     rows = db.execute(text("""
         SELECT u.id, u.email, u.full_name, u.display_name, u.is_superadmin, u.is_active, u.account_status,
                u.must_change_password, u.last_login_at, u.created_at,
+               CASE WHEN u.locked_until > now() THEN u.locked_until END AS locked_until,
                COALESCE(t.is_enabled, false) AS two_factor_enabled,
                COALESCE(
                    json_agg(json_build_object('id', o.id, 'name', o.name, 'role', uo.role) ORDER BY o.name)
@@ -125,6 +127,7 @@ def reset_password(
     user.password_hash = hash_password(body.new_password)
     user.must_change_password = True
     user.password_changed_at = now  # отзывает все текущие сессии пользователя
+    user.failed_login_attempts, user.locked_until = 0, None  # новый пароль — с чистого листа
     user.updated_at = now
     db.commit()
     return {"id": user.id, "must_change_password": True}
@@ -141,6 +144,8 @@ def set_blocked(
         user.account_status, user.blocked_at = "blocked", now
     else:
         user.account_status, user.is_active, user.blocked_at = "active", True, None
+        # снимает и временную блокировку после серии неудачных попыток входа
+        user.failed_login_attempts, user.locked_until = 0, None
     user.updated_at = now
     db.commit()
     return {"id": user.id, "account_status": user.account_status}
