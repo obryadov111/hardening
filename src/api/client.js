@@ -129,6 +129,7 @@ export async function apiFetch(path, options = {}) {
   return response.text();
 }
 
+/** Скачивание файла: { blob, filename } (имя — из Content-Disposition, если сервер его дал). */
 export async function apiDownload(path, options = {}) {
   const headers = {
     ...(options.headers || {}),
@@ -143,15 +144,27 @@ export async function apiDownload(path, options = {}) {
     headers,
   });
 
+  if (response.status === 401) {
+    clearStoredAccessToken();
+  }
+
   if (!response.ok) {
     let detail = "Ошибка скачивания";
     try {
-      detail = await response.text();
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const data = await response.json();
+        detail = formatErrorDetail(data.detail || data.message) || detail;
+      } else {
+        detail = (await response.text()) || detail;
+      }
     } catch {
       // ответ не распарсился как JSON/текст — используем detail по умолчанию
     }
-    throw new Error(detail || "Ошибка скачивания");
+    throw new Error(detail);
   }
 
-  return response.blob();
+  const disposition = response.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename="?([^";]+)"?/i);
+  return { blob: await response.blob(), filename: match ? match[1] : null };
 }

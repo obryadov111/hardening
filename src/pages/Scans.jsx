@@ -10,10 +10,7 @@ import { useSort } from "../hooks/useSort";
 import { getScoreTone } from "../utils/score";
 import { useOrganization } from "../context/OrganizationContext";
 import { getSnapshotsByOrganization } from "../api/snapshots";
-import {
-  generateAndStoreSnapshotExport,
-  getSnapshotExportDownloadUrl,
-} from "../api/exports";
+import { downloadSnapshotExport } from "../api/exports";
 
 function getStatusBadgeClass(status) {
   switch (status) {
@@ -93,46 +90,26 @@ export default function Scans() {
     return { total, completed, failed, latest };
   }, [rows]);
 
-  async function openStoredExport(path) {
-    const url = await getSnapshotExportDownloadUrl(path, 120);
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
-
+  // Файл формируется на бэкенде на лету и скачивается авторизованным запросом: без хранилища
+  // и подписанных ссылок, у отчёта аудита нет публичного URL.
   async function handleExport(snapshot, format) {
     const key = `${snapshot.id}-${format}`;
     setBusyKey(key);
     setExportError("");
 
     try {
-      const existingPath =
-        format === "pdf"
-          ? snapshot.exported_pdf_path
-          : snapshot.exported_excel_path;
-
-      let path = existingPath;
-
-      if (!path) {
-        path = await generateAndStoreSnapshotExport(snapshot.id, format);
-
-        setRows((prev) =>
-          prev.map((row) =>
-            row.id === snapshot.id
-              ? {
-                  ...row,
-                  exported_pdf_path:
-                    format === "pdf" ? path : row.exported_pdf_path,
-                  exported_excel_path:
-                    format === "excel" ? path : row.exported_excel_path,
-                }
-              : row
-          )
-        );
-      }
-
-      await openStoredExport(path);
+      const { blob, filename } = await downloadSnapshotExport(snapshot.id, format);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) {
       console.error(`Ошибка экспорта ${format}:`, error.message);
-      setExportError(`Не удалось сформировать ${format.toUpperCase()}: ${error.message}`);
+      setExportError(`Не удалось сформировать ${format === "pdf" ? "PDF" : "Excel"}: ${error.message}`);
     } finally {
       setBusyKey("");
     }
@@ -276,7 +253,7 @@ export default function Scans() {
                           onClick={() => handleExport(item, "pdf")}
                           className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800 disabled:opacity-50"
                         >
-                          {pdfBusy ? "..." : item.exported_pdf_path ? "Открыть PDF" : "Создать PDF"}
+                          {pdfBusy ? "..." : "Скачать PDF"}
                         </button>
                       </td>
 
@@ -287,7 +264,7 @@ export default function Scans() {
                           onClick={() => handleExport(item, "excel")}
                           className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800 disabled:opacity-50"
                         >
-                          {excelBusy ? "..." : item.exported_excel_path ? "Открыть Excel" : "Создать Excel"}
+                          {excelBusy ? "..." : "Скачать Excel"}
                         </button>
                       </td>
 

@@ -1,24 +1,9 @@
-import { apiDownload, apiFetch } from "./client";
+import { apiDownload } from "./client";
 
-export async function getSnapshotExportDownloadUrl(path, expiresIn = 60) {
-  const query = new URLSearchParams({
-    path,
-    expires_in: String(expiresIn),
-  });
-
-  const data = await apiFetch(`/exports/download-url?${query.toString()}`);
-  return data.signed_url || data.url || null;
-}
-
-export async function generateAndStoreSnapshotExport(snapshotId, format) {
-  const data = await apiFetch(`/exports/snapshots/${snapshotId}`, {
-    method: "POST",
-    body: JSON.stringify({ format }),
-  });
-
-  return data.path;
-}
-
+/** Выгрузка снимка: format — "pdf" | "excel". Возвращает файл и имя из Content-Disposition. */
 export async function downloadSnapshotExport(snapshotId, format) {
-  return apiDownload(`/exports/snapshots/${snapshotId}/download?format=${encodeURIComponent(format)}`);
+  const { blob, filename } = await apiDownload(
+    `/exports/snapshots/${snapshotId}/download?format=${encodeURIComponent(format)}`
+  );
+  return { blob, filename: filename || `scan-${snapshotId}.${format === "pdf" ? "pdf" : "xlsx"}` };
 }

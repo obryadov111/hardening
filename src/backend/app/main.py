@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes.agent import router as agent_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.data import router as data_router
+from app.api.routes.exports import router as exports_router
 from app.api.routes.ingest import router as ingest_router
 from app.core.config import settings
 
@@ -21,6 +22,7 @@ app.include_router(auth_router, prefix=settings.API_PREFIX)
 app.include_router(data_router, prefix=settings.API_PREFIX)
 app.include_router(ingest_router, prefix=settings.API_PREFIX)
 app.include_router(agent_router, prefix=settings.API_PREFIX)
+app.include_router(exports_router, prefix=settings.API_PREFIX)
 
 
 @app.get("/health")
