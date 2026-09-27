@@ -1,0 +1,113 @@
+# Проверка Windows-паков на НАСТОЯЩИХ Windows Server (раннеры GitHub) и сборка агента в .exe.
+#
+# live: агент выполняет пробы паков windows-server на реальной ОС (только чтение) — распознана ли
+#   платформа, выполнилась ли каждая проба (секреты политики, GUID аудита, реестр, службы). Результат с
+#   фактическими значениями — артефакт live-<ОС>.json: образцы с реальной системы.
+#   Не ловит: опечатку в пути реестра — отсутствующий ключ для Windows норма («не задано» → умолчание).
+#   Поэтому в артефакте видно, какие значения найдены в реестре, а какие взяты по умолчанию.
+# exe: агент (collector.py + probes.py, только стандартная библиотека) собирается PyInstaller в один файл —
+#   на Windows-хостах нет Python. Собранный файл прогоняется по подписанным манифестам без сервера.
+name: Windows packs
+
+on:
+  push:
+    paths:
+      - "agent/**"
+      - "src/backend/app/packs/windows-*"
+      - "src/backend/app/services/packs/**"
+      - "src/backend/app/commands/pack.py"
+      - ".github/workflows/windows-packs.yml"
+  workflow_dispatch:
+
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+  # настройки бэкенда нужны только для импорта модулей; БД не используется
+  DATABASE_URL: postgresql+psycopg://ci:ci@localhost:1/ci
+  JWT_SECRET_KEY: ci
+  TOTP_SECRET_ENCRYPTION_KEY: ci
+  PACK_SIGNING_KEY: ci
+
+jobs:
+  live:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          pip install pytest==8.3.5
+          pip install -r src/backend/requirements.txt
+
+      - name: Windows probe tests (agent)
+        run: pytest agent/tests/test_windows_probes.py -v
+
+      - name: OS and software inventory
+        run: python -c "import sys; sys.path.insert(0, 'agent'); import collector; print(collector.get_windows_version()); print('программ:', len(collector.collect_windows_software()))"
+
+      - name: Live run on real Windows Server
+        working-directory: src/backend
+        run: python -m app.commands.pack live --pack windows-server --require-found --json ../../live-${{ matrix.os }}.json
+
+      - name: Client pack must not match a server
+        working-directory: src/backend
+        shell: pwsh
+        run: |
+          python -m app.commands.pack live --json ../../all-${{ matrix.os }}.json
+          $detected = (Get-Content ../../all-${{ matrix.os }}.json | ConvertFrom-Json) | Where-Object { $_.detected } | ForEach-Object { $_.pack }
+          Write-Output "распознаны: $detected"
+          if ($detected -contains 'windows-client' -or -not ($detected -contains 'windows-server')) { exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-${{ matrix.os }}
+          path: live-*.json
+
+  exe:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          pip install pyinstaller==6.11.1
+          pip install -r src/backend/requirements.txt
+
+      - name: Build hardening-agent.exe
+        run: pyinstaller --onefile --name hardening-agent --paths agent --hidden-import probes agent/collector.py
+
+      - name: Built agent runs on signed manifests without a server
+        shell: pwsh
+        run: |
+          $key = [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
+          Set-Content -NoNewline -Path ci.key -Value $key
+          Push-Location src/backend
+          python -m app.commands.pack manifests --key-file ../../ci.key --out ../../manifests.json
+          Pop-Location
+          $env:HARDENING_PACK_KEY = $key
+          .\dist\hardening-agent.exe --api-url http://localhost --environment ci --use-packs --dry-run --manifests-file manifests.json | Out-File -Encoding utf8 payload.json
+          $payload = Get-Content payload.json -Raw | ConvertFrom-Json
+          $packs = $payload.packs | ForEach-Object { $_.id }
+          Write-Output "агент (.exe): ОС = $($payload.asset.os); паки = $packs; ПО = $($payload.software.Count)"
+          if (-not ($packs -contains 'windows-server')) { exit 1 }
+          # подпись проверяется: чужой ключ — отказ
+          $env:HARDENING_PACK_KEY = 'wrong-key'
+          .\dist\hardening-agent.exe --api-url http://localhost --environment ci --use-packs --dry-run --manifests-file manifests.json
+          if ($LASTEXITCODE -eq 0) { Write-Output 'подделка не обнаружена'; exit 1 }
+          exit 0
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hardening-agent-exe
+          path: dist/hardening-agent.exe

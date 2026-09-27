@@ -25,10 +25,14 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 
 MANIFEST_SCHEMA = 1
 SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+IS_WINDOWS = os.name == "nt"
+# На Windows команды ищутся только в System32 — как SAFE_PATH на Linux, без PATH пользователя.
+WINDOWS_SYSTEM32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
 MAX_FILE_BYTES = 2_000_000
 COMMAND_TIMEOUT = 15
 MAX_INCLUDE_DEPTH = 5
@@ -97,6 +101,8 @@ LOCAL_COMMAND_POLICY = {
     "aa-status": re.compile(r"^--enabled$"),
     "timedatectl": re.compile(r"^show( -p [A-Za-z]+)?( --value)?$"),
     "ss": re.compile(r"^-[tuln]+p?$"),
+    # Windows: состояние службы (sc query <имя>); вывод sc не локализуется, состояние — числом и константой
+    "sc": re.compile(r"^query [A-Za-z0-9_.-]+$"),
     # только список запущенных контейнеров и одно поле inspect по конкретному id из закрытого списка
     # полей (docker.yaml, проверки СКО.1.2/1.3/1.5/1.6 по методике ФСТЭК); run/exec/rm и т.п. — отказ
     "docker": re.compile(
@@ -105,6 +111,66 @@ LOCAL_COMMAND_POLICY = {
         r"\}\} [a-f0-9]{6,64})$"
     ),
 }
+
+# Кусты с секретами (хэши паролей, секреты LSA): агент их не читает, даже если так написано в манифесте.
+REG_DENIED = re.compile(r"^HKLM\\(SAM|SECURITY)(\\|$)", re.IGNORECASE)
+_SC_STATE = re.compile(r"^\s*\S+\s*:\s*(\d)\s+(STOPPED|START_PENDING|STOP_PENDING|RUNNING|CONTINUE_PENDING|PAUSE_PENDING|PAUSED)\b", re.M)
+# Start службы в реестре: 0/1 — загрузка/система, 2 — автоматически, 3 — вручную, 4 — отключена
+_WIN_START = {0: "enabled", 1: "enabled", 2: "enabled", 3: "manual", 4: "disabled"}
+
+
+def read_registry(key: str, name: str):
+    """Значение HKLM\\... реестра или None, если ключа/значения нет. DWORD — int, MULTI_SZ — строка через запятую."""
+    # Запреты — до всего остального: действуют независимо от платформы (и проверяемы тестами на Linux).
+    if REG_DENIED.match(key):
+        raise ProbeError(f"чтение {key} запрещено политикой агента")
+    if not key.upper().startswith("HKLM\\"):
+        raise ProbeError("агент читает только HKLM")
+    if not IS_WINDOWS:
+        raise ProbeError("реестр доступен только на Windows")
+    import winreg  # стандартная библиотека на Windows
+
+    try:
+        # KEY_WOW64_64KEY: 64-битное представление реестра, даже если агент собран 32-битным
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key[5:], 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as handle:
+            value, kind = winreg.QueryValueEx(handle, name)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ProbeError(f"нет доступа к {key}\\{name}: {exc.strerror or exc}") from exc
+    if kind == winreg.REG_MULTI_SZ:
+        return ",".join(value)
+    if isinstance(value, bytes):
+        return value.hex()
+    return value
+
+
+def parse_secedit(text: str) -> dict:
+    """INF из `secedit /export`: {раздел: {ключ: значение}}."""
+    sections, current = {}, None
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("[") and line.endswith("]"):
+            current = sections.setdefault(line[1:-1], {})
+        elif current is not None and "=" in line:
+            key, value = line.split("=", 1)
+            current[key.strip()] = value.strip().strip('"')
+    return sections
+
+
+def parse_auditpol_backup(text: str) -> dict:
+    """CSV из `auditpol /backup`: {GUID подкатегории: Setting Value (0–3)}. Колонки берутся по положению:
+    их заголовки локализуются, а порядок и GUID — нет."""
+    import csv
+    import io
+
+    result = {}
+    for row in csv.reader(io.StringIO(text)):
+        # Machine Name, Policy Target, Subcategory, Subcategory GUID, Inclusion, Exclusion, Setting Value
+        if len(row) >= 7 and row[3].startswith("{") and row[6].strip().isdigit():
+            result[row[3].strip().upper()] = int(row[6].strip())
+    return result
+
 
 CLI_FILTERS = ("include", "exclude", "begin", "section", "count", "match", "except")
 _CLI_SEGMENT = re.compile(r"^[A-Za-z0-9 _./^:\-]+$")
@@ -152,6 +218,10 @@ class LocalTransport:
 
     name = "local"
 
+    def __init__(self):
+        self.platform = "windows" if IS_WINDOWS else "posix"
+        self._secpol = self._auditpol = None  # кэш на прогон: экспорт дорогой и одинаков для всех проверок
+
     def _check_path(self, path: str) -> str:
         real = os.path.realpath(path)
         for candidate in (path, real):
@@ -182,17 +252,66 @@ class LocalTransport:
         policy = LOCAL_COMMAND_POLICY.get(argv[0]) if argv else None
         if policy is None or not policy.match(" ".join(argv[1:])):
             raise ProbeError(f"команда вне белого списка агента: {' '.join(argv)}")
-        exe = shutil.which(argv[0], path=SAFE_PATH)
+        return self._execute(argv)
+
+    def _execute(self, argv: list[str]) -> CmdOutput:
+        """Запуск без shell из системного каталога. Команды из манифеста попадают сюда только через run()
+        (белый список); secedit и auditpol с фиксированными аргументами агент вызывает сам."""
+        search = WINDOWS_SYSTEM32 if IS_WINDOWS else SAFE_PATH
+        exe = shutil.which(argv[0], path=search)
         if exe is None:
             raise ProbeError(f"команда {argv[0]} не найдена")
+        env = ({"SystemRoot": os.environ.get("SystemRoot", r"C:\Windows"), "PATH": WINDOWS_SYSTEM32,
+                "TEMP": tempfile.gettempdir(), "TMP": tempfile.gettempdir()}
+               if IS_WINDOWS else {"PATH": SAFE_PATH, "LANG": "C", "LC_ALL": "C"})
         try:
             proc = subprocess.run(
                 [exe, *argv[1:]], capture_output=True, text=True, timeout=COMMAND_TIMEOUT,
-                env={"PATH": SAFE_PATH, "LANG": "C", "LC_ALL": "C"}, check=False,
+                env=env, check=False, errors="replace",
             )
         except (OSError, subprocess.SubprocessError) as exc:
             raise ProbeError(f"команда {argv[0]} не выполнилась: {exc}") from exc
         return CmdOutput(proc.stdout, proc.stderr, proc.returncode)
+
+    def read_registry(self, key: str, name: str):
+        return read_registry(key, name)
+
+    def _export(self, build_argv, what: str) -> str:
+        """secedit /export и auditpol /backup пишут результат в файл: временный файл в личном TEMP агента,
+        читается и сразу удаляется. Системная конфигурация не меняется."""
+        if not IS_WINDOWS:
+            raise ProbeError(f"{what} доступен только на Windows")
+        fd, path = tempfile.mkstemp(prefix="hardening-", suffix=".tmp")
+        os.close(fd)
+        try:
+            out = self._execute(build_argv(path))
+            if out.code != 0:
+                raise ProbeError(f"{what}: код {out.code} (нужны права администратора?) {out.text.strip()[:150]}")
+            raw = open(path, "rb").read()
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        for encoding in ("utf-16", "utf-8-sig", "cp1251"):
+            try:
+                return raw.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        raise ProbeError(f"{what}: не удалось прочитать результат")
+
+    def secpol(self) -> dict:
+        if self._secpol is None:
+            self._secpol = parse_secedit(self._export(
+                lambda path: ["secedit", "/export", "/cfg", path, "/areas", "SECURITYPOLICY", "/quiet"],
+                "экспорт политики безопасности"))
+        return self._secpol
+
+    def auditpol(self) -> dict:
+        if self._auditpol is None:
+            self._auditpol = parse_auditpol_backup(self._export(
+                lambda path: ["auditpol", "/backup", f"/file:{path}"], "резервная копия политики аудита"))
+        return self._auditpol
 
     def run_cli(self, command: str) -> CmdOutput:
         raise ProbeError("cli_config недоступна на локальном транспорте")
@@ -241,6 +360,17 @@ class SshTransport:
 
     def stat_file(self, path: str) -> os.stat_result:
         raise ProbeError("file_stat недоступна на транспорте ssh")
+
+    platform = "network"
+
+    def read_registry(self, key: str, name: str):
+        raise ProbeError("реестр недоступен на транспорте ssh")
+
+    def secpol(self) -> dict:
+        raise ProbeError("политика безопасности Windows недоступна на транспорте ssh")
+
+    def auditpol(self) -> dict:
+        raise ProbeError("политика аудита Windows недоступна на транспорте ssh")
 
 
 # --- пробы -----------------------------------------------------------------------
@@ -388,7 +518,62 @@ def probe_cli_config(t, p: dict) -> dict:
     return _ok(None)
 
 
+def _windows_service_state(t, p: dict) -> dict:
+    """Та же проба на Windows, в тех же словах, что systemd: active/inactive, enabled/manual/disabled.
+    Автозапуск — из реестра (Start), работа — из `sc query` (число и константа состояния не локализуются)."""
+    service = p["service"]
+    if p.get("field") == "enabled":
+        start = _capability(t, "read_registry")(f"HKLM\\SYSTEM\\CurrentControlSet\\Services\\{service}", "Start")
+        if start is None:
+            return _ok("not-found", "служба не установлена")
+        return _ok(_WIN_START.get(int(start), f"start-{start}"), f"Start={start}")
+    out = t.run(["sc", "query", service])
+    if out.code == 1060:  # ERROR_SERVICE_DOES_NOT_EXIST
+        return _ok("not-found", "служба не установлена")
+    match = _SC_STATE.search(out.stdout)
+    if not match:
+        raise ProbeError(f"sc query {service}: состояние не распознано (код {out.code})")
+    return _ok("active" if match.group(2) == "RUNNING" else "inactive", f"{match.group(1)} {match.group(2)}")
+
+
+def _capability(t, name: str):
+    """Метод транспорта или ProbeError: транспорт, который этого не умеет (Linux, SSH, тестовый), даёт
+    «проба не выполнилась», а не AttributeError, обрывающий весь прогон."""
+    method = getattr(t, name, None)
+    if method is None:
+        raise ProbeError(f"транспорт {getattr(t, 'name', '?')} не поддерживает {name}")
+    return method
+
+
+def probe_reg_value(t, p: dict) -> dict:
+    value = _capability(t, "read_registry")(p["key"], p["value"])
+    if value is None:
+        default = p.get("default")
+        return _ok(default, "(значение по умолчанию Windows)") if default is not None else _ok(None)
+    return _ok(value, f"{p['value']}={value}")
+
+
+def probe_win_secpol(t, p: dict) -> dict:
+    section = _capability(t, "secpol")().get(p.get("section", "System Access"), {})
+    value = section.get(p["key"])
+    if value is None:
+        default = p.get("default")
+        return _ok(default, "(значение по умолчанию Windows)") if default is not None else _ok(None)
+    return _ok(value, f"{p['key']} = {value}")
+
+
+def probe_win_auditpol(t, p: dict) -> dict:
+    guid = p["subcategory"].upper()
+    policy = _capability(t, "auditpol")()
+    if guid not in policy:
+        raise ProbeError(f"подкатегория аудита {guid} не найдена в политике аудита")
+    labels = {0: "нет", 1: "успех", 2: "отказ", 3: "успех и отказ"}
+    return _ok(policy[guid], f"{guid}: {labels.get(policy[guid], policy[guid])}")
+
+
 def probe_service_state(t, p: dict) -> dict:
+    if getattr(t, "platform", "posix") == "windows":
+        return _windows_service_state(t, p)
     verb = "is-enabled" if p.get("field") == "enabled" else "is-active"
     out = t.run(["systemctl", verb, p["service"]])
     state = out.stdout.strip() or out.stderr.strip()
@@ -438,6 +623,9 @@ PROBES = {
     "service_state": probe_service_state,
     "pkg_version": probe_pkg_version,
     "first_of": probe_first_of,
+    "reg_value": probe_reg_value,
+    "win_secpol": probe_win_secpol,
+    "win_auditpol": probe_win_auditpol,
 }
 
 

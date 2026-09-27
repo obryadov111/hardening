@@ -1,0 +1,675 @@
+# Пак «Windows Server»: 2016 / 2019 / 2022 / 2025 (полная установка и Server Core).
+# Распознаётся по InstallationType в реестре (Server / Server Core); версия ОС в отчёте — из реестра
+# (ProductName, DisplayVersion, CurrentBuildNumber).
+#
+# Источники значений не зависят от языка системы: на русской Windows `net accounts`, `auditpol /get`,
+# `netsh` выводят русский текст. Поэтому — реестр, экспорт политики безопасности (secedit, ключи вида
+# MinimumPasswordLength) и резервная копия политики аудита (auditpol /backup, GUID и числа).
+# Групповая политика главнее локальной настройки: там, где у параметра есть оба места, сначала читается
+# ключ Policies (first_of), затем локальный с умолчанием Windows.
+#
+# Права: secedit и auditpol требуют администратора — агент на Windows работает от SYSTEM (задача
+# планировщика). Без прав эти проверки получают «не проверено», а не «соблюдено».
+#
+# maturity=draft: проверки написаны по документации Microsoft и CIS и проверены на образцах; прогон на
+# реальных Windows Server 2022/2025 — в CI (GitHub Actions). Контроллер домена: политика паролей берётся
+# из доменной политики — пак описывает рядовой сервер и отдельно контроллер домена не проверяет.
+#
+# Генерируется из pack_sources/windows.py вместе с windows-client — правки там, не здесь.
+
+pack: windows-server
+version: 1.0.0
+maturity: draft
+tags:
+- windows
+- windows-server
+transport: local
+asset_type: windows-server
+detect:
+- probe:
+    type: reg_value
+    key: HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion
+    value: InstallationType
+  regex: ^Server
+checks:
+- id: win.password_min_length
+  title: Минимальная длина пароля — не менее 14 символов
+  probe:
+    type: win_secpol
+    key: MinimumPasswordLength
+  assert:
+    op: gte
+    value: 14
+  severity: medium
+  remediation: 'Политика паролей: «Минимальная длина пароля» = 14.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.2
+- id: win.password_complexity
+  title: Требования к сложности пароля включены
+  probe:
+    type: win_secpol
+    key: PasswordComplexity
+  assert:
+    op: eq
+    value: 1
+  severity: medium
+  remediation: 'Политика паролей: «Пароль должен отвечать требованиям сложности» = Включён.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.2
+- id: win.password_max_age
+  title: Максимальный срок действия пароля — от 1 до 90 дней (0 — никогда не истекает)
+  probe:
+    type: win_secpol
+    key: MaximumPasswordAge
+  assert:
+    op: between
+    value:
+    - 1
+    - 90
+  severity: medium
+  remediation: 'Политика паролей: «Максимальный срок действия пароля» = 90 (не 0).'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.2
+- id: win.password_min_age
+  title: Минимальный срок действия пароля — не менее 1 дня
+  probe:
+    type: win_secpol
+    key: MinimumPasswordAge
+  assert:
+    op: gte
+    value: 1
+  severity: low
+  remediation: 'Политика паролей: «Минимальный срок действия пароля» = 1 (иначе журнал паролей обходится сменой подряд).'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.2
+- id: win.password_history
+  title: Журнал паролей — не менее 24 предыдущих
+  probe:
+    type: win_secpol
+    key: PasswordHistorySize
+  assert:
+    op: gte
+    value: 24
+  severity: low
+  remediation: 'Политика паролей: «Вести журнал паролей» = 24.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.2
+- id: win.reversible_encryption_disabled
+  title: Пароли не хранятся с обратимым шифрованием
+  probe:
+    type: win_secpol
+    key: ClearTextPassword
+  assert:
+    op: eq
+    value: 0
+  severity: high
+  remediation: 'Политика паролей: «Хранить пароли, используя обратимое шифрование» = Отключён.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.2
+- id: win.lockout_threshold
+  title: Блокировка учётной записи после 1–5 неудачных попыток (0 — никогда)
+  probe:
+    type: win_secpol
+    key: LockoutBadCount
+  assert:
+    op: between
+    value:
+    - 1
+    - 5
+  severity: high
+  remediation: 'Политика блокировки: «Пороговое значение блокировки» = 5.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.4
+- id: win.lockout_duration
+  title: Длительность блокировки — не менее 15 минут
+  probe:
+    type: win_secpol
+    key: LockoutDuration
+    default: '0'
+  assert:
+    op: gte
+    value: 15
+  severity: medium
+  remediation: 'Политика блокировки: «Продолжительность блокировки» = 15 минут (задаётся вместе с порогом).'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.4
+- id: win.guest_disabled
+  title: Учётная запись «Гость» отключена
+  probe:
+    type: win_secpol
+    key: EnableGuestAccount
+  assert:
+    op: eq
+    value: 0
+  severity: high
+  remediation: 'Параметры безопасности: «Учётные записи: состояние учётной записи Гость» = Отключена.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.1
+- id: win.anonymous_sid_translation_disabled
+  title: Анонимное сопоставление SID и имён запрещено
+  probe:
+    type: win_secpol
+    key: LSAAnonymousNameLookup
+  assert:
+    op: eq
+    value: 0
+  severity: medium
+  remediation: 'Параметры безопасности: «Сетевой доступ: разрешить трансляцию анонимного SID в имя» = Отключён.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.3
+- id: win.restrict_anonymous_sam
+  title: Анонимный перечень учётных записей SAM запрещён
+  probe:
+    type: reg_value
+    key: HKLM\SYSTEM\CurrentControlSet\Control\Lsa
+    value: RestrictAnonymousSAM
+    default: '1'
+  assert:
+    op: eq
+    value: 1
+  severity: medium
+  remediation: 'HKLM\SYSTEM\CurrentControlSet\Control\Lsa: RestrictAnonymousSAM = 1.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.3
+- id: win.restrict_anonymous
+  title: Анонимный перечень учётных записей и общих ресурсов запрещён
+  probe:
+    type: reg_value
+    key: HKLM\SYSTEM\CurrentControlSet\Control\Lsa
+    value: RestrictAnonymous
+    default: '0'
+  assert:
+    op: eq
+    value: 1
+  severity: medium
+  remediation: 'HKLM\SYSTEM\CurrentControlSet\Control\Lsa: RestrictAnonymous = 1.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.3
+- id: win.null_session_shares_restricted
+  title: Анонимный доступ к общим папкам и каналам ограничен
+  probe:
+    type: reg_value
+    key: HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters
+    value: RestrictNullSessAccess
+    default: '1'
+  assert:
+    op: eq
+    value: 1
+  severity: medium
+  remediation: 'LanmanServer\Parameters: RestrictNullSessAccess = 1.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.12
+- id: win.uac_enabled
+  title: Контроль учётных записей (UAC) включён
+  probe:
+    type: reg_value
+    key: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System
+    value: EnableLUA
+    default: '1'
+  assert:
+    op: eq
+    value: 1
+  severity: high
+  remediation: 'Параметры безопасности: «Контроль учётных записей: все администраторы работают в режиме одобрения» = Включён.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.6
+- id: win.ntlmv1_refused
+  title: 'Только NTLMv2: LM и NTLMv1 отклоняются (LmCompatibilityLevel = 5)'
+  probe:
+    type: reg_value
+    key: HKLM\SYSTEM\CurrentControlSet\Control\Lsa
+    value: LmCompatibilityLevel
+    default: '3'
+  assert:
+    op: gte
+    value: 5
+  severity: high
+  remediation: 'Параметры безопасности: «Сетевая безопасность: уровень проверки подлинности LAN Manager» = «Отправлять только NTLMv2, отказывать LM и NTLM».'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.9
+- id: win.smb1_client_disabled
+  title: Клиент SMBv1 отключён (драйвер mrxsmb10 не запускается)
+  probe:
+    type: reg_value
+    key: HKLM\SYSTEM\CurrentControlSet\Services\mrxsmb10
+    value: Start
+    default: '4'
+  assert:
+    op: eq
+    value: 4
+  severity: high
+  remediation: Отключить компонент «Поддержка общего доступа к файлам SMB 1.0/CIFS» (ключа нет — драйвер не установлен, это соблюдение).
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.9
+- id: win.smb1_server_disabled
+  title: Сервер SMBv1 отключён явно (SMB1 = 0)
+  probe:
+    type: reg_value
+    key: HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters
+    value: SMB1
+    default: '1'
+  assert:
+    op: eq
+    value: 0
+  severity: high
+  remediation: 'LanmanServer\Parameters: SMB1 = 0 (или Set-SmbServerConfiguration -EnableSMB1Protocol $false). Как в CIS: значение должно быть задано явно.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.9
+- id: win.smb_server_signing_required
+  title: Сервер SMB требует подпись пакетов
+  probe:
+    type: reg_value
+    key: HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters
+    value: RequireSecuritySignature
+    default: '0'
+  assert:
+    op: eq
+    value: 1
+  severity: medium
+  remediation: 'Параметры безопасности: «Сервер сети Microsoft: использовать цифровую подпись (всегда)» = Включён.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.9
+- id: win.smb_client_signing_required
+  title: Клиент SMB требует подпись пакетов
+  probe:
+    type: reg_value
+    key: HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters
+    value: RequireSecuritySignature
+    default: '0'
+  assert:
+    op: eq
+    value: 1
+  severity: medium
+  remediation: 'Параметры безопасности: «Клиент сети Microsoft: использовать цифровую подпись (всегда)» = Включён.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.9
+- id: win.llmnr_disabled
+  title: Широковещательное разрешение имён LLMNR отключено
+  probe:
+    type: reg_value
+    key: HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient
+    value: EnableMulticast
+    default: '1'
+  assert:
+    op: eq
+    value: 0
+  severity: medium
+  remediation: 'Групповая политика: «Отключить многоадресное разрешение имён» = Включена.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.9
+- id: win.wdigest_disabled
+  title: WDigest не хранит пароли в памяти открытым текстом
+  probe:
+    type: reg_value
+    key: HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest
+    value: UseLogonCredential
+    default: '0'
+  assert:
+    op: eq
+    value: 0
+  severity: high
+  remediation: 'WDigest: UseLogonCredential = 0.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.15
+- id: win.rdp_nla_required
+  title: RDP требует проверки подлинности на уровне сети (NLA)
+  probe:
+    type: first_of
+    probes:
+    - type: reg_value
+      key: HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services
+      value: UserAuthentication
+    - type: reg_value
+      key: HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp
+      value: UserAuthentication
+      default: '1'
+  assert:
+    op: eq
+    value: 1
+  severity: high
+  remediation: 'Групповая политика: «Требовать проверку подлинности пользователя на уровне сети для удалённых подключений» = Включена.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.10
+- id: win.firewall_domain_enabled
+  title: 'Брандмауэр Windows включён: профиль «Домен»'
+  probe:
+    type: first_of
+    probes:
+    - type: reg_value
+      key: HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\DomainProfile
+      value: EnableFirewall
+    - type: reg_value
+      key: HKLM\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\DomainProfile
+      value: EnableFirewall
+      default: '1'
+  assert:
+    op: eq
+    value: 1
+  severity: high
+  remediation: 'Брандмауэр Защитника Windows, профиль «Домен»: состояние = Включён.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.10
+- id: win.firewall_private_enabled
+  title: 'Брандмауэр Windows включён: профиль «Частный»'
+  probe:
+    type: first_of
+    probes:
+    - type: reg_value
+      key: HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\PrivateProfile
+      value: EnableFirewall
+    - type: reg_value
+      key: HKLM\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\StandardProfile
+      value: EnableFirewall
+      default: '1'
+  assert:
+    op: eq
+    value: 1
+  severity: high
+  remediation: 'Брандмауэр Защитника Windows, профиль «Частный»: состояние = Включён.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.10
+- id: win.firewall_public_enabled
+  title: 'Брандмауэр Windows включён: профиль «Общий»'
+  probe:
+    type: first_of
+    probes:
+    - type: reg_value
+      key: HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\PublicProfile
+      value: EnableFirewall
+    - type: reg_value
+      key: HKLM\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\PublicProfile
+      value: EnableFirewall
+      default: '1'
+  assert:
+    op: eq
+    value: 1
+  severity: high
+  remediation: 'Брандмауэр Защитника Windows, профиль «Общий»: состояние = Включён.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.10
+- id: win.autorun_disabled_all_drives
+  title: Автозапуск отключён для всех типов носителей (NoDriveTypeAutoRun = 255)
+  probe:
+    type: reg_value
+    key: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer
+    value: NoDriveTypeAutoRun
+    default: '145'
+  assert:
+    op: eq
+    value: 255
+  severity: medium
+  remediation: 'Групповая политика: «Отключить автозапуск» = Включена, «Все дисководы».'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.13
+- id: win.autorun_commands_disabled
+  title: Команды автозапуска (autorun.inf) не выполняются (NoAutorun = 1)
+  probe:
+    type: reg_value
+    key: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer
+    value: NoAutorun
+    default: '0'
+  assert:
+    op: eq
+    value: 1
+  severity: medium
+  remediation: 'Групповая политика: «Задать поведение по умолчанию для AutoRun» = Не выполнять команды автозапуска.'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.13
+- id: win.eventlog_running
+  title: Служба журнала событий работает
+  probe:
+    type: service_state
+    service: EventLog
+  assert:
+    op: eq
+    value: active
+  severity: high
+  remediation: Службу «Журнал событий Windows» не останавливать и не отключать.
+  refs:
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.11
+- id: win.audit_logon
+  title: 'Аудит входа в систему: успех и отказ'
+  probe:
+    type: win_auditpol
+    subcategory: '{0CCE9215-69AE-11D9-BED3-505054503030}'
+  assert:
+    op: eq
+    value: 3
+  severity: medium
+  remediation: Расширенная политика аудита, «Вход/выход» → «Аудит входа в систему» = Успех и отказ.
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.11
+- id: win.audit_account_lockout
+  title: 'Аудит блокировки учётных записей: отказ'
+  probe:
+    type: win_auditpol
+    subcategory: '{0CCE9217-69AE-11D9-BED3-505054503030}'
+  assert:
+    op: in
+    value:
+    - 2
+    - 3
+  severity: medium
+  remediation: Расширенная политика аудита, «Вход/выход» → «Аудит блокировки учётной записи» = Отказ.
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.11
+- id: win.audit_credential_validation
+  title: 'Аудит проверки учётных данных: успех и отказ'
+  probe:
+    type: win_auditpol
+    subcategory: '{0CCE923F-69AE-11D9-BED3-505054503030}'
+  assert:
+    op: eq
+    value: 3
+  severity: medium
+  remediation: Расширенная политика аудита, «Вход учётной записи» → «Аудит проверки учётных данных» = Успех и отказ.
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.11
+- id: win.audit_user_account_management
+  title: 'Аудит управления учётными записями: успех и отказ'
+  probe:
+    type: win_auditpol
+    subcategory: '{0CCE9235-69AE-11D9-BED3-505054503030}'
+  assert:
+    op: eq
+    value: 3
+  severity: medium
+  remediation: Расширенная политика аудита, «Управление учётными записями» → «Аудит управления учётными записями пользователей» = Успех и отказ.
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.11
+- id: win.audit_policy_change
+  title: 'Аудит изменения политики аудита: успех'
+  probe:
+    type: win_auditpol
+    subcategory: '{0CCE922F-69AE-11D9-BED3-505054503030}'
+  assert:
+    op: in
+    value:
+    - 1
+    - 3
+  severity: medium
+  remediation: Расширенная политика аудита, «Изменение политики» → «Аудит изменения политики аудита» = Успех.
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.11
+- id: win.audit_process_creation
+  title: 'Аудит создания процессов: успех'
+  probe:
+    type: win_auditpol
+    subcategory: '{0CCE922B-69AE-11D9-BED3-505054503030}'
+  assert:
+    op: in
+    value:
+    - 1
+    - 3
+  severity: low
+  remediation: Расширенная политика аудита, «Подробное отслеживание» → «Аудит создания процессов» = Успех.
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.11
+- id: win.telnet_server_absent
+  title: Сервер Telnet не работает
+  probe:
+    type: service_state
+    service: TlntSvr
+  assert:
+    op: in
+    value:
+    - inactive
+    - not-found
+  severity: high
+  remediation: Удалить компонент «Сервер Telnet».
+  refs:
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.8
+- id: win.ftp_server_absent
+  title: FTP-сервер IIS не работает
+  probe:
+    type: service_state
+    service: ftpsvc
+  assert:
+    op: in
+    value:
+    - inactive
+    - not-found
+  severity: medium
+  remediation: Удалить компонент «FTP-сервер» IIS, если он не нужен.
+  refs:
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.8
+- id: win.remote_registry_disabled
+  title: Служба «Удалённый реестр» отключена
+  probe:
+    type: service_state
+    service: RemoteRegistry
+    field: enabled
+  assert:
+    op: in
+    value:
+    - disabled
+    - not-found
+  severity: low
+  remediation: Службу «Удалённый реестр» перевести в состояние «Отключена».
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.8
+- id: win.print_spooler_disabled
+  title: Диспетчер печати отключён (сервер не печатает)
+  probe:
+    type: service_state
+    service: Spooler
+    field: enabled
+  assert:
+    op: in
+    value:
+    - disabled
+    - not-found
+  severity: low
+  remediation: Службу «Диспетчер печати» отключить на серверах, которые не являются серверами печати (уязвимости PrintNightmare).
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.8
+- id: win.automatic_updates_enabled
+  title: Автоматические обновления не отключены политикой
+  probe:
+    type: reg_value
+    key: HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU
+    value: NoAutoUpdate
+    default: '0'
+  assert:
+    op: eq
+    value: 0
+  severity: medium
+  remediation: 'Групповая политика: «Настройка автоматического обновления» не должна быть «Отключена».'
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.2
+- id: win.defender_realtime_enabled
+  title: Защита в реальном времени Microsoft Defender включена
+  probe:
+    type: first_of
+    probes:
+    - type: reg_value
+      key: HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection
+      value: DisableRealtimeMonitoring
+    - type: reg_value
+      key: HKLM\SOFTWARE\Microsoft\Windows Defender\Real-Time Protection
+      value: DisableRealtimeMonitoring
+      default: '0'
+  assert:
+    op: eq
+    value: 0
+  severity: high
+  remediation: Не отключать защиту в реальном времени (если установлен сторонний антивирус — проверка неприменима, оформить исключение).
+  refs:
+  - source: CIS Microsoft Windows Server Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.15

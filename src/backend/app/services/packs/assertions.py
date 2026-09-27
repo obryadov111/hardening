@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 Outcome = Literal["pass", "fail", "error"]
 
-OPERATORS = ("eq", "ne", "in", "not_in", "lt", "lte", "gt", "gte", "regex", "exists", "absent", "mode_within")
+OPERATORS = ("eq", "ne", "in", "not_in", "lt", "lte", "gt", "gte", "between", "regex", "exists", "absent", "mode_within")
 NUMERIC_OPERATORS = ("lt", "lte", "gt", "gte")
 LIST_OPERATORS = ("in", "not_in")
 VALUELESS_OPERATORS = ("exists", "absent")
@@ -65,6 +65,15 @@ def check_assertion(actual: object, op: str, expected: Any = None) -> Outcome:
         }[op]
         return "pass" if ok else "fail"
 
+    if op == "between":
+        # Диапазон включительно: [min, max]. Нужен там, где 0 означает «выключено», например
+        # MaximumPasswordAge = 0 — пароль не истекает никогда; простое lte 90 засчитало бы это соблюдением.
+        actual_num = _to_number(actual)
+        low, high = (_to_number(v) for v in expected)
+        if actual_num is None or low is None or high is None:
+            return "error"
+        return "pass" if low <= actual_num <= high else "fail"
+
     if op == "mode_within":
         # Права не шире заданных: каждый установленный бит должен быть разрешён. Числовое lte здесь
         # неверно — 604 (читаемо всеми) меньше 640, но шире него.
@@ -97,5 +106,7 @@ def describe_assertion(op: str, expected: Any = None) -> str:
         return f"{prefix}: {', '.join(str(v) for v in expected)}"
     if op == "mode_within":
         return f"права не шире {expected}"
+    if op == "between":
+        return f"от {expected[0]} до {expected[1]}"
     symbol = {"eq": "=", "ne": "!=", "lt": "<", "lte": "<=", "gt": ">", "gte": ">=", "regex": "~"}[op]
     return f"{symbol} {expected}"

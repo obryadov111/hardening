@@ -183,7 +183,65 @@ def collect_docker_facts() -> dict:
 
 # --- asset / software ------------------------------------------------------
 
+WINDOWS_CURRENT_VERSION = r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+WINDOWS_UNINSTALL_KEYS = (
+    r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+    r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",  # 32-битные программы на 64-битной ОС
+)
+
+
+def get_windows_version() -> str | None:
+    """«Windows Server 2022 Datacenter (21H2, сборка 20348)». У Windows 11 в реестре ProductName по-прежнему
+    «Windows 10» — поэтому по номеру сборки (22000+) название исправляется."""
+    import probes
+
+    name = probes.read_registry(WINDOWS_CURRENT_VERSION, "ProductName")
+    build = probes.read_registry(WINDOWS_CURRENT_VERSION, "CurrentBuildNumber") or probes.read_registry(WINDOWS_CURRENT_VERSION, "CurrentBuild")
+    release = probes.read_registry(WINDOWS_CURRENT_VERSION, "DisplayVersion") or probes.read_registry(WINDOWS_CURRENT_VERSION, "ReleaseId")
+    if not name:
+        return None
+    if str(name).startswith("Windows 10") and build and str(build).isdigit() and int(build) >= 22000:
+        name = "Windows 11" + str(name)[len("Windows 10"):]
+    details = ", ".join(x for x in (release and str(release), build and f"сборка {build}") if x)
+    return f"{name} ({details})" if details else str(name)
+
+
+def collect_windows_software() -> list[dict]:
+    """Установленные программы из разделов Uninstall реестра (как «Программы и компоненты»)."""
+    import winreg
+
+    items, seen = [], set()
+    for path in WINDOWS_UNINSTALL_KEYS:
+        try:
+            root = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY)
+        except OSError:
+            continue
+        with root:
+            for index in range(winreg.QueryInfoKey(root)[0]):
+                try:
+                    with winreg.OpenKey(root, winreg.EnumKey(root, index)) as entry:
+                        def value(name, entry=entry):
+                            try:
+                                return str(winreg.QueryValueEx(entry, name)[0]).strip() or None
+                            except OSError:
+                                return None
+                        name = value("DisplayName")
+                        if not name or value("SystemComponent") == "1":
+                            continue
+                        key = (name, value("DisplayVersion"))
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        items.append({"name": name, "version": key[1], "vendor": value("Publisher"),
+                                      "category": "application", "type": "package"})
+                except OSError:
+                    continue
+    return items
+
+
 def get_os_pretty_name() -> str | None:
+    if os.name == "nt":
+        return get_windows_version()
     os_release = read_file("/etc/os-release")
     if not os_release:
         return None
@@ -204,7 +262,9 @@ def get_primary_ip() -> str | None:
 
 
 def collect_software() -> list[dict]:
-    """dpkg (Debian/Ubuntu) в приоритете, rpm — фолбэк для RHEL-семейства."""
+    """dpkg (Debian/Ubuntu) в приоритете, rpm — фолбэк для RHEL-семейства, на Windows — реестр."""
+    if os.name == "nt":
+        return collect_windows_software()
     dpkg_output = run(["dpkg-query", "-W", "-f=${Package}\t${Version}\t${Source}\n"])
     if dpkg_output is not None:
         items = []
@@ -398,6 +458,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.dry_run and not args.api_key:
         print("Ошибка: нужен --api-key или переменная окружения HARDENING_AGENT_API_KEY", file=sys.stderr)
+        return 1
+
+    if os.name == "nt" and not args.use_packs:
+        # Встроенные проверки старого режима написаны для Linux; на Windows — только паки.
+        print("Ошибка: на Windows агент работает только с паками — добавьте --use-packs", file=sys.stderr)
         return 1
 
     if args.use_packs:

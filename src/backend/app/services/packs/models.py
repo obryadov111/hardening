@@ -191,9 +191,80 @@ class PkgVersionProbe(StrictModel):
         return package
 
 
+# ---------- Windows ----------
+# Источники, не зависящие от языка системы: на русской Windows `net accounts`, `auditpol /get`, `netsh`
+# выводят русский текст, и регулярные выражения по нему ломаются. Поэтому — реестр, экспорт политики
+# безопасности (ключи вида MinimumPasswordLength) и резервная копия политики аудита (GUID и числа).
+
+# Кусты с секретами (хэши паролей, секреты LSA) агенту недоступны в принципе.
+REG_DENIED_RE = re.compile(r"^HKLM\\(SAM|SECURITY)(\\|$)", re.IGNORECASE)
+REG_KEY_RE = re.compile(r"^HKLM(\\[A-Za-z0-9 _.(){}\-]+)+$")
+REG_VALUE_RE = re.compile(r"^[A-Za-z0-9 _.\-]+$")
+SECPOL_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+AUDIT_GUID_RE = re.compile(r"^\{[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}\}$")
+
+
+class RegValueProbe(StrictModel):
+    """Значение реестра Windows (только HKLM). Нет ключа или значения — «не задано» (default), это не
+    ошибка: большинство параметров безопасности задаются только при отклонении от умолчания Windows."""
+
+    type: Literal["reg_value"]
+    key: str
+    value: str
+    default: str | None = None
+
+    @field_validator("key")
+    @classmethod
+    def _key(cls, key: str) -> str:
+        if not REG_KEY_RE.match(key):
+            raise ValueError(f"ключ реестра — HKLM\\путь без специальных символов: {key!r}")
+        if REG_DENIED_RE.match(key):
+            raise ValueError(f"кусты SAM и SECURITY агенту недоступны: {key!r}")
+        return key
+
+    @field_validator("value")
+    @classmethod
+    def _value(cls, value: str) -> str:
+        if not REG_VALUE_RE.match(value):
+            raise ValueError(f"недопустимое имя значения реестра: {value!r}")
+        return value
+
+
+class WinSecpolProbe(StrictModel):
+    """Параметр локальной политики безопасности из `secedit /export` (пароли, блокировка, гостевая учётка).
+    Ключи не зависят от языка системы. Нужны права администратора."""
+
+    type: Literal["win_secpol"]
+    section: Literal["System Access"] = "System Access"
+    key: str
+    default: str | None = None
+
+    @field_validator("key")
+    @classmethod
+    def _key(cls, key: str) -> str:
+        if not SECPOL_KEY_RE.match(key):
+            raise ValueError(f"недопустимый ключ политики: {key!r}")
+        return key
+
+
+class WinAuditpolProbe(StrictModel):
+    """Подкатегория расширенной политики аудита по GUID (`auditpol /backup`): 0 — нет, 1 — успех,
+    2 — отказ, 3 — успех и отказ. GUID и числа не зависят от языка системы. Нужны права администратора."""
+
+    type: Literal["win_auditpol"]
+    subcategory: str
+
+    @field_validator("subcategory")
+    @classmethod
+    def _guid(cls, guid: str) -> str:
+        if not AUDIT_GUID_RE.match(guid):
+            raise ValueError(f"подкатегория аудита — GUID в фигурных скобках: {guid!r}")
+        return guid.upper()
+
+
 LeafProbe = (
     FileKvProbe | FileRegexProbe | FileStatProbe | CmdRegexProbe | CmdForeachProbe | CliConfigProbe | ServiceStateProbe
-    | PkgVersionProbe
+    | PkgVersionProbe | RegValueProbe | WinSecpolProbe | WinAuditpolProbe
 )
 
 
@@ -232,6 +303,12 @@ class Assertion(StrictModel):
             raise ValueError(f"оператору {self.op} нужен непустой список")
         if self.op in NUMERIC_OPERATORS and (isinstance(self.value, bool) or not isinstance(self.value, int | float)):
             raise ValueError(f"оператору {self.op} нужно число")
+        if self.op == "between" and not (
+            isinstance(self.value, list) and len(self.value) == 2
+            and all(isinstance(v, int | float) and not isinstance(v, bool) for v in self.value)
+            and self.value[0] <= self.value[1]
+        ):
+            raise ValueError("оператору between нужен список [min, max] из двух чисел, min <= max")
         if self.op == "regex":
             _validate_regex(str(self.value))
         if self.op == "mode_within" and not (isinstance(self.value, str) and re.fullmatch(r"[0-7]{3,4}", self.value)):

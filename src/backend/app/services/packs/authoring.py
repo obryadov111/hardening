@@ -63,13 +63,15 @@ class Finding:
         return f"[{self.level}] {self.where}: {self.message}"
 
 
-def _local_argvs(probe) -> list[list[str]]:
+def _local_argvs(probe, windows: bool = False) -> list[list[str]]:
     """Команды, которые агент выполнит для пробы на локальном транспорте (для белого списка)."""
     if probe.type == "cmd_regex":
         return [list(probe.cmd)]
     if probe.type == "cmd_foreach":
         return [list(probe.list_cmd), [*probe.item_cmd, SAMPLE_CONTAINER_ID]]
     if probe.type == "service_state":
+        if windows:  # на Windows: работа — `sc query`, автозапуск — из реестра (без команды)
+            return [] if probe.field == "enabled" else [["sc", "query", probe.service]]
         return [["systemctl", "is-enabled" if probe.field == "enabled" else "is-active", probe.service]]
     if probe.type == "pkg_version":
         return [["dpkg-query", "-W", "-f=${Status}|${Version}", probe.package]]
@@ -90,7 +92,12 @@ def _probe_findings(pack: Pack, probe, where: str, agent) -> list[Finding]:
 
     if probe.type == "cli_config":
         findings.append(Finding("error", where, "cli_config выполняется только по SSH, в локальном паке агент её отклонит"))
-    for argv in _local_argvs(probe):
+    windows = "windows" in pack.tags
+    if windows and probe.type in ("file_kv", "file_regex", "file_stat", "pkg_version"):
+        findings.append(Finding("error", where, f"проба {probe.type} рассчитана на Linux, в Windows-паке она не выполнится"))
+    if not windows and probe.type in ("reg_value", "win_secpol", "win_auditpol"):
+        findings.append(Finding("error", where, f"проба {probe.type} выполняется только на Windows — у пака нет тега windows"))
+    for argv in _local_argvs(probe, windows):
         policy = agent.LOCAL_COMMAND_POLICY.get(argv[0])
         if policy is None or not policy.match(" ".join(argv[1:])):
             findings.append(Finding(
@@ -160,8 +167,15 @@ class FixtureHost:
     """Транспорт агента поверх фикстуры. Команды проходят белый список агента, как на хосте:
     фикстура не может «разрешить» то, что агент на хосте не выполнит."""
 
-    def __init__(self, agent, transport: str, files=None, stats=None, commands=None, cli=None):
+    def __init__(self, agent, transport: str, files=None, stats=None, commands=None, cli=None,
+                 platform="posix", registry=None, secpol=None, auditpol=None):
         self.agent, self.name = agent, transport
+        # Windows: реестр {"HKLM\\…\\Ключ\\Значение": значение}, политика безопасности {ключ: значение}
+        # (раздел System Access), аудит {GUID: 0–3}. Запреты агента (SAM/SECURITY) действуют и здесь.
+        self.platform = platform
+        self.registry = {k.upper(): v for k, v in (registry or {}).items()}
+        self.secpol_values = None if secpol is None else {k: str(v) for k, v in secpol.items()}
+        self.auditpol_values = None if auditpol is None else {k.upper(): int(v) for k, v in auditpol.items()}
         self.files = dict(files or {})
         self.stats = dict(stats or {})
         self.commands = {k: _command_output(v) for k, v in (commands or {}).items()}
@@ -195,6 +209,23 @@ class FixtureHost:
             raise self.agent.ProbeError(f"команда {argv[0]} не найдена")
         return self.agent.CmdOutput(*out)
 
+    def read_registry(self, key, name):
+        if self.agent.REG_DENIED.match(key):
+            raise self.agent.ProbeError(f"чтение {key} запрещено политикой агента")
+        if self.platform != "windows":
+            raise self.agent.ProbeError("реестр доступен только на Windows")
+        return self.registry.get(f"{key}\\{name}".upper())
+
+    def secpol(self):
+        if self.platform != "windows" or self.secpol_values is None:
+            raise self.agent.ProbeError("экспорт политики безопасности недоступен (нет в фикстуре или не Windows)")
+        return {"System Access": self.secpol_values}
+
+    def auditpol(self):
+        if self.platform != "windows" or self.auditpol_values is None:
+            raise self.agent.ProbeError("политика аудита недоступна (нет в фикстуре или не Windows)")
+        return self.auditpol_values
+
     def run_cli(self, command):
         if self.name != "ssh":
             raise self.agent.ProbeError("cli_config недоступна на локальном транспорте")
@@ -209,8 +240,21 @@ def _command_output(value) -> tuple[str, str, int]:
     return value.get("stdout", ""), value.get("stderr", ""), int(value.get("code", 0))
 
 
+_MERGED_KEYS = ("files", "stats", "commands", "cli", "registry", "secpol", "auditpol")
+
+
 def _merge(base: dict, case: dict) -> dict:
-    merged = {key: {**(base.get(key) or {}), **(case.get(key) or {})} for key in ("files", "stats", "commands", "cli")}
+    merged = {key: {**(base.get(key) or {}), **(case.get(key) or {})} for key in _MERGED_KEYS}
+    for key in ("secpol", "auditpol"):  # отсутствие в фикстуре = «недоступно» (как без прав администратора)
+        if key not in base and key not in case:
+            merged[key] = None
+    for name in case.get("drop_registry") or []:
+        merged["registry"].pop(name, None)
+    for key in case.get("unavailable") or []:  # например, агент без прав администратора: secpol, auditpol
+        if key not in ("secpol", "auditpol"):
+            raise PackError(f"unavailable: только secpol и auditpol, а не {key!r}")
+        merged[key] = None
+    merged["platform"] = case.get("platform") or base.get("platform") or "posix"
     for path in case.get("drop") or []:
         for key in ("files", "stats"):
             merged[key].pop(path, None)
@@ -299,3 +343,50 @@ def run_fixtures(directory: Path = FIXTURES_DIR, packs_dir: Path = PACKS_DIR) ->
 
     registry, agent = load_registry(packs_dir), load_agent_probes()
     return [run_fixture(path, registry, agent) for path in sorted(directory.glob("*.yaml"))]
+
+
+# ============================== прогон на этой машине ==============================
+
+@dataclass
+class LiveCheck:
+    check_id: str
+    status: str
+    value: str | None
+    evidence: str | None
+    error: str | None
+
+
+@dataclass
+class LivePack:
+    pack: str
+    version: str
+    detected: bool
+    checks: list[LiveCheck] = field(default_factory=list)
+
+    @property
+    def not_executed(self) -> list[LiveCheck]:
+        """Пробы, которые не выполнились (found=False): неверный путь реестра, неизвестный GUID, нет прав."""
+        return [c for c in self.checks if c.error]
+
+
+def run_live(registry: PackRegistry, pack_ids: list[str] | None = None, agent=None) -> list[LivePack]:
+    """Паки на ЭТОЙ машине настоящими пробами агента (только чтение) и оценка сервера. Для проверки паков на
+    реальной ОС: распознана ли платформа и выполнилась ли каждая проба. Пак, который платформе не подошёл,
+    всё равно прогоняется, если назван явно (pack_ids) — чтобы увидеть, какие пробы на этой ОС не работают."""
+    agent = agent or load_agent_probes()
+    transport = agent.LocalTransport()
+    packs = [registry.get(pid) for pid in pack_ids] if pack_ids else registry.latest("local")
+    results = []
+    for pack in packs:
+        if pack is None:
+            raise PackError("пак не найден")
+        manifest = build_manifest(pack)
+        detected = agent.matches_detect(transport, manifest["detect"])
+        live = LivePack(pack.pack, pack.version, detected)
+        if detected or pack_ids:
+            raw = agent.run_manifest(transport, manifest)
+            for result in evaluate_pack(pack, {k: SimpleNamespace(**v) for k, v in raw.items()}):
+                live.checks.append(LiveCheck(result.check_id, result.status, result.actual_value, result.evidence,
+                                             raw[result.check_id].get("error")))
+        results.append(live)
+    return results

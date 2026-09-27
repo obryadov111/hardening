@@ -1,0 +1,272 @@
+# Образцы для пака windows-client: реестр, экспорт политики безопасности (secedit), политика аудита
+# (auditpol /backup, GUID -> 0..3), вывод sc query. Значения заданы явно, как на реальной системе;
+# прогон на настоящих Windows Server 2022/2025 — в CI (.github/workflows).
+pack: windows-client
+base:
+  platform: windows
+  registry:
+    HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\InstallationType: Client
+    HKLM\SYSTEM\CurrentControlSet\Control\Lsa\RestrictAnonymousSAM: 1
+    HKLM\SYSTEM\CurrentControlSet\Control\Lsa\RestrictAnonymous: 1
+    HKLM\SYSTEM\CurrentControlSet\Control\Lsa\LmCompatibilityLevel: 5
+    HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters\RestrictNullSessAccess: 1
+    HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters\SMB1: 0
+    HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters\RequireSecuritySignature: 1
+    HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters\RequireSecuritySignature: 1
+    HKLM\SYSTEM\CurrentControlSet\Services\mrxsmb10\Start: 4
+    HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\EnableLUA: 1
+    HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient\EnableMulticast: 0
+    HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest\UseLogonCredential: 0
+    HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp\UserAuthentication: 1
+    HKLM\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\DomainProfile\EnableFirewall: 1
+    HKLM\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\StandardProfile\EnableFirewall: 1
+    HKLM\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\PublicProfile\EnableFirewall: 1
+    HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer\NoDriveTypeAutoRun: 255
+    HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer\NoAutorun: 1
+    HKLM\SYSTEM\CurrentControlSet\Services\RemoteRegistry\Start: 4
+    HKLM\SYSTEM\CurrentControlSet\Services\Spooler\Start: 4
+    HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU\NoAutoUpdate: 0
+    HKLM\SOFTWARE\Microsoft\Windows Defender\Real-Time Protection\DisableRealtimeMonitoring: 0
+  secpol:
+    MinimumPasswordLength: 14
+    PasswordComplexity: 1
+    MaximumPasswordAge: 60
+    MinimumPasswordAge: 1
+    PasswordHistorySize: 24
+    ClearTextPassword: 0
+    LockoutBadCount: 5
+    LockoutDuration: 15
+    EnableGuestAccount: 0
+    LSAAnonymousNameLookup: 0
+  auditpol:
+    '{0CCE9215-69AE-11D9-BED3-505054503030}': 3
+    '{0CCE9217-69AE-11D9-BED3-505054503030}': 2
+    '{0CCE923F-69AE-11D9-BED3-505054503030}': 3
+    '{0CCE9235-69AE-11D9-BED3-505054503030}': 3
+    '{0CCE922F-69AE-11D9-BED3-505054503030}': 1
+    '{0CCE922B-69AE-11D9-BED3-505054503030}': 1
+  commands:
+    sc query EventLog: "SERVICE_NAME: EventLog\n        TYPE               : 20  WIN32_SHARE_PROCESS\n        STATE              : 4  RUNNING\n"
+    sc query TlntSvr: &id001
+      stdout: '[SC] EnumQueryServicesStatus:OpenService FAILED 1060:
+
+        '
+      code: 1060
+    sc query ftpsvc: *id001
+cases:
+- name: укреплённая система — всё соблюдено
+  detect: true
+  expect:
+    win.password_min_length: pass
+    win.password_complexity: pass
+    win.password_max_age: pass
+    win.password_min_age: pass
+    win.password_history: pass
+    win.reversible_encryption_disabled: pass
+    win.lockout_threshold: pass
+    win.lockout_duration: pass
+    win.guest_disabled: pass
+    win.anonymous_sid_translation_disabled: pass
+    win.restrict_anonymous_sam: pass
+    win.restrict_anonymous: pass
+    win.null_session_shares_restricted: pass
+    win.uac_enabled: pass
+    win.ntlmv1_refused: pass
+    win.smb1_client_disabled: pass
+    win.smb1_server_disabled: pass
+    win.smb_server_signing_required: pass
+    win.smb_client_signing_required: pass
+    win.llmnr_disabled: pass
+    win.wdigest_disabled: pass
+    win.rdp_nla_required: pass
+    win.firewall_domain_enabled: pass
+    win.firewall_private_enabled: pass
+    win.firewall_public_enabled: pass
+    win.autorun_disabled_all_drives: pass
+    win.autorun_commands_disabled: pass
+    win.eventlog_running: pass
+    win.audit_logon: pass
+    win.audit_account_lockout: pass
+    win.audit_credential_validation: pass
+    win.audit_user_account_management: pass
+    win.audit_policy_change: pass
+    win.audit_process_creation: pass
+    win.telnet_server_absent: pass
+    win.ftp_server_absent: pass
+    win.remote_registry_disabled: pass
+    win.automatic_updates_enabled: pass
+    win.defender_realtime_enabled: pass
+- name: слабая система — нарушено всё
+  registry:
+    HKLM\SYSTEM\CurrentControlSet\Control\Lsa\RestrictAnonymousSAM: 0
+    HKLM\SYSTEM\CurrentControlSet\Control\Lsa\RestrictAnonymous: 0
+    HKLM\SYSTEM\CurrentControlSet\Control\Lsa\LmCompatibilityLevel: 1
+    HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters\RestrictNullSessAccess: 0
+    HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters\SMB1: 1
+    HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters\RequireSecuritySignature: 0
+    HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters\RequireSecuritySignature: 0
+    HKLM\SYSTEM\CurrentControlSet\Services\mrxsmb10\Start: 2
+    HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\EnableLUA: 0
+    HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient\EnableMulticast: 1
+    HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest\UseLogonCredential: 1
+    HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp\UserAuthentication: 0
+    HKLM\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\DomainProfile\EnableFirewall: 0
+    HKLM\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\StandardProfile\EnableFirewall: 0
+    HKLM\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\PublicProfile\EnableFirewall: 0
+    HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer\NoDriveTypeAutoRun: 145
+    HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer\NoAutorun: 0
+    HKLM\SYSTEM\CurrentControlSet\Services\RemoteRegistry\Start: 2
+    HKLM\SYSTEM\CurrentControlSet\Services\Spooler\Start: 2
+    HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU\NoAutoUpdate: 1
+    HKLM\SOFTWARE\Microsoft\Windows Defender\Real-Time Protection\DisableRealtimeMonitoring: 1
+  secpol:
+    MinimumPasswordLength: 7
+    PasswordComplexity: 0
+    MaximumPasswordAge: 0
+    MinimumPasswordAge: 0
+    PasswordHistorySize: 0
+    ClearTextPassword: 1
+    LockoutBadCount: 0
+    LockoutDuration: 5
+    EnableGuestAccount: 1
+    LSAAnonymousNameLookup: 1
+  auditpol:
+    '{0CCE9215-69AE-11D9-BED3-505054503030}': 1
+    '{0CCE9217-69AE-11D9-BED3-505054503030}': 1
+    '{0CCE923F-69AE-11D9-BED3-505054503030}': 0
+    '{0CCE9235-69AE-11D9-BED3-505054503030}': 0
+    '{0CCE922F-69AE-11D9-BED3-505054503030}': 0
+    '{0CCE922B-69AE-11D9-BED3-505054503030}': 0
+  commands:
+    sc query EventLog: "SERVICE_NAME: EventLog\n        TYPE               : 20  WIN32_SHARE_PROCESS\n        STATE              : 1  STOPPED\n"
+    sc query TlntSvr: "SERVICE_NAME: TlntSvr\n        TYPE               : 20  WIN32_SHARE_PROCESS\n        STATE              : 4  RUNNING\n"
+    sc query ftpsvc: "SERVICE_NAME: ftpsvc\n        TYPE               : 20  WIN32_SHARE_PROCESS\n        STATE              : 4  RUNNING\n"
+  expect:
+    win.password_min_length: fail
+    win.password_complexity: fail
+    win.password_max_age: fail
+    win.password_min_age: fail
+    win.password_history: fail
+    win.reversible_encryption_disabled: fail
+    win.lockout_threshold: fail
+    win.lockout_duration: fail
+    win.guest_disabled: fail
+    win.anonymous_sid_translation_disabled: fail
+    win.restrict_anonymous_sam: fail
+    win.restrict_anonymous: fail
+    win.null_session_shares_restricted: fail
+    win.uac_enabled: fail
+    win.ntlmv1_refused: fail
+    win.smb1_client_disabled: fail
+    win.smb1_server_disabled: fail
+    win.smb_server_signing_required: fail
+    win.smb_client_signing_required: fail
+    win.llmnr_disabled: fail
+    win.wdigest_disabled: fail
+    win.rdp_nla_required: fail
+    win.firewall_domain_enabled: fail
+    win.firewall_private_enabled: fail
+    win.firewall_public_enabled: fail
+    win.autorun_disabled_all_drives: fail
+    win.autorun_commands_disabled: fail
+    win.eventlog_running: fail
+    win.audit_logon: fail
+    win.audit_account_lockout: fail
+    win.audit_credential_validation: fail
+    win.audit_user_account_management: fail
+    win.audit_policy_change: fail
+    win.audit_process_creation: fail
+    win.telnet_server_absent: fail
+    win.ftp_server_absent: fail
+    win.remote_registry_disabled: fail
+    win.automatic_updates_enabled: fail
+    win.defender_realtime_enabled: fail
+- name: 'групповая политика главнее локальной настройки: политика выключила брандмауэр'
+  registry:
+    HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\DomainProfile\EnableFirewall: 0
+  expect:
+    win.firewall_domain_enabled: fail
+- name: 'групповая политика главнее локальной настройки: политика включила брандмауэр'
+  registry:
+    HKLM\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\PublicProfile\EnableFirewall: 0
+    HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\PublicProfile\EnableFirewall: 1
+  expect:
+    win.firewall_public_enabled: pass
+- name: чистая установка — только умолчания Windows (параметры не заданы в реестре)
+  drop_registry:
+  - HKLM\SYSTEM\CurrentControlSet\Control\Lsa\RestrictAnonymousSAM
+  - HKLM\SYSTEM\CurrentControlSet\Control\Lsa\RestrictAnonymous
+  - HKLM\SYSTEM\CurrentControlSet\Control\Lsa\LmCompatibilityLevel
+  - HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters\RestrictNullSessAccess
+  - HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters\SMB1
+  - HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters\RequireSecuritySignature
+  - HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters\RequireSecuritySignature
+  - HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\EnableLUA
+  - HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient\EnableMulticast
+  - HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest\UseLogonCredential
+  - HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp\UserAuthentication
+  - HKLM\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\DomainProfile\EnableFirewall
+  - HKLM\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\StandardProfile\EnableFirewall
+  - HKLM\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\PublicProfile\EnableFirewall
+  - HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer\NoDriveTypeAutoRun
+  - HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer\NoAutorun
+  - HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU\NoAutoUpdate
+  - HKLM\SOFTWARE\Microsoft\Windows Defender\Real-Time Protection\DisableRealtimeMonitoring
+  expect:
+    win.restrict_anonymous_sam: pass
+    win.restrict_anonymous: fail
+    win.ntlmv1_refused: fail
+    win.smb1_server_disabled: fail
+    win.uac_enabled: pass
+    win.llmnr_disabled: fail
+    win.wdigest_disabled: pass
+    win.rdp_nla_required: pass
+    win.firewall_public_enabled: pass
+    win.autorun_disabled_all_drives: fail
+    win.autorun_commands_disabled: fail
+    win.automatic_updates_enabled: pass
+    win.defender_realtime_enabled: pass
+    win.smb_server_signing_required: fail
+    win.null_session_shares_restricted: pass
+- name: SMBv1 не установлен (нет драйвера mrxsmb10) — соблюдение, а не «не проверено»
+  drop_registry:
+  - HKLM\SYSTEM\CurrentControlSet\Services\mrxsmb10\Start
+  expect:
+    win.smb1_client_disabled: pass
+- name: агент без прав администратора — политики паролей и аудита «не проверено», а не «соблюдено»
+  unavailable:
+  - secpol
+  - auditpol
+  expect:
+    win.password_min_length: error
+    win.password_complexity: error
+    win.password_max_age: error
+    win.password_min_age: error
+    win.password_history: error
+    win.reversible_encryption_disabled: error
+    win.lockout_threshold: error
+    win.lockout_duration: error
+    win.guest_disabled: error
+    win.anonymous_sid_translation_disabled: error
+    win.audit_logon: error
+    win.audit_account_lockout: error
+    win.audit_credential_validation: error
+    win.audit_user_account_management: error
+    win.audit_policy_change: error
+    win.audit_process_creation: error
+- name: порог блокировки 0 («никогда не блокировать») — нарушение, а не «соблюдено»
+  secpol:
+    LockoutBadCount: 0
+  expect:
+    win.lockout_threshold: fail
+- name: Server Core не распознаётся как рабочая станция
+  registry:
+    HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\InstallationType: Server Core
+  detect: false
+- name: Windows Server не распознаётся как рабочая станция
+  registry:
+    HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\InstallationType: Server
+  detect: false
+- name: Linux — Windows-пак не применяется
+  platform: posix
+  detect: false
