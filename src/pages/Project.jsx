@@ -51,7 +51,7 @@ export default function Project() {
     return (
       <div className="space-y-6">
         <h1 className="text-2xl font-semibold text-white">Инфраструктура</h1>
-        <ErrorState title="Ошибка подключения к БД" description={orgError} />
+        <ErrorState title="Не удалось загрузить организации" description={orgError} />
       </div>
     );
   }

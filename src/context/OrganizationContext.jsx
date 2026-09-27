@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { getOrganizations } from "../api/organizations";
+import { onClientAuthStateChange } from "../api/client";
 
 const OrganizationContext = createContext(null);
 const STORAGE_KEY = "selected_organization_id";
@@ -12,13 +13,20 @@ export function OrganizationProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // Организации грузятся по состоянию входа, а не один раз при старте: провайдер
+  // живёт выше /login, и раньше запрос до входа получал 403, ошибка запоминалась и
+  // после успешного входа страницы показывали её вместо данных.
   useEffect(() => {
+    let requestId = 0;
+
     async function loadOrganizations() {
+      const current = ++requestId;
       try {
         setLoading(true);
         setError("");
 
         const rows = await getOrganizations();
+        if (current !== requestId) return;
         setOrganizations(rows);
 
         if (!rows.length) {
@@ -38,16 +46,31 @@ export function OrganizationProvider({ children }) {
           localStorage.setItem(STORAGE_KEY, firstId);
         }
       } catch (err) {
+        if (current !== requestId) return;
         console.error("Ошибка загрузки организаций:", err);
         setOrganizations([]);
         setSelectedOrganizationId(null);
         setError(err?.message || "Не удалось загрузить организации");
       } finally {
-        setLoading(false);
+        if (current === requestId) setLoading(false);
       }
     }
 
-    loadOrganizations();
+    const subscription = onClientAuthStateChange((_event, session) => {
+      if (session) {
+        loadOrganizations();
+        return;
+      }
+      requestId++;
+      setOrganizations([]);
+      setError("");
+      setLoading(false);
+    });
+
+    return () => {
+      requestId++;
+      subscription.data.subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
