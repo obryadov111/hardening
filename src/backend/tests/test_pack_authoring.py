@@ -177,3 +177,11 @@ def test_fixture_with_unknown_pack_or_without_cases_is_an_error(tmp_path):
         run_fixture(fixture(tmp_path, "pack: no-such-pack\ncases: [{name: x}]\n"), REGISTRY)
     with pytest.raises(PackError, match="нужны ключи"):
         run_fixture(fixture(tmp_path, "pack: docker\n"), REGISTRY)
+
+
+def test_validator_allows_file_stat_on_secret_files_but_not_reading_them(tmp_path):
+    """Права /etc/shadow проверять можно (file_stat не читает содержимое), читать его — нельзя."""
+    stat_check = {**GOOD_CHECK, "probe": {"type": "file_stat", "path": "/etc/shadow", "field": "mode"},
+                  "assert": {"op": "mode_within", "value": "640"}}
+    write_pack(tmp_path, "t-pack-1.0.0.yaml", [stat_check])
+    assert validate_directory(tmp_path) == []

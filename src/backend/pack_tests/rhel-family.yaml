@@ -1,0 +1,507 @@
+# Образцы для пака rhel-family. Файлы — реальные умолчания, снятые 2026-09-27 с официальных образов Rocky 8/9,
+# AlmaLinux 9, Oracle Linux 9, CentOS Stream 9, РЕД ОС 7.3 и 8 (после установки openssh-server, audit, firewalld,
+# libpwquality, dnf-automatic, crypto-policies, selinux-policy). Живой прогон агента в этих контейнерах — см. заголовок пака.
+pack: rhel-family
+base:
+  files:
+    /etc/os-release: 'NAME="Rocky Linux"
+
+      ID="rocky"
+
+      ID_LIKE="rhel centos fedora"
+
+      VERSION_ID="9.3"
+
+      '
+    /etc/ssh/sshd_config: "Include /etc/ssh/sshd_config.d/*.conf\nAuthorizedKeysFile\t.ssh/authorized_keys\n"
+    /etc/ssh/sshd_config.d/10-hardening.conf: 'PermitRootLogin no
+
+      PasswordAuthentication no
+
+      X11Forwarding no
+
+      MaxAuthTries 4
+
+      '
+    /etc/ssh/sshd_config.d/50-redhat.conf: 'Include /etc/crypto-policies/back-ends/opensshserver.config
+
+      SyslogFacility AUTHPRIV
+
+      ChallengeResponseAuthentication no
+
+      GSSAPIAuthentication yes
+
+      UsePAM yes
+
+      X11Forwarding yes
+
+      PrintMotd no
+
+      '
+    /etc/crypto-policies/back-ends/opensshserver.config: 'Ciphers aes256-gcm@openssh.com,chacha20-poly1305@openssh.com
+
+      '
+    /etc/login.defs: "PASS_MAX_DAYS\t90\nPASS_MIN_DAYS\t1\n"
+    /etc/security/pwquality.conf: 'minlen = 14
+
+      '
+    /etc/pam.d/system-auth: 'auth        required      pam_env.so
+
+      auth        required      pam_faillock.so preauth silent
+
+      auth        sufficient    pam_unix.so try_first_pass nullok
+
+      auth        [default=die] pam_faillock.so authfail
+
+      auth        required      pam_deny.so
+
+      account     required      pam_faillock.so
+
+      account     required      pam_unix.so
+
+      password    requisite     pam_pwquality.so try_first_pass local_users_only retry=3 authtok_type=
+
+      password    sufficient    pam_unix.so try_first_pass use_authtok nullok sha512 shadow
+
+      password    required      pam_deny.so
+
+      '
+    /etc/pam.d/password-auth: 'auth        required      pam_env.so
+
+      auth        required      pam_faillock.so preauth silent
+
+      auth        sufficient    pam_unix.so try_first_pass nullok
+
+      auth        [default=die] pam_faillock.so authfail
+
+      auth        required      pam_deny.so
+
+      account     required      pam_faillock.so
+
+      account     required      pam_unix.so
+
+      password    requisite     pam_pwquality.so try_first_pass local_users_only retry=3 authtok_type=
+
+      password    sufficient    pam_unix.so try_first_pass use_authtok nullok sha512 shadow
+
+      password    required      pam_deny.so
+
+      '
+    /proc/sys/net/ipv4/ip_forward: '0
+
+      '
+    /etc/selinux/config: 'SELINUX=enforcing
+
+      SELINUXTYPE=targeted
+
+      '
+    /etc/crypto-policies/config: 'DEFAULT
+
+      '
+  stats:
+    /etc/shadow: '0'
+  commands:
+    systemctl is-active firewalld:
+      stdout: 'active
+
+        '
+      stderr: ''
+      code: 0
+    systemctl is-enabled dnf-automatic-install.timer:
+      stdout: 'enabled
+
+        '
+      stderr: ''
+      code: 0
+    systemctl is-active auditd:
+      stdout: 'active
+
+        '
+      stderr: ''
+      code: 0
+    systemctl is-active telnet.socket:
+      stdout: 'inactive
+
+        '
+      stderr: ''
+      code: 3
+    getenforce:
+      stdout: 'Enforcing
+
+        '
+      stderr: ''
+      code: 0
+cases:
+- name: укреплённая система — всё соблюдено
+  detect: true
+  expect:
+    ssh.permit_root_login: pass
+    ssh.password_authentication: pass
+    ssh.permit_empty_passwords: pass
+    ssh.x11_forwarding: pass
+    ssh.max_auth_tries: pass
+    firewall.firewalld_active: pass
+    updates.dnf_automatic_install_enabled: pass
+    password_policy.pass_max_days: pass
+    password_policy.pass_min_len: pass
+    password_policy.pwquality_enabled: pass
+    password_policy.lockout_on_failure: pass
+    password_policy.lockout_on_failure_remote: pass
+    files.shadow_permissions: pass
+    kernel.ip_forward: pass
+    logging.auditd_active: pass
+    services.telnet_inactive: pass
+    selinux.enforcing_configured: pass
+    selinux.enforcing_runtime: pass
+    crypto.policy_not_legacy: pass
+- name: как поставляется Rocky 9 (умолчания пакетов, сняты с официального образа) + ослабления — нарушено всё
+  files:
+    /etc/ssh/sshd_config.d/10-hardening.conf: 'PermitEmptyPasswords yes
+
+      '
+    /etc/login.defs: "PASS_MAX_DAYS\t99999\nPASS_MIN_DAYS\t0\n"
+    /etc/security/pwquality.conf: '# minlen = 8
+
+      '
+    /etc/pam.d/system-auth: 'auth        required      pam_env.so
+
+      auth        sufficient    pam_unix.so try_first_pass nullok
+
+      auth        required      pam_deny.so
+
+      account     required      pam_unix.so
+
+      password    requisite     pam_pwhistory.so try_first_pass local_users_only retry=3 authtok_type=
+
+      password    sufficient    pam_unix.so try_first_pass use_authtok nullok sha512 shadow
+
+      password    required      pam_deny.so
+
+      session     required      pam_unix.so
+
+      '
+    /etc/pam.d/password-auth: 'auth        required      pam_env.so
+
+      auth        sufficient    pam_unix.so try_first_pass nullok
+
+      auth        required      pam_deny.so
+
+      account     required      pam_unix.so
+
+      password    requisite     pam_pwquality.so try_first_pass local_users_only retry=3 authtok_type=
+
+      password    sufficient    pam_unix.so try_first_pass use_authtok nullok sha512 shadow
+
+      password    required      pam_deny.so
+
+      session     required      pam_unix.so
+
+      '
+    /proc/sys/net/ipv4/ip_forward: '1
+
+      '
+    /etc/selinux/config: 'SELINUX=permissive
+
+      '
+    /etc/crypto-policies/config: 'LEGACY
+
+      '
+  stats:
+    /etc/shadow: '640'
+  commands:
+    systemctl is-active firewalld:
+      stdout: 'inactive
+
+        '
+      stderr: ''
+      code: 3
+    systemctl is-enabled dnf-automatic-install.timer:
+      stdout: 'disabled
+
+        '
+      stderr: ''
+      code: 1
+    systemctl is-active auditd:
+      stdout: 'inactive
+
+        '
+      stderr: ''
+      code: 3
+    systemctl is-active telnet.socket:
+      stdout: 'active
+
+        '
+      stderr: ''
+      code: 0
+    getenforce:
+      stdout: 'Permissive
+
+        '
+      stderr: ''
+      code: 0
+  expect:
+    ssh.permit_root_login: fail
+    ssh.password_authentication: fail
+    ssh.permit_empty_passwords: fail
+    ssh.x11_forwarding: fail
+    ssh.max_auth_tries: fail
+    firewall.firewalld_active: fail
+    updates.dnf_automatic_install_enabled: fail
+    password_policy.pass_max_days: fail
+    password_policy.pass_min_len: fail
+    password_policy.pwquality_enabled: fail
+    password_policy.lockout_on_failure: fail
+    password_policy.lockout_on_failure_remote: fail
+    files.shadow_permissions: fail
+    kernel.ip_forward: fail
+    logging.auditd_active: fail
+    services.telnet_inactive: fail
+    selinux.enforcing_configured: fail
+    selinux.enforcing_runtime: fail
+    crypto.policy_not_legacy: fail
+- name: 'Rocky 9 / Oracle 9 / CentOS Stream 9 / РЕД ОС 8 как поставляются: вход под root по ключу (prohibit-password — умолчание OpenSSH)'
+  drop:
+  - /etc/ssh/sshd_config.d/10-hardening.conf
+  expect:
+    ssh.permit_root_login: fail
+    ssh.x11_forwarding: fail
+    ssh.password_authentication: fail
+    ssh.max_auth_tries: fail
+- name: 'Rocky 8 как поставляется: PermitRootLogin yes прямо в sshd_config, без Include'
+  files:
+    /etc/ssh/sshd_config: 'SyslogFacility AUTHPRIV
+
+      PermitRootLogin yes
+
+      PasswordAuthentication yes
+
+      X11Forwarding yes
+
+      '
+  drop:
+  - /etc/ssh/sshd_config.d/10-hardening.conf
+  expect:
+    ssh.permit_root_login: fail
+    ssh.password_authentication: fail
+- name: 'AlmaLinux 9: PermitRootLogin yes в sshd_config.d/25-permitrootlogin.conf (раньше 50-redhat.conf — первым и побеждает)'
+  files:
+    /etc/ssh/sshd_config.d/25-permitrootlogin.conf: 'PermitRootLogin yes
+
+      '
+  drop:
+  - /etc/ssh/sshd_config.d/10-hardening.conf
+  expect:
+    ssh.permit_root_login: fail
+- name: укреплённый 10-*.conf раньше дистрибутивного 25-permitrootlogin.conf — побеждает первый (соблюдено)
+  files:
+    /etc/ssh/sshd_config.d/25-permitrootlogin.conf: 'PermitRootLogin yes
+
+      '
+  expect:
+    ssh.permit_root_login: pass
+- name: 'РЕД ОС 7.3: Include в КОНЦЕ sshd_config, PermitRootLogin yes в 50-redos.conf'
+  files:
+    /etc/os-release: 'NAME="RED OS"
+
+      ID="redos"
+
+      ID_LIKE="rhel centos fedora"
+
+      VERSION_ID="7.3"
+
+      '
+    /etc/ssh/sshd_config: "AuthorizedKeysFile\t.ssh/authorized_keys\nInclude /etc/ssh/sshd_config.d/*.conf\n"
+    /etc/ssh/sshd_config.d/50-redos.conf: 'SyslogFacility AUTHPRIV
+
+      PermitRootLogin yes
+
+      PasswordAuthentication yes
+
+      X11Forwarding yes
+
+      '
+  drop:
+  - /etc/ssh/sshd_config.d/10-hardening.conf
+  - /etc/ssh/sshd_config.d/50-redhat.conf
+  detect: true
+  expect:
+    ssh.permit_root_login: fail
+    ssh.password_authentication: fail
+- name: 'pam_faillock только в system-auth: вход по SSH (password-auth) не защищён'
+  files:
+    /etc/pam.d/password-auth: 'auth        required      pam_env.so
+
+      auth        sufficient    pam_unix.so try_first_pass nullok
+
+      auth        required      pam_deny.so
+
+      account     required      pam_unix.so
+
+      password    requisite     pam_pwquality.so try_first_pass local_users_only retry=3 authtok_type=
+
+      password    sufficient    pam_unix.so try_first_pass use_authtok nullok sha512 shadow
+
+      password    required      pam_deny.so
+
+      session     required      pam_unix.so
+
+      '
+  expect:
+    password_policy.lockout_on_failure: pass
+    password_policy.lockout_on_failure_remote: fail
+- name: подполитика SHA1 поверх DEFAULT — тоже устаревшие алгоритмы
+  files:
+    /etc/crypto-policies/config: 'DEFAULT:SHA1
+
+      '
+  expect:
+    crypto.policy_not_legacy: fail
+- name: без systemd (контейнер, сбой шины) — службы «не проверено», а не «соблюдено»/«нарушено»
+  commands:
+    systemctl is-active firewalld: &id001
+      stdout: ''
+      stderr: 'System has not been booted with systemd as init system (PID 1). Can''t operate.
+
+        Failed to connect to bus: Host is down
+
+        '
+      code: 1
+    systemctl is-active auditd: *id001
+    systemctl is-active telnet.socket: *id001
+  expect:
+    firewall.firewalld_active: error
+    logging.auditd_active: error
+    services.telnet_inactive: error
+- name: 'служба не установлена (юнита нет): Telnet — соблюдено, auditd — нарушено'
+  commands:
+    systemctl is-active auditd:
+      stdout: ''
+      stderr: 'Unit auditd.service could not be found.
+
+        '
+      code: 4
+    systemctl is-active telnet.socket:
+      stdout: ''
+      stderr: 'Unit telnet.socket could not be found.
+
+        '
+      code: 4
+  expect:
+    logging.auditd_active: fail
+    services.telnet_inactive: pass
+- name: 'распознаётся: Rocky 9'
+  files:
+    /etc/os-release: 'NAME="Rocky Linux"
+
+      ID="rocky"
+
+      ID_LIKE="rhel centos fedora"
+
+      VERSION_ID="9.3"
+
+      '
+  detect: true
+- name: 'распознаётся: Rocky 8'
+  files:
+    /etc/os-release: 'NAME="Rocky Linux"
+
+      ID="rocky"
+
+      ID_LIKE="rhel centos fedora"
+
+      VERSION_ID="8.9"
+
+      '
+  detect: true
+- name: 'распознаётся: AlmaLinux 9'
+  files:
+    /etc/os-release: 'NAME="AlmaLinux"
+
+      ID="almalinux"
+
+      ID_LIKE="rhel centos fedora"
+
+      '
+  detect: true
+- name: 'распознаётся: Oracle Linux 9'
+  files:
+    /etc/os-release: 'NAME="Oracle Linux Server"
+
+      ID="ol"
+
+      ID_LIKE="fedora"
+
+      '
+  detect: true
+- name: 'распознаётся: CentOS Stream 9'
+  files:
+    /etc/os-release: 'NAME="CentOS Stream"
+
+      ID="centos"
+
+      ID_LIKE="rhel fedora"
+
+      '
+  detect: true
+- name: 'распознаётся: РЕД ОС 8'
+  files:
+    /etc/os-release: 'NAME="RED OS"
+
+      ID="redos"
+
+      ID_LIKE="rhel centos fedora"
+
+      VERSION_ID="8.0"
+
+      '
+  detect: true
+- name: 'распознаётся: РЕД ОС 7.3'
+  files:
+    /etc/os-release: 'NAME="RED OS"
+
+      ID="redos"
+
+      ID_LIKE="rhel centos fedora"
+
+      VERSION_ID="7.3"
+
+      '
+  detect: true
+- name: 'распознаётся: RHEL 9'
+  files:
+    /etc/os-release: 'NAME="Red Hat Enterprise Linux"
+
+      ID="rhel"
+
+      ID_LIKE="fedora"
+
+      '
+  detect: true
+- name: 'не распознаётся: Ubuntu 24.04'
+  files:
+    /etc/os-release: 'ID=ubuntu
+
+      ID_LIKE=debian
+
+      '
+  detect: false
+- name: 'не распознаётся: Debian 12'
+  files:
+    /etc/os-release: 'ID=debian
+
+      '
+  detect: false
+- name: 'не распознаётся: Astra Linux'
+  files:
+    /etc/os-release: 'ID=astra
+
+      ID_LIKE=debian
+
+      '
+  detect: false
+- name: 'не распознаётся: Fedora (рабочая станция, без ID_LIKE)'
+  files:
+    /etc/os-release: 'ID=fedora
+
+      '
+  detect: false

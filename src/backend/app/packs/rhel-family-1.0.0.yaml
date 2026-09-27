@@ -1,0 +1,230 @@
+# Пак «Семейство RHEL»: Red Hat Enterprise Linux, Rocky Linux, AlmaLinux, Oracle Linux, CentOS Stream,
+# РЕД ОС (7.3 МУРОМ, 8). Распознаётся по ID_LIKE в /etc/os-release: у всех он содержит rhel или fedora
+# (у Oracle Linux — только fedora). Ubuntu, Debian, Astra (ID_LIKE=debian) не распознаются.
+#
+# Отличия от ubuntu-server, ради которых это отдельный пак, а не правка того:
+#   * PAM: /etc/pam.d/system-auth и password-auth (вход по SSH идёт через password-auth), а не common-*;
+#     на РЕД ОС 8 они — ссылки в /etc/authselect/, файлы читаются по ссылке;
+#   * межсетевой экран — firewalld, а не ufw; обновления — таймер dnf-automatic, а не unattended-upgrades;
+#   * своё: SELinux (конфигурация и режим работы), системные криптополитики (LEGACY/SHA1 = устаревшие
+#     протоколы, ОПС.1.9), права /etc/shadow — 000 по умолчанию (на Debian 640).
+# id проверок совпадают с ubuntu-server там, где смысл тот же (ssh.*, password_policy.*, kernel.*,
+# logging.*) — отчёты по разным ОС сравнимы.
+#
+# Реальные умолчания, снятые с официальных образов 2026-09-27 (после установки openssh-server, audit,
+# firewalld, libpwquality, dnf-automatic, crypto-policies, selinux-policy): pam_pwquality уже в
+# system-auth (в отличие от Ubuntu), pam_faillock нет; minlen не задан (8); PASS_MAX_DAYS 99999;
+# SELINUX=enforcing; криптополитика DEFAULT; /etc/shadow — 000. SSH различается:
+#   Rocky 8 — PermitRootLogin yes и PasswordAuthentication yes прямо в sshd_config;
+#   AlmaLinux 9 — PermitRootLogin yes в sshd_config.d/25-permitrootlogin.conf;
+#   РЕД ОС 7.3 — Include в КОНЦЕ sshd_config, PermitRootLogin yes в sshd_config.d/50-redos.conf;
+#   Rocky 9, Oracle 9, CentOS Stream 9, РЕД ОС 8 — умолчания OpenSSH (prohibit-password).
+#
+# maturity=draft. Файловые пробы прогнаны агентом внутри контейнеров всех семи систем (официальные
+# образы) — пути, форматы и разбор верны на реальных файлах ОС. НЕ подтверждены вживую: пробы служб
+# (firewalld, auditd, таймер dnf-automatic, telnet) и режим SELinux во время работы — в контейнере без
+# systemd их не проверить; механизм тот же, что подтверждён на Ubuntu (systemctl, getenforce).
+
+pack: rhel-family
+version: 1.0.0
+maturity: draft
+tags: [linux-server, rhel-family]
+transport: local
+asset_type: linux-server
+
+detect:
+  - probe: { type: file_regex, path: /etc/os-release, pattern: '(?im)^ID_LIKE="?([^"\n]*)' }
+    regex: '(?i)\b(rhel|fedora)\b'
+
+checks:
+  # ---------- SSH (id как у ubuntu-server) ----------
+  - id: ssh.permit_root_login
+    title: Запрет входа по SSH под root
+    probe: { type: file_kv, path: /etc/ssh/sshd_config, key: PermitRootLogin, default: prohibit-password, follow_include: true }
+    assert: { op: eq, value: "no" }
+    severity: high
+    remediation: "В /etc/ssh/sshd_config.d/ (файл с номером меньше, чем у дистрибутивных) задать PermitRootLogin no; проверить, что его не переопределяет 25-permitrootlogin.conf или 50-*.conf."
+    refs:
+      - { source: "CIS Red Hat Enterprise Linux Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.10" }
+
+  - id: ssh.password_authentication
+    title: Запрет входа по SSH-паролю (только по ключу)
+    probe: { type: file_kv, path: /etc/ssh/sshd_config, key: PasswordAuthentication, default: "yes", follow_include: true }
+    assert: { op: eq, value: "no" }
+    severity: high
+    remediation: "PasswordAuthentication no в sshd_config.d/, предварительно разложив ключи пользователям."
+    refs:
+      - { source: "CIS Red Hat Enterprise Linux Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.10" }
+
+  - id: ssh.permit_empty_passwords
+    title: Запрет пустых паролей по SSH
+    probe: { type: file_kv, path: /etc/ssh/sshd_config, key: PermitEmptyPasswords, default: "no", follow_include: true }
+    assert: { op: eq, value: "no" }
+    severity: critical
+    remediation: "PermitEmptyPasswords no."
+    refs:
+      - { source: "CIS Red Hat Enterprise Linux Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.1" }
+
+  - id: ssh.x11_forwarding
+    title: Отключить X11-форвардинг по SSH
+    probe: { type: file_kv, path: /etc/ssh/sshd_config, key: X11Forwarding, default: "no", follow_include: true }
+    assert: { op: eq, value: "no" }
+    severity: low
+    remediation: "X11Forwarding no (дистрибутивный 50-*.conf ставит yes — переопределить файлом с меньшим номером)."
+    refs: [{ source: "CIS Red Hat Enterprise Linux Benchmark (адаптировано)" }]
+
+  - id: ssh.max_auth_tries
+    title: Ограничить число попыток аутентификации SSH
+    probe: { type: file_kv, path: /etc/ssh/sshd_config, key: MaxAuthTries, default: "6", follow_include: true }
+    assert: { op: lte, value: 4 }
+    severity: medium
+    remediation: "MaxAuthTries 4."
+    refs:
+      - { source: "CIS Red Hat Enterprise Linux Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.4" }
+
+  # ---------- межсетевой экран и обновления ----------
+  - id: firewall.firewalld_active
+    title: Межсетевой экран firewalld работает
+    probe: { type: service_state, service: firewalld }
+    assert: { op: eq, value: active }
+    severity: high
+    remediation: "systemctl enable --now firewalld; открыть только нужные службы (firewall-cmd --permanent --add-service=…)."
+    refs:
+      - { source: "CIS Red Hat Enterprise Linux Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.10" }
+
+  - id: updates.dnf_automatic_install_enabled
+    title: Автоматическая установка обновлений включена (dnf-automatic-install.timer)
+    probe: { type: service_state, service: dnf-automatic-install.timer, field: enabled }
+    assert: { op: eq, value: enabled }
+    severity: medium
+    remediation: "dnf install dnf-automatic; systemctl enable --now dnf-automatic-install.timer (или dnf-automatic.timer с apply_updates = yes — тогда проверку оформить исключением)."
+    refs:
+      - { source: "CIS Red Hat Enterprise Linux Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.2" }
+
+  # ---------- парольная политика и блокировка (id как у ubuntu-server) ----------
+  - id: password_policy.pass_max_days
+    title: Максимальный срок действия пароля — не более 90 дней
+    probe: { type: file_kv, path: /etc/login.defs, key: PASS_MAX_DAYS }
+    assert: { op: lte, value: 90 }
+    severity: medium
+    remediation: "PASS_MAX_DAYS 90 в /etc/login.defs; существующим учёткам — chage -M 90 <пользователь>."
+    refs:
+      - { source: "CIS Red Hat Enterprise Linux Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.2" }
+
+  - id: password_policy.pass_min_len
+    title: Минимальная длина пароля — не менее 14 символов
+    # default "8": значение libpwquality, когда minlen не задан (в поставляемом файле — «# minlen = 8»)
+    probe: { type: file_kv, path: /etc/security/pwquality.conf, key: minlen, separator: equals, default: "8" }
+    assert: { op: gte, value: 14 }
+    severity: medium
+    remediation: "minlen = 14 в /etc/security/pwquality.conf."
+    refs:
+      - { source: "CIS Red Hat Enterprise Linux Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.2" }
+
+  - id: password_policy.pwquality_enabled
+    title: Проверка сложности паролей (pam_pwquality) подключена к PAM
+    probe: { type: file_regex, path: /etc/pam.d/system-auth, pattern: '(?m)^\s*password\s+\S+\s+(pam_pwquality)\.so' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "На системах с authselect — профиль с pam_pwquality (он есть по умолчанию); не удалять строку password requisite pam_pwquality.so."
+    refs:
+      - { source: "CIS Red Hat Enterprise Linux Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.2" }
+
+  - id: password_policy.lockout_on_failure
+    title: Блокировка после неудачных попыток входа (локальный вход, system-auth)
+    probe: { type: file_regex, path: /etc/pam.d/system-auth, pattern: '(?m)^\s*auth\s+\S+(?:\s+\S+)*?\s+(pam_faillock)\.so' }
+    assert: { op: exists }
+    severity: high
+    remediation: "authselect enable-feature with-faillock; в /etc/security/faillock.conf — deny = 5, unlock_time = 900."
+    refs:
+      - { source: "CIS Red Hat Enterprise Linux Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.4" }
+
+  - id: password_policy.lockout_on_failure_remote
+    title: Блокировка после неудачных попыток входа (вход по сети, password-auth — через него идёт SSH)
+    probe: { type: file_regex, path: /etc/pam.d/password-auth, pattern: '(?m)^\s*auth\s+\S+(?:\s+\S+)*?\s+(pam_faillock)\.so' }
+    assert: { op: exists }
+    severity: high
+    remediation: "authselect enable-feature with-faillock (включает pam_faillock и в system-auth, и в password-auth)."
+    refs:
+      - { source: "CIS Red Hat Enterprise Linux Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.4" }
+
+  - id: files.shadow_permissions
+    title: Файл паролей /etc/shadow недоступен никому, кроме root (права 000)
+    probe: { type: file_stat, path: /etc/shadow, field: mode }
+    assert: { op: mode_within, value: "000" }
+    severity: medium
+    remediation: "chmod 000 /etc/shadow (умолчание RHEL-семейства; root читает файл независимо от прав)."
+    refs:
+      - { source: "CIS Red Hat Enterprise Linux Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.7" }
+
+  # ---------- ядро, журналирование, службы (id как у ubuntu-server) ----------
+  - id: kernel.ip_forward
+    title: IP-форвардинг отключён (хост не является роутером)
+    probe: { type: file_regex, path: /proc/sys/net/ipv4/ip_forward, pattern: '^\s*(\d)' }
+    assert: { op: eq, value: "0" }
+    severity: low
+    remediation: "net.ipv4.ip_forward = 0 в /etc/sysctl.d/; на хостах с контейнерами и VPN пересылка нужна — оформить исключение."
+    refs: [{ source: "CIS Red Hat Enterprise Linux Benchmark (адаптировано)" }]
+
+  - id: logging.auditd_active
+    title: Аудит событий безопасности (auditd) активен
+    probe: { type: service_state, service: auditd }
+    assert: { op: eq, value: active }
+    severity: high
+    remediation: "systemctl enable --now auditd."
+    refs:
+      - { source: "CIS Red Hat Enterprise Linux Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.11" }
+
+  - id: services.telnet_inactive
+    title: Сервер Telnet не работает
+    probe: { type: service_state, service: telnet.socket }
+    assert: { op: ne, value: active }
+    severity: high
+    remediation: "dnf remove telnet-server."
+    refs:
+      - { source: "CIS Red Hat Enterprise Linux Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.8" }
+
+  # ---------- своё для RHEL-семейства ----------
+  - id: selinux.enforcing_configured
+    title: SELinux в режиме enforcing в конфигурации (действует после перезагрузки)
+    probe: { type: file_kv, path: /etc/selinux/config, key: SELINUX, separator: equals }
+    assert: { op: eq, value: enforcing }
+    severity: high
+    remediation: "SELINUX=enforcing в /etc/selinux/config (переход из disabled — с перемаркировкой файловой системы)."
+    refs:
+      - { source: "CIS Red Hat Enterprise Linux Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.3" }
+
+  - id: selinux.enforcing_runtime
+    title: SELinux работает в режиме enforcing сейчас (не переключён в permissive командой setenforce)
+    probe: { type: cmd_regex, cmd: [getenforce], pattern: '(Enforcing|Permissive|Disabled)' }
+    assert: { op: eq, value: Enforcing }
+    severity: high
+    remediation: "setenforce 1 и выяснить, кто и зачем переключил режим; постоянный режим — в /etc/selinux/config."
+    refs:
+      - { source: "CIS Red Hat Enterprise Linux Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.3" }
+
+  - id: crypto.policy_not_legacy
+    title: Системная криптополитика не разрешает устаревшие алгоритмы (не LEGACY, без SHA1)
+    probe: { type: file_regex, path: /etc/crypto-policies/config, pattern: '(?m)^\s*([A-Z0-9][A-Z0-9:_-]*)\s*$' }
+    assert: { op: regex, value: '^(?!.*(LEGACY|SHA1))' }
+    severity: medium
+    remediation: "update-crypto-policies --set DEFAULT (или FUTURE); LEGACY и подполитика SHA1 разрешают TLS 1.0/1.1 и SHA-1."
+    refs:
+      - { source: "CIS Red Hat Enterprise Linux Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.9" }

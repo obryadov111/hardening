@@ -618,3 +618,43 @@ def test_allowed_docker_commands_pass_the_policy(monkeypatch):
         "HostConfig.NetworkMode", "HostConfig.PidMode",
     ):
         LocalTransport().run(["docker", "inspect", "--format", "{{." + field + "}}", "0123456789ab"])
+
+
+
+# ---------- service_state: только известные состояния systemctl ----------
+
+class Systemctl:
+    name, platform = "local", "posix"
+
+    def __init__(self, stdout, stderr="", code=0):
+        self.out = CmdOutput(stdout, stderr, code)
+
+    def run(self, argv):
+        assert argv[0] == "systemctl"
+        return self.out
+
+
+@pytest.mark.parametrize(("stdout", "stderr", "code", "expected"), [
+    ("active\n", "", 0, "active"),
+    ("inactive\n", "", 3, "inactive"),
+    ("failed\n", "", 3, "failed"),
+    ("", "Unit auditd.service could not be found.\n", 4, "not-found"),
+])
+def test_service_state_known_states(stdout, stderr, code, expected):
+    assert run_probe(Systemctl(stdout, stderr, code), {"type": "service_state", "service": "auditd"})["value"] == expected
+
+
+@pytest.mark.parametrize("stderr", [
+    "System has not been booted with systemd as init system (PID 1). Can't operate.\nFailed to connect to bus: Host is down\n",
+    "Failed to connect to bus: No such file or directory\n",
+])
+def test_service_state_systemctl_failure_is_not_a_value(stderr):
+    """Текст ошибки systemctl — не состояние: иначе «Telnet не активен» засчитывался бы как соблюдённый."""
+    result = run_probe(Systemctl("", stderr, 1), {"type": "service_state", "service": "telnet.socket"})
+    assert result["found"] is False and "не получено" in result["error"]
+
+
+def test_service_state_enabled_values():
+    assert run_probe(Systemctl("disabled\n", "", 1), {"type": "service_state", "service": "x", "field": "enabled"})["value"] == "disabled"
+    missing = Systemctl("", "Failed to get unit file state for x.timer: No such file or directory\n", 1)
+    assert run_probe(missing, {"type": "service_state", "service": "x.timer", "field": "enabled"})["value"] == "not-found"

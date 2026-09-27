@@ -29,7 +29,7 @@ import urllib.error
 import urllib.request
 
 
-def read_file(path: str) -> str | None:
+def read_file(path: str) -> "str | None":
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             return f.read()
@@ -37,9 +37,9 @@ def read_file(path: str) -> str | None:
         return None
 
 
-def run(cmd: list[str]) -> str | None:
+def run(cmd: "list[str]") -> "str | None":
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=15)
         if result.returncode != 0:
             return None
         return result.stdout
@@ -190,7 +190,7 @@ WINDOWS_UNINSTALL_KEYS = (
 )
 
 
-def get_windows_version() -> str | None:
+def get_windows_version() -> "str | None":
     """«Windows Server 2022 Datacenter (21H2, сборка 20348)». У Windows 11 в реестре ProductName по-прежнему
     «Windows 10» — поэтому по номеру сборки (22000+) название исправляется."""
     import probes
@@ -206,7 +206,7 @@ def get_windows_version() -> str | None:
     return f"{name} ({details})" if details else str(name)
 
 
-def collect_windows_software() -> list[dict]:
+def collect_windows_software() -> "list[dict]":
     """Установленные программы из разделов Uninstall реестра (как «Программы и компоненты»)."""
     import winreg
 
@@ -239,7 +239,7 @@ def collect_windows_software() -> list[dict]:
     return items
 
 
-def get_os_pretty_name() -> str | None:
+def get_os_pretty_name() -> "str | None":
     if os.name == "nt":
         return get_windows_version()
     os_release = read_file("/etc/os-release")
@@ -249,7 +249,7 @@ def get_os_pretty_name() -> str | None:
     return m.group(1) if m else None
 
 
-def get_primary_ip() -> str | None:
+def get_primary_ip() -> "str | None":
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
@@ -261,7 +261,7 @@ def get_primary_ip() -> str | None:
         return None
 
 
-def collect_software() -> list[dict]:
+def collect_software() -> "list[dict]":
     """dpkg (Debian/Ubuntu) в приоритете, rpm — фолбэк для RHEL-семейства, на Windows — реестр."""
     if os.name == "nt":
         return collect_windows_software()
@@ -430,7 +430,7 @@ def build_pack_payload(args: argparse.Namespace, probes_module) -> dict:
     }
 
 
-def parse_args(argv: list[str]) -> argparse.Namespace:
+def parse_args(argv: "list[str]") -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--api-url", required=True, help="Базовый URL бэкенда, например https://hardening.example.com")
     parser.add_argument("--api-key", default=os.environ.get("HARDENING_AGENT_API_KEY"), help="Ключ агента (или переменная окружения HARDENING_AGENT_API_KEY)")
@@ -463,7 +463,7 @@ def _utf8_console() -> None:
             pass
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: "list[str] | None" = None) -> int:
     if os.name == "nt":
         _utf8_console()
     args = parse_args(argv if argv is not None else sys.argv[1:])

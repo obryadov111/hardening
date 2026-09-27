@@ -15,8 +15,6 @@
 агента и своим на организацию; при желании схема заменяется на асимметричную
 (Ed25519) без изменения формата манифеста.
 """
-from __future__ import annotations
-
 import glob
 import hashlib
 import hmac
@@ -59,7 +57,7 @@ def verify_manifest(manifest: dict, signature: str, key: str) -> bool:
     return hmac.compare_digest(expected, signature or "")
 
 
-def load_verified_manifests(response: dict, key: str) -> list[dict]:
+def load_verified_manifests(response: dict, key: str) -> "list[dict]":
     """Проверяет подпись каждого манифеста из ответа сервера. Любая подделка — ManifestError:
     это событие безопасности, а не повод молча пропустить один пак."""
     verified = []
@@ -243,18 +241,18 @@ class LocalTransport:
         except OSError as exc:
             raise ProbeError(f"не удалось получить stat {path}: {exc.strerror or exc}") from exc
 
-    def glob(self, pattern: str) -> list[str]:
+    def glob(self, pattern: str) -> "list[str]":
         """Файлы по маске в лексическом порядке; запрещённые политикой пути в выдачу не попадают."""
         found = sorted(glob.glob(pattern))[:MAX_INCLUDE_FILES]
         return [p for p in found if not any(d.search(p) or d.search(os.path.realpath(p)) for d in DENIED_PATH_PATTERNS)]
 
-    def run(self, argv: list[str]) -> CmdOutput:
+    def run(self, argv: "list[str]") -> CmdOutput:
         policy = LOCAL_COMMAND_POLICY.get(argv[0]) if argv else None
         if policy is None or not policy.match(" ".join(argv[1:])):
             raise ProbeError(f"команда вне белого списка агента: {' '.join(argv)}")
         return self._execute(argv)
 
-    def _execute(self, argv: list[str]) -> CmdOutput:
+    def _execute(self, argv: "list[str]") -> CmdOutput:
         """Запуск без shell из системного каталога. Команды из манифеста попадают сюда только через run()
         (белый список); secedit и auditpol с фиксированными аргументами агент вызывает сам."""
         search = WINDOWS_SYSTEM32 if IS_WINDOWS else SAFE_PATH
@@ -266,7 +264,7 @@ class LocalTransport:
                if IS_WINDOWS else {"PATH": SAFE_PATH, "LANG": "C", "LC_ALL": "C"})
         try:
             proc = subprocess.run(
-                [exe, *argv[1:]], capture_output=True, text=True, timeout=COMMAND_TIMEOUT,
+                [exe, *argv[1:]], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=COMMAND_TIMEOUT,
                 env=env, check=False, errors="replace",
             )
         except (OSError, subprocess.SubprocessError) as exc:
@@ -336,7 +334,7 @@ class SshTransport:
 
     name = "ssh"
 
-    def __init__(self, host: str, user: str | None = None, port: int = 22, key_path: str | None = None,
+    def __init__(self, host: str, user: "str | None" = None, port: int = 22, key_path: "str | None" = None,
                  connect_timeout: int = 10, command_timeout: int = 30, runner=None):
         if not _HOST_RE.match(host) or (user is not None and not _USER_RE.match(user)):
             raise ValueError("недопустимое имя хоста или пользователя SSH")
@@ -345,7 +343,7 @@ class SshTransport:
         self.connect_timeout, self.command_timeout = connect_timeout, command_timeout
         self._runner = runner or subprocess.run
 
-    def _ssh_argv(self, command: str) -> list[str]:
+    def _ssh_argv(self, command: str) -> "list[str]":
         argv = ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
                 "-o", f"ConnectTimeout={self.connect_timeout}", "-p", str(self.port)]
         if self.key_path:
@@ -356,7 +354,7 @@ class SshTransport:
         if not is_readonly_cli(command):
             raise ProbeError(f"по SSH допустимы только команды на чтение: {command!r}")
         try:
-            proc = self._runner(self._ssh_argv(command), capture_output=True, text=True,
+            proc = self._runner(self._ssh_argv(command), stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
                                 timeout=self.command_timeout, check=False)
         except (OSError, subprocess.SubprocessError) as exc:
             raise ProbeError(f"SSH-команда не выполнилась: {exc}") from exc
@@ -364,7 +362,7 @@ class SshTransport:
             raise ProbeError(f"ssh: {(proc.stderr or '').strip()[:200] or 'ошибка соединения'}")
         return CmdOutput(proc.stdout, proc.stderr, proc.returncode)
 
-    def run(self, argv: list[str]) -> CmdOutput:
+    def run(self, argv: "list[str]") -> CmdOutput:
         return self.run_cli(" ".join(argv))
 
     def read_file(self, path: str) -> str:
@@ -387,11 +385,11 @@ class SshTransport:
 
 # --- пробы -----------------------------------------------------------------------
 
-def _ok(value, evidence: str | None = None) -> dict:
+def _ok(value, evidence: "str | None" = None) -> dict:
     return {"found": True, "value": value, "evidence": redact(evidence) if evidence else None}
 
 
-def _search(pattern: str, text: str) -> tuple[str | None, str | None]:
+def _search(pattern: str, text: str) -> "tuple[str | None, str | None]":
     m = re.search(pattern, text, re.MULTILINE)
     if not m:
         return None, None
@@ -530,6 +528,18 @@ def probe_cli_config(t, p: dict) -> dict:
     return _ok(None)
 
 
+# Состояния, которые печатает systemctl is-active / is-enabled (systemd 219+, RHEL 7 и новее).
+_SYSTEMD_ACTIVE_STATES = {"active", "inactive", "failed", "activating", "deactivating", "reloading", "refreshing",
+                          "maintenance", "unknown"}
+_SYSTEMD_ENABLED_STATES = {"enabled", "enabled-runtime", "disabled", "static", "masked", "masked-runtime", "indirect",
+                           "generated", "transient", "alias", "linked", "linked-runtime", "not-found"}
+# Именно «юнита нет», а не любая ошибка: «Failed to connect to bus: No such file or directory» — сбой шины.
+_UNIT_MISSING = re.compile(
+    r"Unit \S+ could not be found|Failed to get unit file state for \S+: No such file or directory|Unit \S+ not loaded",
+    re.IGNORECASE,
+)
+
+
 def _windows_service_state(t, p: dict) -> dict:
     """Та же проба на Windows, в тех же словах, что systemd: active/inactive, enabled/manual/disabled.
     Автозапуск — из реестра (Start), работа — из `sc query` (число и константа состояния не локализуются)."""
@@ -588,10 +598,17 @@ def probe_service_state(t, p: dict) -> dict:
         return _windows_service_state(t, p)
     verb = "is-enabled" if p.get("field") == "enabled" else "is-active"
     out = t.run(["systemctl", verb, p["service"]])
-    state = out.stdout.strip() or out.stderr.strip()
-    if not state:
-        raise ProbeError(f"systemctl не вернул состояние службы {p['service']}")
-    return _ok(state.splitlines()[0])
+    # Значение — только известное состояние из stdout. Раньше при пустом stdout значением становился текст
+    # ошибки из stderr («System has not been booted with systemd», «Failed to connect to bus»): проверка
+    # «служба не активна» (ne active) засчитывалась как соблюдённая, «служба активна» — как нарушенная,
+    # хотя состояние неизвестно. Найдено прогоном агента в контейнерах RHEL-семейства без systemd.
+    first = out.stdout.strip().splitlines()[0].strip() if out.stdout.strip() else ""
+    if first in (_SYSTEMD_ENABLED_STATES if verb == "is-enabled" else _SYSTEMD_ACTIVE_STATES):
+        return _ok(first)
+    error = (out.stderr or out.stdout).strip()
+    if _UNIT_MISSING.search(error):
+        return _ok("not-found", error.splitlines()[0][:200])
+    raise ProbeError(f"systemctl {verb} {p['service']}: состояние не получено ({error.splitlines()[0][:150] if error else f'код {out.code}'})")
 
 
 def probe_pkg_version(t, p: dict) -> dict:
@@ -654,7 +671,7 @@ def run_probe(transport, probe: dict) -> dict:
 
 # --- манифест: детект и выполнение -------------------------------------------------
 
-def matches_detect(transport, detect_rules: list[dict]) -> bool:
+def matches_detect(transport, detect_rules: "list[dict]") -> bool:
     """Платформа распознана, только если совпали все условия detect."""
     for rule in detect_rules:
         result = run_probe(transport, rule["probe"])
@@ -669,7 +686,7 @@ def matches_detect(transport, detect_rules: list[dict]) -> bool:
     return True
 
 
-def select_manifests(transport, manifests: list[dict]) -> list[dict]:
+def select_manifests(transport, manifests: "list[dict]") -> "list[dict]":
     return [m for m in manifests if m.get("transport") == transport.name and matches_detect(transport, m["detect"])]
 
 

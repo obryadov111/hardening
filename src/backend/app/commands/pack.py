@@ -6,6 +6,8 @@
                                                                 # паки на ЭТОЙ машине настоящими пробами
     python -m app.commands.pack manifests --key-file файл --out файл [--transport local]
                                                                 # подписанные манифесты для --manifests-file агента
+    python -m app.commands.pack evaluate результат.json --pack id [--allow-error check_id ...]
+                                                                # оценка сохранённого прогона агента (--dry-run)
 
 Код выхода 1 — есть ошибки валидации или несовпадения в фикстурах; предупреждения на код не влияют.
 Формат фикстур — pack_tests/README.md.
@@ -102,6 +104,33 @@ def cmd_manifests(args) -> int:
     return 0
 
 
+def cmd_evaluate(args) -> int:
+    """Результат агента (--dry-run, JSON запроса ingest) — через оценку сервера. Код 1, если пак не был
+    выполнен агентом (платформа не распознана) или проба не выполнилась у проверки не из --allow-error.
+    Для проверки паков на реальных ОС, где агент запускается отдельно (контейнеры, CI)."""
+    import json
+    from types import SimpleNamespace
+
+    from app.services.packs.evaluate import evaluate_pack
+
+    payload = json.loads(Path(args.payload).read_text(encoding="utf-8"))
+    runs = {run["id"]: run for run in payload.get("packs", [])}
+    os_name = (payload.get("asset") or {}).get("os")
+    if args.pack not in runs:
+        print(f"✗ {args.payload}: пак {args.pack} не выполнен (распознаны: {', '.join(runs) or 'нет'}; ОС: {os_name})")
+        return 1
+    run = runs[args.pack]
+    pack = load_registry(Path(args.packs)).get(args.pack, run["version"])
+    results = evaluate_pack(pack, {k: SimpleNamespace(**v) for k, v in run["probe_results"].items()})
+    unexpected = [r for r in results if r.status == "error" and r.check_id not in (args.allow_error or [])]
+    counts = {s: sum(r.status == s for r in results) for s in ("pass", "fail", "error")}
+    mark = "✗" if unexpected else "✓"
+    print(f"{mark} {os_name}: {pack.pack} {pack.version} — соблюдено {counts['pass']}, нарушено {counts['fail']}, не проверено {counts['error']}")
+    for r in unexpected:
+        print(f"    не выполнилась: {r.check_id} — {run['probe_results'].get(r.check_id, {}).get('error')}")
+    return 1 if unexpected else 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.commands.pack", description="Инструменты автора пака")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -124,6 +153,12 @@ def main(argv=None) -> int:
     manifests.add_argument("--transport", default="local", choices=["local", "ssh"])
     manifests.add_argument("--packs", default=str(PACKS_DIR), help="каталог паков")
     manifests.set_defaults(func=cmd_manifests)
+    evaluate = sub.add_parser("evaluate", help="оценить сохранённый прогон агента (--dry-run) логикой сервера")
+    evaluate.add_argument("payload")
+    evaluate.add_argument("--pack", required=True)
+    evaluate.add_argument("--allow-error", action="append", help="проверка, которой разрешено «не проверено» (можно несколько)")
+    evaluate.add_argument("--packs", default=str(PACKS_DIR), help="каталог паков")
+    evaluate.set_defaults(func=cmd_evaluate)
     args = parser.parse_args(argv)
     return args.func(args)
 

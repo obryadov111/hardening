@@ -81,7 +81,9 @@ def _local_argvs(probe, windows: bool = False) -> list[list[str]]:
 def _probe_findings(pack: Pack, probe, where: str, agent) -> list[Finding]:
     findings = []
     path = getattr(probe, "path", None)
-    if path and any(p.search(path) for p in agent.DENIED_PATH_PATTERNS):
+    # file_stat читает только права и владельца, не содержимое: агент разрешает её и для /etc/shadow
+    # (так проверяются права на файлы с секретами, ОПС.1.7), запрет — для проб, читающих файл.
+    if path and probe.type != "file_stat" and any(p.search(path) for p in agent.DENIED_PATH_PATTERNS):
         findings.append(Finding("error", where, f"путь {path} запрещён агенту (секреты) — проба всегда будет error"))
 
     if pack.transport == "ssh":

@@ -1,0 +1,63 @@
+# Проверка Linux-паков на НАСТОЯЩИХ файлах ОС: агент (системный python3 дистрибутива) запускается в
+# контейнерах официальных образов с типовыми серверными пакетами и умолчаниями дистрибутива; результат
+# оценивается логикой сервера (pack evaluate). Падает, если пак не распознал ОС или файловая проба
+# не выполнилась — например, дистрибутив в новой версии поменял путь или формат.
+# В контейнере нет systemd — пробы служб здесь «не проверено» по построению (--allow-error).
+# Образы «плавающие» (rockylinux:9 и т. п.): падение после выхода новой версии ОС — полезный сигнал.
+name: Linux packs
+
+on:
+  push:
+    paths:
+      - "agent/**"
+      - "src/backend/app/packs/rhel-family-*"
+      - "src/backend/app/services/packs/**"
+      - "src/backend/app/commands/pack.py"
+      - ".github/scripts/agent-in-container.sh"
+      - ".github/workflows/linux-packs.yml"
+  workflow_dispatch:
+
+env:
+  DATABASE_URL: postgresql+psycopg://ci:ci@localhost:1/ci
+  JWT_SECRET_KEY: ci
+  TOTP_SECRET_ENCRYPTION_KEY: ci
+  PACK_SIGNING_KEY: ci
+
+jobs:
+  rhel-family:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - rockylinux:8
+          - rockylinux:9
+          - almalinux:9
+          - oraclelinux:9
+          - quay.io/centos/centos:stream9
+          - registry.red-soft.ru/ubi7/ubi:latest   # РЕД ОС 7.3 МУРОМ
+          - registry.red-soft.ru/ubi8/ubi:latest   # РЕД ОС 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r src/backend/requirements.txt
+
+      - name: Signed manifests
+        working-directory: src/backend
+        run: |
+          mkdir -p ../../work
+          head -c 32 /dev/urandom | base64 > ../../work/key
+          python -m app.commands.pack manifests --key-file ../../work/key --out ../../work/manifests.json
+
+      - name: Agent inside ${{ matrix.image }}
+        run: |
+          docker run --rm -v "$PWD/agent:/agent:ro" -v "$PWD/work:/work:ro" -v "$PWD/.github/scripts:/scripts:ro" \
+            "${{ matrix.image }}" sh /scripts/agent-in-container.sh > payload.json
+
+      - name: Evaluate
+        working-directory: src/backend
+        run: >
+          python -m app.commands.pack evaluate ../../payload.json --pack rhel-family
+          --allow-error firewall.firewalld_active --allow-error logging.auditd_active --allow-error services.telnet_inactive
