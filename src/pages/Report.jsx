@@ -9,6 +9,25 @@ import { useSort } from "../hooks/useSort";
 import { useOrganization } from "../context/OrganizationContext";
 import { getReportsByOrganization } from "../api/reports";
 import { getScoreTone } from "../utils/score";
+import { getHardeningByOrganization } from "../api/hardening";
+import SeverityBadge from "../components/ui/SeverityBadge";
+import { REMEDIATION_BY_SEVERITY, REMEDIATION_SOURCE_NOTE, getRemediation } from "../utils/remediation";
+import { Link } from "react-router-dom";
+
+/** Текущие нарушения по уровням: сколько, на скольких активах, в какой срок и обязательно ли. */
+function remediationPlan(checks) {
+  const byLevel = {};
+  for (const check of checks) {
+    const severity = (check.rule?.severity || "").toLowerCase();
+    if (!getRemediation(check.status, severity)) continue;
+    const entry = (byLevel[severity] ||= { severity, count: 0, assets: new Set() });
+    entry.count += 1;
+    if (check.asset?.id) entry.assets.add(check.asset.id);
+  }
+  return Object.values(byLevel)
+    .map((entry) => ({ ...entry, ...REMEDIATION_BY_SEVERITY[entry.severity], assets: entry.assets.size }))
+    .sort((a, b) => a.order - b.order);
+}
 
 export default function Report() {
   const {
@@ -20,23 +39,30 @@ export default function Report() {
   } = useOrganization();
 
   const [reports, setReports] = useState([]);
+  const [checks, setChecks] = useState([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     async function loadData() {
       if (!selectedOrganizationId) {
         setReports([]);
+        setChecks([]);
         setLoading(false);
         return;
       }
 
       try {
         setLoading(true);
-        const data = await getReportsByOrganization(selectedOrganizationId);
+        const [data, current] = await Promise.all([
+          getReportsByOrganization(selectedOrganizationId),
+          getHardeningByOrganization(selectedOrganizationId),
+        ]);
         setReports(data);
+        setChecks(Array.isArray(current) ? current : []);
       } catch (error) {
         console.error("Ошибка загрузки отчётов:", error.message);
         setReports([]);
+        setChecks([]);
       } finally {
         setLoading(false);
       }
@@ -48,6 +74,7 @@ export default function Report() {
   }, [selectedOrganizationId, orgLoading]);
 
   const latest = reports[0] || null;
+  const plan = useMemo(() => remediationPlan(checks), [checks]);
 
   const avgScore = useMemo(() => {
     if (!reports.length) return 0;
@@ -91,6 +118,45 @@ export default function Report() {
         <StatCard label="Нарушения" value={latest?.failed ?? "—"} loading={loading} hint="Проваленные проверки" tone="danger" />
         <StatCard label="Средний Score" value={`${avgScore}%`} loading={loading} hint="Среднее по отчётам" tone="default" />
       </div>
+
+      <AppCard title="Что устранить и в какие сроки" subtitle={REMEDIATION_SOURCE_NOTE}>
+        {loading ? (
+          <SkeletonTable rows={4} cols={5} />
+        ) : plan.length === 0 ? (
+          <div className="text-sm text-zinc-400">Текущих нарушений нет.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="border-b border-zinc-800 text-left text-zinc-400">
+                <tr>
+                  <th className="px-4 py-3 font-medium">Уровень</th>
+                  <th className="px-4 py-3 font-medium">Нарушений</th>
+                  <th className="px-4 py-3 font-medium">Активов</th>
+                  <th className="px-4 py-3 font-medium">Срок устранения</th>
+                  <th className="px-4 py-3 font-medium">Порядок</th>
+                </tr>
+              </thead>
+              <tbody>
+                {plan.map((row) => (
+                  <tr key={row.severity} className="border-b border-zinc-800/60 text-zinc-200">
+                    <td className="px-4 py-3"><SeverityBadge value={row.severity} /></td>
+                    <td className="px-4 py-3 font-semibold text-white">{row.count}</td>
+                    <td className="px-4 py-3">{row.assets}</td>
+                    <td className="px-4 py-3">{row.deadline}</td>
+                    <td className={`px-4 py-3 ${row.mandatory ? "text-rose-300" : "text-zinc-400"}`}>
+                      {row.mandatory ? "Обязательно (п. 3.4.4)" : "После экспертной оценки (п. 3.4.5)"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="mt-3 text-xs text-zinc-500">
+              Список нарушений с рекомендациями — на странице{" "}
+              <Link to="/hardening" className="text-zinc-300 underline hover:text-white">Харденинг</Link>.
+            </div>
+          </div>
+        )}
+      </AppCard>
 
       <AppCard title="История отчётов" subtitle="Отчёты по выбранной организации">
         {loading ? (
