@@ -385,8 +385,9 @@ def test_default_registry_ships_ubuntu_server_pack():
     pack = get_pack_registry().get("ubuntu-server")
 
     assert pack is not None and pack.maturity == "baseline" and pack.transport == "local"
-    assert pack.version == "1.1.0"
-    assert len(pack.checks) == 14  # 12 перенесённых из старого агента + 2 из методики ФСТЭК (1.1.0)
+    assert pack.version == "1.2.0"
+    # 12 перенесённых из старого агента + auditd из методики ФСТЭК (1.1.0); проверка Samba с 1.2.0 — в паке samba
+    assert len(pack.checks) == 13
     assert "ubuntu" in pack.tags and "linux-server" in pack.tags
 
 
@@ -452,7 +453,7 @@ def test_shipped_packs_and_their_maturity():
 
     assert {name: p.maturity for name, p in packs.items()} == {
         "ubuntu-server": "baseline", "docker": "baseline", "cisco-ios": "draft", "astra-linux": "inventory",
-        "postgresql": "draft",
+        "postgresql": "draft", "samba": "draft",
     }
     assert packs["astra-linux"].checks == [] and packs["cisco-ios"].verified_on == []
     assert all(p.verified_on for p in packs.values() if p.maturity == "baseline")  # baseline = подтверждено на оборудовании

@@ -1,0 +1,41 @@
+# Пак «Samba»: проверки файлового сервера Samba. Применяется вместе с паком ОС (ubuntu-server и т. п.):
+# агент выполняет все подошедшие паки за один прогон. Признак Samba на хосте — /etc/samba/smb.conf.
+#
+# Выделен из ubuntu-server 1.1.0 (2026-09-27): там проверка применялась к любому Ubuntu-серверу и
+# без установленной Samba давала error («не проверено»), хотя гостевых папок без Samba нет в
+# принципе. Отдельный пак с detect по smb.conf делает её неприменимой там, где Samba нет, и
+# годится для любого дистрибутива со стандартным путём конфигурации.
+#
+# ЧЕСТНО: maturity=draft — проверка покрыта образцами (pack_tests/samba.yaml), но на реальном хосте
+# с установленной Samba живым агентом не прогонялась. id проверки сохранён прежним, чтобы история
+# результатов не рвалась при переходе с ubuntu-server 1.1.0.
+#
+# Ограничение: ищутся только явные `guest ok = yes` / `public = yes`. `map to guest` в [global] и
+# `include` других файлов конфигурации не разбираются.
+#
+# Источник: «Методика анализа защищённости информационных систем», ФСТЭК России, 25.11.2025,
+# ОПС.1.12 — «гостевые или общие папки без ограничений»; CIS Benchmark (адаптировано).
+
+pack: samba
+version: 1.0.0
+maturity: draft
+tags: [file-server, samba]
+transport: local
+
+detect:
+  - probe: { type: file_stat, path: /etc/samba/smb.conf, field: mode }
+    regex: '^\d+$'
+
+checks:
+  - id: filesharing.smb_no_guest_access
+    title: Общие ресурсы Samba не разрешают гостевой доступ
+    probe:
+      type: file_regex
+      path: /etc/samba/smb.conf
+      pattern: '(?im)^\s*(guest ok|public)\s*=\s*yes\s*$'
+    assert: { op: absent }
+    severity: high
+    remediation: "В /etc/samba/smb.conf убрать 'guest ok = yes' / 'public = yes' у общих ресурсов, ограничить доступ списком 'valid users'."
+    refs:
+      - { source: "CIS Benchmark (Ubuntu Linux, адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.12" }

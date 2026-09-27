@@ -41,18 +41,18 @@ cases:
     detect: true
     expect:
       cisco_ios.service_password_encryption: pass
-      cisco_ios.enable_secret_used: pass
+      cisco_ios.enable_credential_set: pass
       cisco_ios.enable_password_absent: pass
       cisco_ios.aaa_new_model: pass
       cisco_ios.snmp_default_community_absent: pass
       cisco_ios.ssh_version2_only: pass
       cisco_ios.http_server_disabled: pass
       cisco_ios.vty_telnet_disabled: pass
-      cisco_ios.vty_ssh_only: pass
+      cisco_ios.vty_transport_explicit: pass
       cisco_ios.vty_acl_set: pass
       cisco_ios.ntp_configured: pass
 
-  - name: слабый коммутатор — нарушено всё
+  - name: слабый коммутатор — каждое нарушение ловит одна проверка
     cli:
       show running-config: |
         Building configuration...
@@ -77,16 +77,45 @@ cases:
         end
     expect:
       cisco_ios.service_password_encryption: fail
-      cisco_ios.enable_secret_used: fail
+      cisco_ios.enable_credential_set: pass   # пароль есть; что он обратимый — ловит enable_password_absent
       cisco_ios.enable_password_absent: fail
       cisco_ios.aaa_new_model: fail
       cisco_ios.snmp_default_community_absent: fail
       cisco_ios.ssh_version2_only: fail
       cisco_ios.http_server_disabled: fail
       cisco_ios.vty_telnet_disabled: fail
-      cisco_ios.vty_ssh_only: fail
+      cisco_ios.vty_transport_explicit: pass  # транспорт задан явно; что это Telnet — ловит vty_telnet_disabled
       cisco_ios.vty_acl_set: fail
       cisco_ios.ntp_configured: fail
+
+  # С 1.1.0 каждое нарушение ловит ровно одна проверка (раньше пары проверок проваливались вместе).
+  - name: только обратимый enable password — провал одной проверки, а не двух
+    cli:
+      show running-config: "version 15.2\nenable password 7 0822455D0A16\nline vty 0 4\n transport input ssh\n!\nend\n"
+    expect:
+      cisco_ios.enable_password_absent: fail
+      cisco_ios.enable_credential_set: pass
+
+  - name: пароля enable нет вовсе
+    cli:
+      show running-config: "version 15.2\nline vty 0 4\n transport input ssh\n!\nend\n"
+    expect:
+      cisco_ios.enable_credential_set: fail
+      cisco_ios.enable_password_absent: pass
+
+  - name: Telnet разрешён явно — провал одной проверки, а не двух
+    cli:
+      show running-config: "version 15.2\nline vty 0 4\n transport input telnet ssh\n!\nend\n"
+    expect:
+      cisco_ios.vty_telnet_disabled: fail
+      cisco_ios.vty_transport_explicit: pass
+
+  - name: транспорт VTY не задан — действует умолчание платформы
+    cli:
+      show running-config: "version 15.2\nline vty 0 4\n access-class 10 in\n!\nend\n"
+    expect:
+      cisco_ios.vty_transport_explicit: fail
+      cisco_ios.vty_telnet_disabled: pass
 
   - name: у учётки нет прав на running-config — «не проверено», а не «соблюдено»
     cli:

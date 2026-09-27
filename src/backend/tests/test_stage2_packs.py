@@ -131,17 +131,23 @@ def test_cisco_hardened_config_passes_everything():
     assert len(result) == 11 and set(result.values()) == {"pass"}, {k: v for k, v in result.items() if v != "pass"}
 
 
-def test_cisco_weak_config_fails_every_check():
+def test_cisco_weak_config_each_violation_is_caught_by_exactly_one_check():
     transport, _ = cisco(CISCO_WEAK)
     result = statuses("cisco-ios", transport)
-    assert set(result.values()) == {"fail"}, {k: v for k, v in result.items() if v != "fail"}
+    # 1.1.0: пары проверок разведены. Обратимый `enable password` ловит enable_password_absent
+    # (enable_credential_set проходит: пароль задан), `transport input all` — vty_telnet_disabled
+    # (vty_transport_explicit проходит: транспорт задан явно). Остальное — провал.
+    both_ok = {"cisco_ios.enable_credential_set", "cisco_ios.vty_transport_explicit"}
+    assert {k for k, v in result.items() if v == "pass"} == both_ok
+    assert {k for k, v in result.items() if v != "pass"} == set(result) - both_ok
+    assert set(result.values()) == {"pass", "fail"}
 
 
 def test_cisco_vty_telnet_in_any_block_is_caught():
     config = CISCO_HARDENED.replace("line vty 5 15\n access-class 10 in\n transport input ssh", "line vty 5 15\n access-class 10 in\n transport input telnet")
     result = statuses("cisco-ios", cisco(config)[0])
     assert result["cisco_ios.vty_telnet_disabled"] == "fail"  # первый блок в порядке, второй разрешает telnet
-    assert result["cisco_ios.vty_ssh_only"] == "pass"  # exists — есть хотя бы один блок ssh; ограничение описано в паке
+    assert result["cisco_ios.vty_transport_explicit"] == "pass"  # транспорт задан явно в обоих блоках
 
 
 def test_cisco_probe_reads_only_show_commands():
@@ -480,6 +486,17 @@ def test_ubuntu_without_docker_matches_only_the_os_pack():
     assert matched == ["ubuntu-server"]
 
 
+def test_ubuntu_with_samba_matches_the_samba_pack_and_it_does_not_change_the_os_result():
+    """1.2.0: Samba — отдельный пак. Есть smb.conf — применяется и он; нет — пак не применяется,
+    и проверка Samba не превращается в error на серверах без Samba (как было в ubuntu-server 1.1.0)."""
+    host = docker_host(with_socket=False)
+    host.files["/etc/samba/smb.conf"] = "[share]\n   path = /srv/share\n   guest ok = yes\n"
+    matched = probes.select_manifests(host, all_local_manifests())
+    assert [m["pack"] for m in matched] == ["samba", "ubuntu-server"]
+    assert statuses("samba", host) == {"filesharing.smb_no_guest_access": "fail"}
+    assert "filesharing.smb_no_guest_access" not in statuses("ubuntu-server", host)
+
+
 def _run_payload(host, name_filter=None):
     matched = probes.select_manifests(host, all_local_manifests())
     return {
@@ -496,23 +513,23 @@ def test_several_packs_are_evaluated_in_one_ingest_with_one_snapshot(client, db,
 
     body = client.post("/api/ingest", json=payload, headers={"X-Agent-Api-Key": key}).json()
 
-    assert body["checks"] == {"total": 21, "passed": 20, "failed": 1, "errors": 0}  # 14 от ОС-пака + 7 от docker (6 pass + privileged fail)
+    assert body["checks"] == {"total": 20, "passed": 19, "failed": 1, "errors": 0}  # 13 от ОС-пака + 7 от docker (6 pass + privileged fail)
     by_pack = {p["id"]: p for p in body["packs"]}
     assert (by_pack["docker"]["total"], by_pack["docker"]["failed"], by_pack["docker"]["maturity"]) == (7, 1, "baseline")
-    assert (by_pack["ubuntu-server"]["total"], by_pack["ubuntu-server"]["passed"]) == (14, 14)
+    assert (by_pack["ubuntu-server"]["total"], by_pack["ubuntu-server"]["passed"]) == (13, 13)
     assert db.execute(text("SELECT COUNT(*) FROM scan_snapshots")).scalar() == 1
     rows = db.execute(text("SELECT pack_id, COUNT(*) FROM hardening_checks GROUP BY pack_id ORDER BY pack_id")).all()
-    assert [tuple(r) for r in rows] == [("docker", 7), ("ubuntu-server", 14)]
+    assert [tuple(r) for r in rows] == [("docker", 7), ("ubuntu-server", 13)]
 
 
 def test_a_later_run_without_a_pack_drops_that_packs_current_state(client, db, make_org, make_agent_key):
     key = make_agent_key(make_org("Drop Org"))
     client.post("/api/ingest", json=_run_payload(docker_host({})), headers={"X-Agent-Api-Key": key})
-    assert db.execute(text("SELECT COUNT(*) FROM hardening_checks")).scalar() == 21  # 14 от ОС-пака + 7 от docker (0 контейнеров -> все проверки pass)
+    assert db.execute(text("SELECT COUNT(*) FROM hardening_checks")).scalar() == 20  # 13 от ОС-пака + 7 от docker (0 контейнеров -> все проверки pass)
 
     client.post("/api/ingest", json=_run_payload(docker_host(with_socket=False)), headers={"X-Agent-Api-Key": key})
 
-    assert db.execute(text("SELECT COUNT(*) FROM hardening_checks")).scalar() == 14  # docker удалён с хоста — его проверок нет
+    assert db.execute(text("SELECT COUNT(*) FROM hardening_checks")).scalar() == 13  # docker удалён с хоста — его проверок нет
     assert db.execute(text("SELECT COUNT(*) FROM scan_snapshots")).scalar() == 2  # история сохранена
 
 

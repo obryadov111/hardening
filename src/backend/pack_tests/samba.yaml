@@ -1,0 +1,50 @@
+# Образцы для пака samba: применяется только там, где есть /etc/samba/smb.conf.
+pack: samba
+
+base:
+  files:
+    /etc/samba/smb.conf: |
+      [global]
+         workgroup = WORKGROUP
+         security = user
+         map to guest = never
+      [docs]
+         path = /srv/docs
+         valid users = @staff
+         guest ok = no
+  stats:
+    /etc/samba/smb.conf: "644"
+
+cases:
+  - name: общие ресурсы только для своих — соблюдено
+    detect: true
+    expect:
+      filesharing.smb_no_guest_access: pass
+
+  - name: ресурс с guest ok = yes — нарушение
+    files:
+      /etc/samba/smb.conf: "[global]\n   security = user\n[public]\n   path = /srv/share\n   guest ok = yes\n"
+    expect:
+      filesharing.smb_no_guest_access: fail
+
+  - name: устаревший синоним public = yes — тоже нарушение
+    files:
+      /etc/samba/smb.conf: "[share]\n   path = /srv/share\n   Public = Yes\n"
+    expect:
+      filesharing.smb_no_guest_access: fail
+
+  - name: табуляция и верхний регистр — тоже нарушение
+    files:
+      /etc/samba/smb.conf: "[share]\n\tGUEST OK = YES\n"
+    expect:
+      filesharing.smb_no_guest_access: fail
+
+  - name: закомментированный guest ok — не нарушение
+    files:
+      /etc/samba/smb.conf: "[share]\n   path = /srv/share\n;  guest ok = yes\n#  guest ok = yes\n"
+    expect:
+      filesharing.smb_no_guest_access: pass
+
+  - name: Samba не установлена — пак не применяется (раньше в ubuntu-server это давало error)
+    drop: [/etc/samba/smb.conf]
+    detect: false
