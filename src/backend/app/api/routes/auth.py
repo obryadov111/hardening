@@ -4,12 +4,18 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from jose import jwt
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_user_allow_password_change, get_db
 from app.core.config import settings
-from app.core.security import create_access_token, decrypt_totp_secret, verify_password
+from app.core.security import (
+    create_access_token,
+    decrypt_totp_secret,
+    hash_password,
+    password_problem,
+    verify_password,
+)
 from app.models.user import User
 from app.models.user_2fa import User2FA
-from app.schemas.auth import LoginRequest, LoginResponse, MeResponse, Verify2FARequest
+from app.schemas.auth import ChangePasswordRequest, LoginRequest, LoginResponse, MeResponse, Verify2FARequest
 from app.services.twofa_service import verify_totp_code
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -67,11 +73,37 @@ def verify_2fa(payload: Verify2FARequest, db: Session = Depends(get_db)):
 
 
 @router.get("/me", response_model=MeResponse)
-def me(current_user: User = Depends(get_current_user)):
+def me(current_user: User = Depends(get_current_user_allow_password_change)):
     return MeResponse(
         id=str(current_user.id),
         email=current_user.email,
         display_name=current_user.display_name,
         is_superadmin=current_user.is_superadmin,
         account_status=current_user.account_status,
+        must_change_password=current_user.must_change_password,
     )
+
+
+@router.post("/change-password", response_model=LoginResponse)
+def change_password(
+    payload: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user_allow_password_change),
+    db: Session = Depends(get_db),
+):
+    """Смена своего пароля (в т.ч. временного, выданного администратором). Все прежние сессии
+    отзываются; в ответе — новый токен для текущей."""
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Текущий пароль неверен")
+    problem = password_problem(payload.new_password, current_user.email)
+    if problem:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Новый пароль не подходит: {problem}")
+    if verify_password(payload.new_password, current_user.password_hash):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Новый пароль должен отличаться от текущего")
+
+    now = datetime.now(UTC)
+    current_user.password_hash = hash_password(payload.new_password)
+    current_user.must_change_password = False
+    current_user.password_changed_at = now
+    current_user.updated_at = now
+    db.commit()
+    return LoginResponse(access_token=create_access_token(str(current_user.id)))

@@ -37,10 +37,12 @@ def get_pack_registry() -> PackRegistry:
     return _load_default_registry()
 
 
-def get_current_user(
+def get_current_user_allow_password_change(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> User:
+    """Пользователь по токену, в т.ч. с временным паролем. Только для /auth/me и смены пароля;
+    остальные ручки — через get_current_user."""
     token = credentials.credentials
     try:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
@@ -53,9 +55,26 @@ def get_current_user(
     user = db.query(User).filter(User.id == subject).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Пользователь не найден")
+    # Смена или сброс пароля отзывает все выданные раньше токены. Токен без iat выдан до появления
+    # этой проверки: для пользователя, у которого пароль с тех пор менялся, он тоже недействителен.
+    if user.password_changed_at is not None:
+        issued_at = payload.get("iat")
+        if issued_at is None or float(issued_at) < user.password_changed_at.timestamp():
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Сессия завершена: пароль был изменён")
     if not user.is_active or user.account_status != "active":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Пользователь заблокирован")
 
+    return user
+
+
+PASSWORD_CHANGE_REQUIRED = "Нужно сменить временный пароль"
+
+
+def get_current_user(user: User = Depends(get_current_user_allow_password_change)) -> User:
+    """Пользователь по токену. С временным паролем (задан администратором) доступ закрыт на сервере,
+    пока пароль не сменён, — а не только скрыт в интерфейсе."""
+    if user.must_change_password:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=PASSWORD_CHANGE_REQUIRED)
     return user
 
 

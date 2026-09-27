@@ -22,9 +22,29 @@ def hash_password(password: str) -> str:
 
 
 def create_access_token(subject: str) -> str:
-    expire = datetime.now(UTC) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    payload = {"sub": subject, "exp": expire}
+    now = datetime.now(UTC)
+    expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    # iat с долями секунды: токен, выданный до смены пароля в ту же секунду, тоже должен отзываться
+    payload = {"sub": subject, "exp": expire, "iat": now.timestamp()}
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+PASSWORD_MIN_LENGTH = 12
+PASSWORD_MAX_LENGTH = 128
+
+
+def password_problem(password: str, email: str | None = None) -> str | None:
+    """Причина, по которой пароль не подходит, или None. Проверяется для паролей, задаваемых через
+    API (создание пользователя, сброс, смена); существующие хэши не пересматриваются."""
+    if len(password) < PASSWORD_MIN_LENGTH:
+        return f"пароль короче {PASSWORD_MIN_LENGTH} символов"
+    if len(password) > PASSWORD_MAX_LENGTH:
+        return f"пароль длиннее {PASSWORD_MAX_LENGTH} символов"
+    if not password.strip():
+        return "пароль не может состоять из пробелов"
+    if email and password.strip().lower() == email.strip().lower():
+        return "пароль не должен совпадать с email"
+    return None
 
 
 def _build_fernet() -> Fernet:

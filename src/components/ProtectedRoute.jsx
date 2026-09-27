@@ -2,6 +2,7 @@ import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { authApi } from "../api/auth";
 import { getStoredAccessToken } from "../api/client";
+import ChangePassword from "../pages/ChangePassword";
 
 // Состояния проверки доступа:
 //  "checking" — ждём /auth/me;
@@ -13,6 +14,7 @@ import { getStoredAccessToken } from "../api/client";
 export default function ProtectedRoute() {
   const [state, setState] = useState("checking");
   const [attempt, setAttempt] = useState(0);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
   const location = useLocation();
 
   useEffect(() => {
@@ -24,8 +26,11 @@ export default function ProtectedRoute() {
         return;
       }
       try {
-        await authApi.getMyProfile();
-        if (mounted) setState("ok");
+        const profile = await authApi.getMyProfile();
+        if (!mounted) return;
+        // Временный пароль: сервер закрывает остальные разделы, пока пароль не сменён.
+        setMustChangePassword(Boolean(profile?.must_change_password));
+        setState("ok");
       } catch {
         if (mounted) setState(getStoredAccessToken() ? "unreachable" : "unauth");
       }
@@ -84,6 +89,10 @@ export default function ProtectedRoute() {
 
   if (state === "unauth") {
     return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+
+  if (mustChangePassword) {
+    return <ChangePassword forced />;
   }
 
   return <Outlet />;

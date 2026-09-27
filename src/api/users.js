@@ -36,10 +36,13 @@ export async function getCurrentUserProfile() {
   return apiFetch("/auth/me");
 }
 
-export async function createUserProfile() {
-  return getCurrentUserProfile();
+// ---------- учётные записи (только суперадмин) ----------
+
+export async function adminListUsers() {
+  return apiFetch("/admin/users");
 }
 
+/** payload: { email, password (временный), full_name?, organization_id?, role? } */
 export async function adminCreateUser(payload) {
   return apiFetch("/admin/users", {
     method: "POST",
@@ -54,8 +57,16 @@ export async function adminResetUserPassword(userId, newPassword) {
   });
 }
 
-export async function adminToggleUserBlock(userId, blocked) {
+export async function adminSetUserBlocked(userId, blocked) {
   return apiFetch(`/admin/users/${userId}/${blocked ? "block" : "activate"}`, {
     method: "POST",
   });
+}
+
+/** Временный пароль для выдачи пользователю: 16 символов из криптостойкого генератора. */
+export function generateTemporaryPassword(length = 16) {
+  // без похожих символов (0/O, 1/l/I) и знаков, которые путаются при передаче (_ выглядит как пробел)
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  const bytes = crypto.getRandomValues(new Uint32Array(length));
+  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
 }

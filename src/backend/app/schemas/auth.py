@@ -24,3 +24,9 @@ class MeResponse(BaseModel):
     display_name: str | None = None
     is_superadmin: bool
     account_status: str
+    must_change_password: bool = False
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str

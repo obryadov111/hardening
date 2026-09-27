@@ -43,6 +43,18 @@ export const authApi = {
     clearStoredAccessToken();
   },
 
+  /** Смена своего пароля; сервер отзывает прежние сессии и выдаёт новый токен. */
+  async changePassword(currentPassword, newPassword) {
+    const data = await apiFetch("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    });
+    if (data.access_token) {
+      setStoredAccessToken(data.access_token);
+    }
+    return data;
+  },
+
   async getSession() {
     const token = getStoredAccessToken();
     return token ? { access_token: token } : null;

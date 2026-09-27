@@ -4,6 +4,8 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import Login from "./pages/Login";
 import { OrganizationProvider } from "./context/OrganizationContext";
 import OrganizationUsers from "./pages/OrganizationUsers";
+import AdminUsers from "./pages/AdminUsers";
+import ChangePassword from "./pages/ChangePassword";
 import Dashboard from "./pages/Dashboard";
 import Assets from "./pages/Assets";
 import AssetDetails from "./pages/AssetDetails";
@@ -36,6 +38,8 @@ export default function App() {
               <Route path="scans" element={<Scans />} />
               <Route path="scan-compare" element={<ScanCompare />} />
               <Route path="organization-users" element={<OrganizationUsers />} />
+              <Route path="admin/users" element={<AdminUsers />} />
+              <Route path="change-password" element={<ChangePassword />} />
             </Route>
           </Route>
           

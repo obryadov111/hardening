@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routes.admin_users import router as admin_users_router
 from app.api.routes.agent import router as agent_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.data import router as data_router
@@ -29,6 +30,7 @@ app.include_router(exports_router, prefix=settings.API_PREFIX)
 app.include_router(snapshots_router, prefix=settings.API_PREFIX)
 app.include_router(policies_router, prefix=settings.API_PREFIX)
 app.include_router(members_router, prefix=settings.API_PREFIX)
+app.include_router(admin_users_router, prefix=settings.API_PREFIX)
 
 
 @app.get("/health")

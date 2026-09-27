@@ -3,10 +3,12 @@ import { AnimatePresence, motion as Motion } from "framer-motion";
 import {
   Building2,
   ChevronDown,
+  KeyRound,
   LogOut,
   Menu,
   Shield,
   UserCog,
+  Users,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { authApi } from "../api/auth";
@@ -195,6 +197,32 @@ export default function Topbar({ onMenuClick }) {
                         <span>Управление доступом</span>
                       </button>
                     ) : null}
+
+                    {profile?.is_superadmin ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          navigate("/admin/users");
+                        }}
+                        className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800"
+                      >
+                        <Users size={16} />
+                        <span>Пользователи системы</span>
+                      </button>
+                    ) : null}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        navigate("/change-password");
+                      }}
+                      className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800"
+                    >
+                      <KeyRound size={16} />
+                      <span>Сменить пароль</span>
+                    </button>
 
                     <button
                       type="button"
