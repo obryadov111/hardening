@@ -208,9 +208,17 @@ def test_astra_host_gets_astra_pack_and_not_the_ubuntu_pack():
     assert matched == ["astra-linux"]
 
 
-def test_astra_pack_is_inventory_only_without_any_checks():
-    pack = PACKS["astra-linux"]
+def test_astra_pack_1_0_0_is_inventory_only_without_any_checks():
+    """1.0.0 — «только обнаружение» — остаётся в реестре: старые результаты ссылаются на неё."""
+    pack = REGISTRY.get("astra-linux", "1.0.0")
     assert pack.maturity == "inventory" and pack.checks == []
+
+
+def test_astra_pack_1_1_0_has_the_debian_family_checks():
+    """С 1.1.0 (образ Astra 1.8.6) — те же 14 проверок, что у ubuntu-server; собственные механизмы Astra — нет."""
+    pack = PACKS["astra-linux"]
+    assert pack.version == "1.1.0" and pack.maturity == "draft"
+    assert [c.id for c in pack.checks] == [c.id for c in PACKS["ubuntu-server"].checks]
 
 
 # ============================== Docker ==============================

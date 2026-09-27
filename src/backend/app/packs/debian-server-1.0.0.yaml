@@ -1,0 +1,247 @@
+# Пак «Debian»: Debian 11 (bullseye), 12 (bookworm), 13 (trixie). Распознаётся по ID=debian.
+#
+# Проверки — те же, что у ubuntu-server 1.3.0 (генерируются из него, pack_sources/debian_family.py):
+# раскладка файлов для них у Debian та же — сверено на официальных образах Debian 11/12/13 2026-09-27.
+# Отличие Debian от Ubuntu на практике: ufw и unattended-upgrades по умолчанию не установлены (в Debian
+# межсетевой экран чаще — nftables напрямую). Нет ufw — проверки межсетевого экрана «не проверено»
+# (нет файлов), а не «соблюдено»; используется nftables — оформить исключение.
+#
+# maturity=draft: агент выполнен в контейнерах Debian 11/12/13 — пак распознан, файловые пробы
+# выполняются на настоящих файлах ОС; службы (auditd) без systemd в контейнере не подтверждены.
+
+pack: debian-server
+version: 1.0.0
+maturity: draft
+tags:
+- linux-server
+- debian-family
+- debian
+transport: local
+asset_type: linux-server
+detect:
+- probe:
+    type: file_kv
+    path: /etc/os-release
+    key: ID
+    separator: equals
+  equals: debian
+checks:
+- id: ssh.permit_root_login
+  title: Запрет входа по SSH под root
+  probe:
+    type: file_kv
+    path: /etc/ssh/sshd_config
+    key: PermitRootLogin
+    follow_include: true
+    default: prohibit-password
+  assert:
+    op: eq
+    value: 'no'
+  severity: high
+  remediation: В sshd_config установить PermitRootLogin no и перезапустить sshd.
+  refs:
+  - source: CIS Debian Linux Benchmark (адаптировано)
+- id: ssh.password_authentication
+  title: Запрет входа по SSH-паролю (только по ключу)
+  probe:
+    type: file_kv
+    path: /etc/ssh/sshd_config
+    key: PasswordAuthentication
+    follow_include: true
+    default: 'yes'
+  assert:
+    op: eq
+    value: 'no'
+  severity: high
+  remediation: В sshd_config установить PasswordAuthentication no.
+  refs:
+  - source: CIS Debian Linux Benchmark (адаптировано)
+- id: ssh.permit_empty_passwords
+  title: Запрет пустых паролей по SSH
+  probe:
+    type: file_kv
+    path: /etc/ssh/sshd_config
+    key: PermitEmptyPasswords
+    follow_include: true
+    default: 'no'
+  assert:
+    op: eq
+    value: 'no'
+  severity: critical
+  remediation: В sshd_config установить PermitEmptyPasswords no.
+  refs:
+  - source: CIS Debian Linux Benchmark (адаптировано)
+- id: ssh.x11_forwarding
+  title: Отключить X11-форвардинг по SSH
+  probe:
+    type: file_kv
+    path: /etc/ssh/sshd_config
+    key: X11Forwarding
+    follow_include: true
+    default: 'no'
+  assert:
+    op: eq
+    value: 'no'
+  severity: low
+  remediation: В sshd_config установить X11Forwarding no.
+  refs:
+  - source: CIS Debian Linux Benchmark (адаптировано)
+- id: ssh.max_auth_tries
+  title: Ограничить число попыток аутентификации SSH
+  probe:
+    type: file_kv
+    path: /etc/ssh/sshd_config
+    key: MaxAuthTries
+    follow_include: true
+    default: '6'
+  assert:
+    op: lte
+    value: 4
+  severity: medium
+  remediation: В sshd_config установить MaxAuthTries 4 (или меньше).
+  refs:
+  - source: CIS Debian Linux Benchmark (адаптировано)
+- id: firewall.ufw_enabled
+  title: Firewall (ufw) активен
+  probe:
+    type: first_of
+    probes:
+    - type: cmd_regex
+      cmd:
+      - ufw
+      - status
+      - verbose
+      pattern: (?i)Status:\s*(active|inactive)
+    - type: file_kv
+      path: /etc/ufw/ufw.conf
+      key: ENABLED
+      separator: equals
+  assert:
+    op: in
+    value:
+    - active
+    - 'yes'
+  severity: high
+  remediation: Выполнить `ufw enable` и проверить `ufw status`.
+  refs:
+  - source: CIS Debian Linux Benchmark (адаптировано)
+- id: firewall.default_incoming_policy
+  title: Политика по умолчанию для входящих — deny
+  probe:
+    type: first_of
+    probes:
+    - type: cmd_regex
+      cmd:
+      - ufw
+      - status
+      - verbose
+      pattern: (?i)Default:\s*(deny|allow|reject)\s*\(incoming\)
+    - type: file_kv
+      path: /etc/default/ufw
+      key: DEFAULT_INPUT_POLICY
+      separator: equals
+  assert:
+    op: in
+    value:
+    - deny
+    - reject
+    - drop
+  severity: high
+  remediation: Выполнить `ufw default deny incoming`.
+  refs:
+  - source: CIS Debian Linux Benchmark (адаптировано)
+- id: updates.unattended_upgrades_enabled
+  title: Автоматические обновления безопасности включены
+  probe:
+    type: file_regex
+    path: /etc/apt/apt.conf.d/20auto-upgrades
+    pattern: Unattended-Upgrade\s+"(\d)"
+  assert:
+    op: eq
+    value: '1'
+  severity: medium
+  remediation: Установить и настроить unattended-upgrades (`dpkg-reconfigure -plow unattended-upgrades`).
+  refs:
+  - source: CIS Debian Linux Benchmark (адаптировано)
+- id: password_policy.pass_max_days
+  title: Максимальный срок действия пароля — не более 90 дней
+  probe:
+    type: file_kv
+    path: /etc/login.defs
+    key: PASS_MAX_DAYS
+  assert:
+    op: lte
+    value: 90
+  severity: medium
+  remediation: В /etc/login.defs установить PASS_MAX_DAYS 90 (или меньше).
+  refs:
+  - source: CIS Debian Linux Benchmark (адаптировано)
+- id: password_policy.pass_min_len
+  title: Минимальная длина пароля — не менее 14 символов
+  probe:
+    type: file_kv
+    path: /etc/security/pwquality.conf
+    key: minlen
+    separator: equals
+    default: '8'
+  assert:
+    op: gte
+    value: 14
+  severity: medium
+  remediation: В /etc/security/pwquality.conf установить minlen=14 (или больше).
+  refs:
+  - source: CIS Debian Linux Benchmark (адаптировано)
+- id: password_policy.pwquality_enabled
+  title: Проверка сложности паролей (pam_pwquality) подключена к PAM
+  probe:
+    type: file_regex
+    path: /etc/pam.d/common-password
+    pattern: ^[^#\n]*\b(pam_pwquality)\.so
+  assert:
+    op: exists
+  severity: medium
+  remediation: Установить libpam-pwquality (`apt install libpam-pwquality`) и проверить строку `password requisite pam_pwquality.so` в /etc/pam.d/common-password.
+  refs:
+  - source: CIS Debian Linux Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.2
+- id: password_policy.lockout_on_failure
+  title: Блокировка после неудачных попыток входа
+  probe:
+    type: file_regex
+    path: /etc/pam.d/common-auth
+    pattern: ^[^#\n]*\b(pam_faillock|pam_tally2)\b
+  assert:
+    op: exists
+  severity: high
+  remediation: Настроить pam_faillock (deny=5, unlock_time=900).
+  refs:
+  - source: CIS Debian Linux Benchmark (адаптировано)
+- id: kernel.ip_forward
+  title: IP-форвардинг отключён (хост не является роутером)
+  probe:
+    type: file_regex
+    path: /proc/sys/net/ipv4/ip_forward
+    pattern: ^\s*(\d)
+  assert:
+    op: eq
+    value: '0'
+  severity: low
+  remediation: Установить net.ipv4.ip_forward=0 в /etc/sysctl.conf и применить `sysctl -p`.
+  refs:
+  - source: CIS Debian Linux Benchmark (адаптировано)
+- id: logging.auditd_active
+  title: Аудит событий безопасности (auditd) активен
+  probe:
+    type: service_state
+    service: auditd
+    field: active
+  assert:
+    op: eq
+    value: active
+  severity: high
+  remediation: Установить пакет auditd (`apt install auditd`) и включить службу (`systemctl enable --now auditd`).
+  refs:
+  - source: CIS Debian Linux Benchmark (адаптировано)
+  - source: Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025
+    id: ОПС.1.11

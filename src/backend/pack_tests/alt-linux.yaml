@@ -1,0 +1,198 @@
+# Образцы для пака alt-linux. Сценарий «как поставляется» — реальные файлы официальных образов alt:p10 и alt:p11
+# (одинаковы для обеих платформ); PAM — схема tcb, сложность паролей — passwdqc, SSH — /etc/openssh.
+pack: alt-linux
+base:
+  files:
+    /etc/os-release: 'NAME="ALT Server"
+
+      VERSION="10.2"
+
+      ID=altlinux
+
+      VERSION_ID=10.2
+
+      '
+    /etc/openssh/sshd_config: 'PermitRootLogin no
+
+      PasswordAuthentication no
+
+      PermitEmptyPasswords no
+
+      X11Forwarding no
+
+      MaxAuthTries 4
+
+      '
+    /etc/login.defs: "PASS_MAX_DAYS\t90\nPASS_MIN_DAYS\t1\n"
+    /etc/passwdqc.conf: 'min=disabled,24,14,14,14
+
+      max=72
+
+      enforce=everyone
+
+      retry=3
+
+      '
+    /etc/pam.d/system-auth-local-only: "auth\t\trequired\tpam_faillock.so preauth\nauth\t\trequired\tpam_tcb.so shadow fork nullok\nauth\t\t[default=die]\tpam_faillock.so authfail\naccount\t\trequired\t\
+      pam_tcb.so shadow fork\npassword\trequired\tpam_passwdqc.so config=/etc/passwdqc.conf\npassword\trequired\tpam_tcb.so use_authtok shadow fork nullok write_to=tcb\n"
+    /proc/sys/net/ipv4/ip_forward: '0
+
+      '
+  stats:
+    /etc/tcb: '710'
+    /etc/shadow: '400'
+  commands:
+    systemctl is-active auditd:
+      stdout: 'active
+
+        '
+      stderr: ''
+      code: 0
+cases:
+- name: укреплённая система — всё соблюдено
+  detect: true
+  expect:
+    ssh.permit_root_login: pass
+    ssh.password_authentication: pass
+    ssh.permit_empty_passwords: pass
+    ssh.x11_forwarding: pass
+    ssh.max_auth_tries: pass
+    password_policy.pass_max_days: pass
+    password_policy.passwdqc_min_length: pass
+    password_policy.passwdqc_enforced: pass
+    password_policy.pwquality_enabled: pass
+    password_policy.lockout_on_failure: pass
+    files.tcb_permissions: pass
+    files.shadow_permissions: pass
+    kernel.ip_forward: pass
+    logging.auditd_active: pass
+- name: ослабленная система — нарушено всё
+  files:
+    /etc/openssh/sshd_config: 'PermitRootLogin yes
+
+      PasswordAuthentication yes
+
+      PermitEmptyPasswords yes
+
+      X11Forwarding yes
+
+      MaxAuthTries 10
+
+      '
+    /etc/login.defs: "PASS_MAX_DAYS\t99999\n"
+    /etc/passwdqc.conf: 'min=6,6,6,6,6
+
+      enforce=none
+
+      '
+    /etc/pam.d/system-auth-local-only: "auth\t\trequired\tpam_tcb.so shadow fork nullok\naccount\t\trequired\tpam_tcb.so shadow fork\npassword\trequired\tpam_pwhistory.so config=/etc/passwdqc.conf\npassword\t\
+      required\tpam_tcb.so use_authtok shadow fork nullok write_to=tcb\nsession\t\trequired\tpam_tcb.so\n"
+    /proc/sys/net/ipv4/ip_forward: '1
+
+      '
+  stats:
+    /etc/tcb: '755'
+    /etc/shadow: '644'
+  commands:
+    systemctl is-active auditd:
+      stdout: 'inactive
+
+        '
+      stderr: ''
+      code: 3
+  expect:
+    ssh.permit_root_login: fail
+    ssh.password_authentication: fail
+    ssh.permit_empty_passwords: fail
+    ssh.x11_forwarding: fail
+    ssh.max_auth_tries: fail
+    password_policy.pass_max_days: fail
+    password_policy.passwdqc_min_length: fail
+    password_policy.passwdqc_enforced: fail
+    password_policy.pwquality_enabled: fail
+    password_policy.lockout_on_failure: fail
+    files.tcb_permissions: fail
+    files.shadow_permissions: fail
+    kernel.ip_forward: fail
+    logging.auditd_active: fail
+- name: Альт p10/p11 как поставляется (файлы сняты с официальных образов 2026-09-27)
+  files:
+    /etc/openssh/sshd_config: "#PermitRootLogin without-password\n#MaxAuthTries 6\n#PasswordAuthentication yes\n#PermitEmptyPasswords no\n#X11Forwarding yes\nSubsystem\tsftp\t/usr/lib/openssh/sftp-server\n"
+    /etc/login.defs: "#PASS_MAX_DAYS\t\t99999\n#PASS_MIN_DAYS\t\t0\nUSERGROUPS_ENAB yes\n"
+    /etc/passwdqc.conf: 'min=disabled,24,11,8,7
+
+      max=72
+
+      passphrase=3
+
+      match=4
+
+      similar=deny
+
+      random=47
+
+      enforce=users
+
+      retry=3
+
+      '
+    /etc/pam.d/system-auth-local-only: "auth\t\trequired\tpam_tcb.so shadow fork nullok\naccount\t\trequired\tpam_tcb.so shadow fork\npassword\trequired\tpam_passwdqc.so config=/etc/passwdqc.conf\npassword\t\
+      required\tpam_tcb.so use_authtok shadow fork nullok write_to=tcb\nsession\t\trequired\tpam_tcb.so\n"
+  expect:
+    ssh.permit_root_login: fail
+    ssh.password_authentication: fail
+    ssh.permit_empty_passwords: pass
+    ssh.x11_forwarding: pass
+    ssh.max_auth_tries: fail
+    password_policy.pass_max_days: fail
+    password_policy.passwdqc_min_length: fail
+    password_policy.passwdqc_enforced: pass
+    password_policy.pwquality_enabled: pass
+    password_policy.lockout_on_failure: fail
+    files.tcb_permissions: pass
+    files.shadow_permissions: pass
+- name: 'passwdqc: одна короткая длина (парольная фраза 11) — уже нарушение'
+  files:
+    /etc/passwdqc.conf: 'min=disabled,24,11,14,14
+
+      '
+  expect:
+    password_policy.passwdqc_min_length: fail
+- name: 'passwdqc: все классы disabled, кроме длинных — соблюдено'
+  files:
+    /etc/passwdqc.conf: 'min=disabled,disabled,disabled,disabled,16
+
+      '
+  expect:
+    password_policy.passwdqc_min_length: pass
+- name: login.defs недоступен (агент без группы shadow) — «не проверено», а не «соблюдено»
+  drop:
+  - /etc/login.defs
+  expect:
+    password_policy.pass_max_days: error
+- name: 'распознаётся: образ alt:p11 (ALT Container)'
+  files:
+    /etc/os-release: 'NAME="ALT Container"
+
+      ID=altlinux
+
+      VERSION_ID=11
+
+      '
+  detect: true
+- name: 'не распознаётся: РЕД ОС (тоже RPM, но свой пак)'
+  files:
+    /etc/os-release: 'ID="redos"
+
+      ID_LIKE="rhel centos fedora"
+
+      '
+  detect: false
+- name: 'не распознаётся: Astra Linux'
+  files:
+    /etc/os-release: 'ID=astra
+
+      ID_LIKE=debian
+
+      '
+  detect: false

@@ -1,4 +1,4 @@
-# Проверка Linux-паков на НАСТОЯЩИХ файлах ОС: агент (системный python3 дистрибутива) запускается в
+# Проверка Linux-паков (RHEL- и Debian-семейства, РЕД ОС, Astra) на НАСТОЯЩИХ файлах ОС: агент (системный python3 дистрибутива) запускается в
 # контейнерах официальных образов с типовыми серверными пакетами и умолчаниями дистрибутива; результат
 # оценивается логикой сервера (pack evaluate). Падает, если пак не распознал ОС или файловая проба
 # не выполнилась — например, дистрибутив в новой версии поменял путь или формат.
@@ -11,6 +11,10 @@ on:
     paths:
       - "agent/**"
       - "src/backend/app/packs/rhel-family-*"
+      - "src/backend/app/packs/ubuntu-server-*"
+      - "src/backend/app/packs/debian-server-*"
+      - "src/backend/app/packs/astra-linux-*"
+      - "src/backend/app/packs/alt-linux-*"
       - "src/backend/app/services/packs/**"
       - "src/backend/app/commands/pack.py"
       - ".github/scripts/agent-in-container.sh"
@@ -24,19 +28,32 @@ env:
   PACK_SIGNING_KEY: ci
 
 jobs:
-  rhel-family:
+  live:
+    name: ${{ matrix.image }} → ${{ matrix.pack }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        image:
-          - rockylinux:8
-          - rockylinux:9
-          - almalinux:9
-          - oraclelinux:9
-          - quay.io/centos/centos:stream9
-          - registry.red-soft.ru/ubi7/ubi:latest   # РЕД ОС 7.3 МУРОМ
-          - registry.red-soft.ru/ubi8/ubi:latest   # РЕД ОС 8
+        include:
+          # RHEL-семейство; без systemd в контейнере службы — «не проверено» по построению
+          - { image: "rockylinux:8", pack: rhel-family, allow: "firewall.firewalld_active logging.auditd_active services.telnet_inactive" }
+          - { image: "rockylinux:9", pack: rhel-family, allow: "firewall.firewalld_active logging.auditd_active services.telnet_inactive" }
+          - { image: "almalinux:9", pack: rhel-family, allow: "firewall.firewalld_active logging.auditd_active services.telnet_inactive" }
+          - { image: "oraclelinux:9", pack: rhel-family, allow: "firewall.firewalld_active logging.auditd_active services.telnet_inactive" }
+          - { image: "quay.io/centos/centos:stream9", pack: rhel-family, allow: "firewall.firewalld_active logging.auditd_active services.telnet_inactive" }
+          - { image: "registry.red-soft.ru/ubi7/ubi:latest", pack: rhel-family, allow: "firewall.firewalld_active logging.auditd_active services.telnet_inactive" }   # РЕД ОС 7.3
+          - { image: "registry.red-soft.ru/ubi8/ubi:latest", pack: rhel-family, allow: "firewall.firewalld_active logging.auditd_active services.telnet_inactive" }   # РЕД ОС 8
+          # Debian-семейство (Debian 11 — пакеты из archive.debian.org, поддержка закончилась)
+          - { image: "ubuntu:20.04", pack: ubuntu-server, allow: "logging.auditd_active" }
+          - { image: "ubuntu:22.04", pack: ubuntu-server, allow: "logging.auditd_active" }
+          - { image: "ubuntu:24.04", pack: ubuntu-server, allow: "logging.auditd_active" }
+          - { image: "debian:11", pack: debian-server, allow: "logging.auditd_active" }
+          - { image: "debian:12", pack: debian-server, allow: "logging.auditd_active" }
+          - { image: "debian:13", pack: debian-server, allow: "logging.auditd_active" }
+          - { image: "registry.astralinux.ru/library/astra/ubi18:latest", pack: astra-linux, allow: "logging.auditd_active" }   # Astra SE 1.8
+          # Альт
+          - { image: "alt:p10", pack: alt-linux, allow: "logging.auditd_active" }
+          - { image: "alt:p11", pack: alt-linux, allow: "logging.auditd_active" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -56,8 +73,9 @@ jobs:
           docker run --rm -v "$PWD/agent:/agent:ro" -v "$PWD/work:/work:ro" -v "$PWD/.github/scripts:/scripts:ro" \
             "${{ matrix.image }}" sh /scripts/agent-in-container.sh > payload.json
 
-      - name: Evaluate
+      - name: Evaluate ${{ matrix.pack }}
         working-directory: src/backend
-        run: >
-          python -m app.commands.pack evaluate ../../payload.json --pack rhel-family
-          --allow-error firewall.firewalld_active --allow-error logging.auditd_active --allow-error services.telnet_inactive
+        run: |
+          args=""
+          for check in ${{ matrix.allow }}; do args="$args --allow-error $check"; done
+          python -m app.commands.pack evaluate ../../payload.json --pack ${{ matrix.pack }} $args

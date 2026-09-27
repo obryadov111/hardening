@@ -1,18 +1,16 @@
-# Образцы для пака astra-linux. Проверки те же, что у ubuntu-server (генерируются из него), поэтому сценарии
+# Образцы для пака debian-server. Проверки те же, что у ubuntu-server (генерируются из него), поэтому сценарии
 # укреплённого/слабого хоста взяты из pack_tests/ubuntu-server.yaml с подменой /etc/os-release; сценарий «как
 # поставляется» — реальные файлы, снятые с официального образа.
-pack: astra-linux
+pack: debian-server
 base:
   files:
-    /etc/os-release: 'PRETTY_NAME="Astra Linux"
+    /etc/os-release: 'PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"
 
-      NAME="Astra Linux"
+      NAME="Debian GNU/Linux"
 
-      ID=astra
+      VERSION_ID="12"
 
-      ID_LIKE=debian
-
-      VERSION_ID=1.8_x86-64
+      ID=debian
 
       '
     /etc/ssh/sshd_config: 'PermitRootLogin no
@@ -144,7 +142,7 @@ cases:
     password_policy.lockout_on_failure: fail
     kernel.ip_forward: fail
     logging.auditd_active: fail
-- name: 'Astra Linux SE 1.8.6 как поставляется (файлы сняты с официального образа 2026-09-27): пароли ГОСТ gost12_512, pam_pwquality подключён'
+- name: Debian 12 как поставляется (файлы сняты с официального образа 2026-09-27, установлены ufw/auditd/pwquality/unattended-upgrades)
   files:
     /etc/ssh/sshd_config: "Include /etc/ssh/sshd_config.d/*.conf\nKbdInteractiveAuthentication no\nUsePAM yes\nX11Forwarding yes\nPrintMotd no\nAcceptEnv LANG LC_*\nSubsystem\tsftp\t/usr/lib/openssh/sftp-server\n"
     /etc/login.defs: "PASS_MAX_DAYS\t99999\nPASS_MIN_DAYS\t0\n"
@@ -152,8 +150,8 @@ cases:
 
       '
     /etc/pam.d/common-auth: "auth\t[success=1 default=ignore]\tpam_unix.so nullok\nauth\trequisite\t\t\tpam_deny.so\nauth\trequired\t\t\tpam_permit.so\n"
-    /etc/pam.d/common-password: "password\trequisite\t\t\tpam_pwquality.so retry=3 local_users_only\npassword\t[success=1 default=ignore]\tpam_unix.so obscure use_authtok try_first_pass gost12_512\npassword\t\
-      requisite\t\t\tpam_deny.so\npassword\trequired\t\t\tpam_permit.so\n"
+    /etc/pam.d/common-password: "password\trequisite\t\t\tpam_pwquality.so retry=3\npassword\t[success=1 default=ignore]\tpam_unix.so obscure use_authtok try_first_pass yescrypt\npassword\trequisite\t\t\
+      \tpam_deny.so\npassword\trequired\t\t\tpam_permit.so\n"
     /etc/ufw/ufw.conf: 'ENABLED=no
 
       '
@@ -223,13 +221,23 @@ cases:
     ssh.permit_root_login: error
     ssh.permit_empty_passwords: error
     password_policy.pass_min_len: error
-- name: 'распознаётся: Astra (NAME без ID)'
+- name: 'распознаётся: Debian 11'
   files:
-    /etc/os-release: 'NAME="Astra Linux"
+    /etc/os-release: 'ID=debian
+
+      VERSION_ID="11"
 
       '
   detect: true
-- name: 'не распознаётся: Ubuntu 24.04 (свой пак)'
+- name: 'распознаётся: Debian 13'
+  files:
+    /etc/os-release: 'ID=debian
+
+      VERSION_ID="13"
+
+      '
+  detect: true
+- name: 'не распознаётся: Ubuntu 24.04 (у неё свой пак)'
   files:
     /etc/os-release: 'ID=ubuntu
 
@@ -237,9 +245,19 @@ cases:
 
       '
   detect: false
-- name: 'не распознаётся: Debian 12 (свой пак)'
+- name: 'не распознаётся: Astra Linux (свой пак)'
   files:
-    /etc/os-release: 'ID=debian
+    /etc/os-release: 'ID=astra
+
+      ID_LIKE=debian
+
+      '
+  detect: false
+- name: 'не распознаётся: Rocky 9'
+  files:
+    /etc/os-release: 'ID="rocky"
+
+      ID_LIKE="rhel centos fedora"
 
       '
   detect: false

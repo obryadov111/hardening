@@ -1,0 +1,173 @@
+# Пак «Альт» (ALT Linux / Альт Сервер, платформы p10 и p11). Распознаётся по ID=altlinux в /etc/os-release.
+#
+# Альт устроен иначе, чем Debian- и RHEL-семейства, — поэтому отдельный пак, а не расширение тех:
+#   * SSH — /etc/openssh/sshd_config (не /etc/ssh); в поставке все параметры закомментированы —
+#     действуют умолчания OpenSSH (PermitRootLogin without-password = prohibit-password);
+#   * PAM — схема tcb: /etc/pam.d/system-auth-local-only с pam_tcb и pam_passwdqc (не pam_unix/pam_pwquality);
+#   * сложность паролей — passwdqc (/etc/passwdqc.conf), а не pwquality: min=N0,N1,N2,N3,N4 — минимальная
+#     длина для паролей из 1/2/3/4 классов символов и парольных фраз; в поставке min=disabled,24,11,8,7 —
+#     самый короткий допустимый пароль 7 символов;
+#   * хэши паролей — в /etc/tcb/<пользователь>/shadow (каталог 710 root:shadow), /etc/shadow — 400;
+#   * /etc/login.defs — 640 root:shadow: агенту без root/группы shadow не прочитать — «не проверено».
+# Сверено на официальных образах alt:p10 и alt:p11 2026-09-27.
+#
+# Намеренно НЕТ проверки межсетевого экрана и автообновлений: у Альта нет механизма по умолчанию (etcnet
+# /etc/net/ifaces/*/fw, nftables или firewalld — выбор администратора; автообновлений в поставке нет).
+# Придумывать «правильный» механизм нельзя — это следующий шаг после сбора практики с реальных установок.
+#
+# maturity=draft: агент выполнен в контейнерах Альт p10 и p11 — пак распознан, файловые пробы выполняются
+# на настоящих файлах; службы (auditd) без systemd не подтверждены.
+
+pack: alt-linux
+version: 1.0.0
+maturity: draft
+tags: [linux-server, alt]
+transport: local
+asset_type: linux-server
+
+detect:
+  - probe: { type: file_kv, path: /etc/os-release, key: ID, separator: equals }
+    equals: altlinux
+
+checks:
+  # ---------- SSH (id как у ubuntu-server и rhel-family; путь — /etc/openssh) ----------
+  - id: ssh.permit_root_login
+    title: Запрет входа по SSH под root
+    probe: { type: file_kv, path: /etc/openssh/sshd_config, key: PermitRootLogin, default: without-password, follow_include: true }
+    assert: { op: eq, value: "no" }
+    severity: high
+    remediation: "PermitRootLogin no в /etc/openssh/sshd_config; перезапустить sshd."
+    refs:
+      - { source: "CIS Distribution Independent Linux Benchmark (адаптировано под Альт)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.10" }
+
+  - id: ssh.password_authentication
+    title: Запрет входа по SSH-паролю (только по ключу)
+    probe: { type: file_kv, path: /etc/openssh/sshd_config, key: PasswordAuthentication, default: "yes", follow_include: true }
+    assert: { op: eq, value: "no" }
+    severity: high
+    remediation: "PasswordAuthentication no (или control sshd-password-auth disabled), предварительно разложив ключи."
+    refs:
+      - { source: "CIS Distribution Independent Linux Benchmark (адаптировано под Альт)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.10" }
+
+  - id: ssh.permit_empty_passwords
+    title: Запрет пустых паролей по SSH
+    probe: { type: file_kv, path: /etc/openssh/sshd_config, key: PermitEmptyPasswords, default: "no", follow_include: true }
+    assert: { op: eq, value: "no" }
+    severity: critical
+    remediation: "PermitEmptyPasswords no."
+    refs:
+      - { source: "CIS Distribution Independent Linux Benchmark (адаптировано под Альт)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.1" }
+
+  - id: ssh.x11_forwarding
+    title: Отключить X11-форвардинг по SSH
+    probe: { type: file_kv, path: /etc/openssh/sshd_config, key: X11Forwarding, default: "no", follow_include: true }
+    assert: { op: eq, value: "no" }
+    severity: low
+    remediation: "X11Forwarding no."
+    refs: [{ source: "CIS Distribution Independent Linux Benchmark (адаптировано под Альт)" }]
+
+  - id: ssh.max_auth_tries
+    title: Ограничить число попыток аутентификации SSH
+    probe: { type: file_kv, path: /etc/openssh/sshd_config, key: MaxAuthTries, default: "6", follow_include: true }
+    assert: { op: lte, value: 4 }
+    severity: medium
+    remediation: "MaxAuthTries 4."
+    refs:
+      - { source: "CIS Distribution Independent Linux Benchmark (адаптировано под Альт)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.4" }
+
+  # ---------- парольная политика: passwdqc, tcb ----------
+  - id: password_policy.pass_max_days
+    title: Максимальный срок действия пароля — не более 90 дней
+    # login.defs у Альта — 640 root:shadow: без root/группы shadow агент получит «не проверено», а не значение.
+    # В поставке PASS_MAX_DAYS закомментирован («#PASS_MAX_DAYS 99999») — действует умолчание 99999 (не истекает).
+    probe: { type: file_kv, path: /etc/login.defs, key: PASS_MAX_DAYS, default: "99999" }
+    assert: { op: lte, value: 90 }
+    severity: medium
+    remediation: "PASS_MAX_DAYS 90 в /etc/login.defs; существующим учёткам — chage -M 90."
+    refs:
+      - { source: "CIS Distribution Independent Linux Benchmark (адаптировано под Альт)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.2" }
+
+  - id: password_policy.passwdqc_min_length
+    title: passwdqc не допускает паролей короче 14 символов ни для одного класса (min)
+    # min=N0,N1,N2,N3,N4: каждое числовое значение >= 14 (disabled — такие пароли запрещены совсем)
+    probe: { type: file_kv, path: /etc/passwdqc.conf, key: min, separator: equals }
+    assert: { op: regex, value: '^((disabled|1[4-9]|[2-9][0-9]|[0-9]{3,}),){4}(disabled|1[4-9]|[2-9][0-9]|[0-9]{3,})$' }
+    severity: medium
+    remediation: "В /etc/passwdqc.conf: min=disabled,24,14,14,14 (или control passwdqc-min … на p11)."
+    refs:
+      - { source: "CIS Distribution Independent Linux Benchmark (адаптировано под Альт)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.2" }
+
+  - id: password_policy.passwdqc_enforced
+    title: Требования passwdqc обязательны (enforce не none)
+    probe: { type: file_kv, path: /etc/passwdqc.conf, key: enforce, separator: equals, default: users }
+    assert: { op: in, value: [users, everyone] }
+    severity: medium
+    remediation: "control passwdqc-enforce users (или everyone — тогда и для root)."
+    refs:
+      - { source: "CIS Distribution Independent Linux Benchmark (адаптировано под Альт)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.2" }
+
+  - id: password_policy.pwquality_enabled
+    title: Проверка сложности паролей (pam_passwdqc) подключена к PAM
+    probe: { type: file_regex, path: /etc/pam.d/system-auth-local-only, pattern: '(?m)^\s*password\s+\S+\s+(pam_passwdqc)\.so' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "Не удалять строку password required pam_passwdqc.so из system-auth-local-only."
+    refs:
+      - { source: "CIS Distribution Independent Linux Benchmark (адаптировано под Альт)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.2" }
+
+  - id: password_policy.lockout_on_failure
+    title: Блокировка после неудачных попыток входа (pam_faillock)
+    probe: { type: file_regex, path: /etc/pam.d/system-auth-local-only, pattern: '(?m)^\s*auth\s+\S+(?:\s+\S+)*?\s+(pam_faillock|pam_tally2)\.so' }
+    assert: { op: exists }
+    severity: high
+    remediation: "Установить pam_faillock и подключить в system-auth-local-only (preauth до pam_tcb, authfail после); deny = 5, unlock_time = 900."
+    refs:
+      - { source: "CIS Distribution Independent Linux Benchmark (адаптировано под Альт)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.4" }
+
+  - id: files.tcb_permissions
+    title: Каталог хэшей паролей /etc/tcb недоступен посторонним (не шире 710)
+    probe: { type: file_stat, path: /etc/tcb, field: mode }
+    assert: { op: mode_within, value: "710" }
+    severity: high
+    remediation: "chmod 710 /etc/tcb; владелец root:shadow (умолчание Альта)."
+    refs:
+      - { source: "CIS Distribution Independent Linux Benchmark (адаптировано под Альт)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.7" }
+
+  - id: files.shadow_permissions
+    title: Файл /etc/shadow недоступен никому, кроме root (не шире 400)
+    probe: { type: file_stat, path: /etc/shadow, field: mode }
+    assert: { op: mode_within, value: "400" }
+    severity: medium
+    remediation: "chmod 400 /etc/shadow (умолчание Альта)."
+    refs:
+      - { source: "CIS Distribution Independent Linux Benchmark (адаптировано под Альт)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.7" }
+
+  # ---------- ядро и журналирование (id как у ubuntu-server) ----------
+  - id: kernel.ip_forward
+    title: IP-форвардинг отключён (хост не является роутером)
+    probe: { type: file_regex, path: /proc/sys/net/ipv4/ip_forward, pattern: '^\s*(\d)' }
+    assert: { op: eq, value: "0" }
+    severity: low
+    remediation: "net.ipv4.ip_forward = 0 в /etc/sysctl.d/; на хостах с контейнерами и VPN — оформить исключение."
+    refs: [{ source: "CIS Distribution Independent Linux Benchmark (адаптировано под Альт)" }]
+
+  - id: logging.auditd_active
+    title: Аудит событий безопасности (auditd) активен
+    probe: { type: service_state, service: auditd }
+    assert: { op: eq, value: active }
+    severity: high
+    remediation: "apt-get install audit; systemctl enable --now auditd."
+    refs:
+      - { source: "CIS Distribution Independent Linux Benchmark (адаптировано под Альт)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "ОПС.1.11" }
