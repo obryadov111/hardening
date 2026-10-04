@@ -50,6 +50,7 @@ hostname sw-core-01
 enable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0
 !
 aaa new-model
+login block-for 300 attempts 5 within 60
 !
 ip ssh version 2
 no ip http server
@@ -128,7 +129,7 @@ def test_cisco_pack_is_not_detected_on_other_platforms(banner):
 def test_cisco_hardened_config_passes_everything():
     transport, _ = cisco(CISCO_HARDENED)
     result = statuses("cisco-ios", transport)
-    assert len(result) == 11 and set(result.values()) == {"pass"}, {k: v for k, v in result.items() if v != "pass"}
+    assert len(result) == 12 and set(result.values()) == {"pass"}, {k: v for k, v in result.items() if v != "pass"}
 
 
 def test_cisco_weak_config_each_violation_is_caught_by_exactly_one_check():
@@ -214,10 +215,11 @@ def test_astra_pack_1_0_0_is_inventory_only_without_any_checks():
     assert pack.maturity == "inventory" and pack.checks == []
 
 
-def test_astra_pack_1_1_0_has_the_debian_family_checks():
-    """С 1.1.0 (образ Astra 1.8.6) — те же 14 проверок, что у ubuntu-server; собственные механизмы Astra — нет."""
+def test_astra_pack_has_the_debian_family_checks():
+    """С 1.1.0 (образ Astra 1.8.6) — те же проверки, что у ubuntu-server (1.2.0 — из ubuntu-server 1.4.0);
+    собственные механизмы Astra — нет."""
     pack = PACKS["astra-linux"]
-    assert pack.version == "1.1.0" and pack.maturity == "draft"
+    assert pack.version == "1.2.0" and pack.maturity == "draft"
     assert [c.id for c in pack.checks] == [c.id for c in PACKS["ubuntu-server"].checks]
 
 
@@ -227,6 +229,8 @@ class Host(regression.FakeHost):
     """Смоделированный хост, умеющий stat (для сокета docker)."""
 
     def stat_file(self, path):
+        if path in regression.HARDENED_MODES:
+            return super().stat_file(path)
         if path not in self.files:
             raise probes.ProbeError(f"нет {path}")
         return SimpleNamespace(st_mode=0o140660, st_uid=0, st_gid=999)
@@ -243,7 +247,11 @@ DOCKER_SAFE_DEFAULTS = {
     "HostConfig.NanoCpus": "500000000",
     "HostConfig.NetworkMode": "bridge",
     "HostConfig.PidMode": "",
+    # 1.2.0 (JSON-поля inspect)
+    "json .HostConfig.PortBindings": '{"8000/tcp":[{"HostIp":"127.0.0.1","HostPort":"8000"}]}',
+    "json .HostConfig.SecurityOpt": '["no-new-privileges"]',
 }
+DOCKER_ICC_COMMAND = 'docker network inspect bridge --format {{index .Options "com.docker.network.bridge.enable_icc"}}'
 # Статусы шести новых проверок 1.1.0 при безопасных значениях по умолчанию — используется там, где
 # тест варьирует только один параметр (privileged) и не хочет переписывать весь ожидаемый словарь.
 DOCKER_SAFE_STATUSES = {
@@ -253,6 +261,10 @@ DOCKER_SAFE_STATUSES = {
     "docker.cpu_limit_set": "pass",
     "docker.no_host_network": "pass",
     "docker.no_host_pid": "pass",
+    "docker.icc_disabled": "pass",
+    "docker.no_ports_on_all_interfaces": "pass",
+    "docker.no_new_privileges": "pass",
+    "docker.socket_permissions": "pass",
 }
 
 
@@ -266,7 +278,9 @@ def docker_host(containers=None, ps_code=0, with_socket=True):
         overrides = {"HostConfig.Privileged": cfg} if isinstance(cfg, str) else cfg
         fields = {**DOCKER_SAFE_DEFAULTS, **overrides}
         for field, value in fields.items():
-            commands[f"docker inspect --format {{{{.{field}}}}} {cid}"] = (f"{value}\n", "", 0)
+            fmt = f"{{{{{field}}}}}" if field.startswith("json ") else f"{{{{.{field}}}}}"
+            commands[f"docker inspect --format {fmt} {cid}"] = (f"{value}\n", "", 0)
+    commands[DOCKER_ICC_COMMAND] = ("false\n", "", 0)
     files = dict(regression.HARDENED_FILES)
     if with_socket:
         files["/var/run/docker.sock"] = ""
@@ -289,9 +303,11 @@ def test_docker_privileged_check(containers, expected):
 
 def test_docker_unavailable_is_error_not_a_pass():
     # старый агент: docker отказал -> нет факта -> error; пак сохраняет это (а не «привилегированных нет»)
-    # docker ps -q отказывает одинаково для всех семи проверок пака (каждая сама вызывает list_cmd).
-    all_error = {c.id: "error" for c in PACKS["docker"].checks}
-    assert statuses("docker", docker_host({"aaa111bbb222": "true"}, ps_code=1)) == all_error
+    # docker ps -q отказывает одинаково для всех проверок по контейнерам (каждая сама вызывает list_cmd).
+    # Проверки уровня демона (1.2.0: icc сети bridge, права сокета) от списка контейнеров не зависят.
+    per_container = {c.id: "error" for c in PACKS["docker"].checks if c.probe.type == "cmd_foreach"}
+    expected = {**per_container, "docker.icc_disabled": "pass", "docker.socket_permissions": "pass"}
+    assert statuses("docker", docker_host({"aaa111bbb222": "true"}, ps_code=1)) == expected
 
 
 # ---------- новые проверки 1.1.0 (методика ФСТЭК, раздел СКО) ----------
@@ -379,8 +395,9 @@ PG_HBA_PATH = "/etc/postgresql/16/main/pg_hba.conf"
 PG_LOG_PATH = "/var/log/postgresql/postgresql-16-main.log"
 PG_DATA_PATH = "/var/lib/postgresql/16/main"
 
-PG_HARDENED_CONF = "listen_addresses = 'localhost'\nssl = on\nssl_min_protocol_version = 'TLSv1.2'\n"
-PG_HARDENED_HBA = "local   all all                trust\nhost    all all 127.0.0.1/32 scram-sha-256\nhost    all all ::1/128     scram-sha-256\n"
+PG_HARDENED_CONF = ("listen_addresses = 'localhost'\nssl = on\nssl_min_protocol_version = 'TLSv1.2'\n"
+                    "password_encryption = 'scram-sha-256'\nshared_preload_libraries = 'auth_delay'\n")
+PG_HARDENED_HBA = "local   all all                peer\nhost    all all 127.0.0.1/32 scram-sha-256\nhost    all all ::1/128     scram-sha-256\n"
 # Реальные строки, снятые с контейнера diploma_db этого хоста (2026-09-24, только чтение):
 PG_WEAK_HBA = (
     "local   all             all                                     trust\n"
@@ -409,7 +426,7 @@ def test_postgresql_pack_detected_only_when_conf_exists():
 
 def test_postgresql_hardened_host_passes_everything():
     result = statuses("postgresql", postgres_host())
-    assert len(result) == 6 and set(result.values()) == {"pass"}, {k: v for k, v in result.items() if v != "pass"}
+    assert len(result) == 9 and set(result.values()) == {"pass"}, {k: v for k, v in result.items() if v != "pass"}
 
 
 def test_postgresql_real_weak_config_from_this_hosts_container_fails_as_expected():
@@ -521,23 +538,23 @@ def test_several_packs_are_evaluated_in_one_ingest_with_one_snapshot(client, db,
 
     body = client.post("/api/ingest", json=payload, headers={"X-Agent-Api-Key": key}).json()
 
-    assert body["checks"] == {"total": 21, "passed": 20, "failed": 1, "errors": 0}  # 14 от ОС-пака + 7 от docker (6 pass + privileged fail)
+    assert body["checks"] == {"total": 36, "passed": 35, "failed": 1, "errors": 0}  # 25 от ОС-пака + 11 от docker (10 pass + privileged fail)
     by_pack = {p["id"]: p for p in body["packs"]}
-    assert (by_pack["docker"]["total"], by_pack["docker"]["failed"], by_pack["docker"]["maturity"]) == (7, 1, "baseline")
-    assert (by_pack["ubuntu-server"]["total"], by_pack["ubuntu-server"]["passed"]) == (14, 14)
+    assert (by_pack["docker"]["total"], by_pack["docker"]["failed"], by_pack["docker"]["maturity"]) == (11, 1, "baseline")
+    assert (by_pack["ubuntu-server"]["total"], by_pack["ubuntu-server"]["passed"]) == (25, 25)
     assert db.execute(text("SELECT COUNT(*) FROM scan_snapshots")).scalar() == 1
     rows = db.execute(text("SELECT pack_id, COUNT(*) FROM hardening_checks GROUP BY pack_id ORDER BY pack_id")).all()
-    assert [tuple(r) for r in rows] == [("docker", 7), ("ubuntu-server", 14)]
+    assert [tuple(r) for r in rows] == [("docker", 11), ("ubuntu-server", 25)]
 
 
 def test_a_later_run_without_a_pack_drops_that_packs_current_state(client, db, make_org, make_agent_key):
     key = make_agent_key(make_org("Drop Org"))
     client.post("/api/ingest", json=_run_payload(docker_host({})), headers={"X-Agent-Api-Key": key})
-    assert db.execute(text("SELECT COUNT(*) FROM hardening_checks")).scalar() == 21  # 14 от ОС-пака + 7 от docker (0 контейнеров -> все проверки pass)
+    assert db.execute(text("SELECT COUNT(*) FROM hardening_checks")).scalar() == 36  # 25 от ОС-пака + 11 от docker (0 контейнеров -> все проверки pass)
 
     client.post("/api/ingest", json=_run_payload(docker_host(with_socket=False)), headers={"X-Agent-Api-Key": key})
 
-    assert db.execute(text("SELECT COUNT(*) FROM hardening_checks")).scalar() == 14  # docker удалён с хоста — его проверок нет
+    assert db.execute(text("SELECT COUNT(*) FROM hardening_checks")).scalar() == 25  # docker удалён с хоста — его проверок нет
     assert db.execute(text("SELECT COUNT(*) FROM scan_snapshots")).scalar() == 2  # история сохранена
 
 

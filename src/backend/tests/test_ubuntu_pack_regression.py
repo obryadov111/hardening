@@ -51,7 +51,14 @@ SHARED = sorted(check.id for check in PACK.checks if check.id in _LEGACY_CODES)
 # Проверки без аналога в старом агенте (добавлены в 1.1.0 по методике ФСТЭК от 25.11.2025, раздел ОПС) —
 # не сравниваются со старой логикой и тестируются отдельно ниже. filesharing.smb_no_guest_access
 # с 1.2.0 — в отдельном паке samba (образцы: pack_tests/samba.yaml).
-NEW_CHECKS = {"logging.auditd_active", "password_policy.pwquality_enabled"}  # 1.3.0: pam_pwquality
+NEW_CHECKS = {
+    "logging.auditd_active", "password_policy.pwquality_enabled",  # 1.1.0, 1.3.0
+    # 1.4.0: построчная сверка с методикой ФСТЭК (ОПС.1.1/1.3/1.6/1.7/1.8/1.9/1.13, СУД.1.3)
+    "accounts.pam_nullok_absent", "mac.apparmor_enabled", "accounts.uid0_only_root",
+    "files.shadow_permissions", "files.passwd_permissions",
+    "services.telnet_inactive", "services.rsh_inactive", "services.ftp_inactive",
+    "ssh.no_weak_ciphers", "ssh.no_weak_macs", "kernel.usb_storage_disabled",
+}
 # Намеренные отличия критичности от сида старого агента: 1.2.0, сверка с методикой оценки
 # критичности ФСТЭК от 30.06.2025 (правило — README паков). Любое другое расхождение — провал.
 SEVERITY_CHANGES = {
@@ -82,6 +89,12 @@ class FakeHost:
             raise probes.ProbeError(f"нет файла {path}")
         return self.files[path]
 
+    def stat_file(self, path):
+        # права файлов эталонного хоста (файловые пробы file_stat; содержимое /etc/shadow агент не читает)
+        if path not in HARDENED_MODES:
+            raise probes.ProbeError(f"нет {path}")
+        return SimpleNamespace(st_mode=HARDENED_MODES[path], st_uid=0, st_gid=0)
+
     def glob(self, pattern):
         return sorted(p for p in self.files if fnmatch.fnmatch(p, pattern))
 
@@ -106,8 +119,20 @@ HARDENED_FILES = {
     "/etc/pam.d/common-auth": "auth required pam_faillock.so preauth deny=5\nauth [success=1] pam_unix.so\n",
     "/etc/pam.d/common-password": "password requisite pam_pwquality.so retry=3\npassword [success=1] pam_unix.so obscure\n",
     "/proc/sys/net/ipv4/ip_forward": "0\n",
+    # 1.4.0
+    "/sys/module/apparmor/parameters/enabled": "Y\n",
+    "/etc/passwd": "root:x:0:0:root:/root:/bin/bash\nadmin:x:1000:1000::/home/admin:/bin/bash\n",
 }
-HARDENED_COMMANDS = {"ufw status verbose": (UFW_ACTIVE, "", 0), "systemctl is-active auditd": ("active\n", "", 0)}
+HARDENED_MODES = {"/etc/shadow": 0o100640, "/etc/passwd": 0o100644}
+HARDENED_COMMANDS = {
+    "ufw status verbose": (UFW_ACTIVE, "", 0),
+    "systemctl is-active auditd": ("active\n", "", 0),
+    # 1.4.0
+    "systemctl is-active inetd": ("inactive\n", "", 3),
+    "systemctl is-active rsh.socket": ("inactive\n", "", 3),
+    "systemctl is-active vsftpd": ("inactive\n", "", 3),
+    "modprobe -n -v usb-storage": ("install /bin/false \n", "", 0),
+}
 
 
 def make_host(files=None, commands=None, drop=()):

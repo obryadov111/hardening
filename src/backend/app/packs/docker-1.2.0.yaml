@@ -1,0 +1,216 @@
+# Пак «Docker»: проверки хоста с Docker Engine. Перенос правила docker.no_privileged_containers
+# старого агента (collector.py: docker ps -q -> docker inspect).
+#
+# Применяется вместе с паком ОС (ubuntu-server и т. п.): агент выполняет все подошедшие паки за один прогон.
+# Признак Docker на хосте — сокет /var/run/docker.sock.
+#
+# Отличие от старого агента: если docker недоступен или отказал в доступе, проверка получает error
+# («не удалось проверить»), а не «привилегированных контейнеров нет». Список контейнеров и inspect по
+# каждому идентификатору выполняются отдельными вызовами, каждый проходит белый список агента.
+#
+# 1.1.0 (сверка с «Методикой анализа защищённости информационных систем», ФСТЭК России 25.11.2025,
+# раздел СКО — средства контейнеризации): добавлены 6 проверок из СКО.1.2/1.3/1.5/1.6. Каждой
+# соответствует новое разрешённое поле docker inspect в agent/probes.py (LOCAL_COMMAND_POLICY) —
+# закрытый список, не «любое поле». Не перенесены из методики:
+#   СКО.1.4 (образы с известными уязвимостями) — нужен движок сопоставления с БДУ ФСТЭК, это
+#     отдельная подсистема (приоритет 4 плана), не расширение пака.
+#   СКО.1.7, СКО.1.8 — закрыты в 1.2.0 (см. ниже).
+#
+# ЧЕСТНО: в отличие от 1.1.0 пака ubuntu-server, эти 6 проверок реально прогнаны (2026-09-24) через
+# probes.py против ДВУХ живых контейнеров на этом хосте (hardening_backend, diploma_db) в режиме
+# только чтения (`docker inspect`, без run/exec/изменений) — вывод probe-движка соответствует
+# ожидаемому: обе проверки на лимиты ресурсов (docker.memory_limit_set, docker.cpu_limit_set)
+# корректно дали fail (лимиты правда не заданы), остальные четыре — pass. maturity=baseline
+# оправдан этой живой проверкой, а не только юнит-тестами.
+#
+# 1.2.0 (2026-10-04, построчная сверка с методикой ФСТЭК от 25.11.2025): закрыты СКО.1.7–СКО.1.9.
+#   * docker.icc_disabled (СКО.1.7) — контейнеры в сети bridge не видят друг друга без явной связи.
+#     Источник — фактический параметр сети bridge (`docker network inspect bridge`), а не daemon.json:
+#     файла может не быть, а значение по умолчанию — icc включён.
+#   * docker.no_ports_on_all_interfaces (СКО.1.8 — для Docker без оркестрации это порты, опубликованные
+#     на 0.0.0.0/::, аналог NodePort/LoadBalancer): если публикация наружу нужна намеренно (веб-интерфейс),
+#     это оформляется принятым риском, а не правкой проверки.
+#   * docker.no_new_privileges (СКО.1.9) — процессы контейнера не могут повысить привилегии (setuid).
+#   * docker.socket_permissions (СКО.1.9, СКО.1.2) — сокет демона доступен только root и группе docker.
+#   СКО.1.4 (образы с уязвимостями) по-прежнему не закрыт: нужен разбор пакетов внутри образов.
+#
+# Не перенесены из старого набора (без изменений с 1.0.0): userns-remap, TCP-доступ к сокету —
+# по мере необходимости.
+
+pack: docker
+version: 1.2.0
+maturity: baseline
+verified_on: ["Docker Engine 29.3.1 на Ubuntu 24.04.4 LTS"]
+tags: [container-host, docker]
+transport: local
+
+detect:
+  - probe: { type: file_stat, path: /var/run/docker.sock, field: mode }
+    regex: '^\d+$'
+
+checks:
+  - id: docker.no_privileged_containers
+    title: Нет контейнеров, запущенных в privileged-режиме
+    probe:
+      type: cmd_foreach
+      list_cmd: [docker, ps, -q]
+      item_cmd: [docker, inspect, --format, "{{.HostConfig.Privileged}}"]
+      pattern: '^true$'
+    assert: { op: eq, value: 0 }
+    severity: critical
+    remediation: Убрать флаг --privileged из запуска контейнеров, использовать точечные --cap-add.
+    refs:
+      - { source: "CIS Docker Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СКО.1.1" }
+
+  # --- Новое в 1.1.0 (методика ФСТЭК, раздел СКО) --------------------------------------------
+
+  - id: docker.no_sensitive_host_mounts
+    title: Нет монтирования чувствительных каталогов хоста в контейнеры
+    # HostConfig.Binds выводится как "[host1:container1:mode host2:container2:mode]"; пусто -> "[]".
+    # Эвристика по началу токена: именованные тома (не начинаются с "/") не считаются.
+    probe:
+      type: cmd_foreach
+      list_cmd: [docker, ps, -q]
+      item_cmd: [docker, inspect, --format, "{{.HostConfig.Binds}}"]
+      pattern: '(?:\[|\s)(/etc|/var/run/docker\.sock|/proc|/sys|/root)(?::)'
+    assert: { op: eq, value: 0 }
+    severity: high
+    remediation: "Убрать монтирование /etc, /var/run/docker.sock, /proc, /sys, /root в контейнеры; при необходимости — точечный доступ к отдельному файлу, не ко всему каталогу."
+    refs:
+      - { source: "CIS Docker Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СКО.1.2" }
+
+  - id: docker.no_root_user_explicit
+    title: Нет контейнеров, явно запущенных от имени root
+    # ОГРАНИЧЕНИЕ: ловит только ЯВНО заданного root/0 (--user root, USER root в Dockerfile).
+    # Пустое поле (по умолчанию образа) не считается нарушением — эффективный пользователь образа
+    # агенту неизвестен без анализа самого образа; ложный fail хуже отсутствия проверки.
+    probe:
+      type: cmd_foreach
+      list_cmd: [docker, ps, -q]
+      item_cmd: [docker, inspect, --format, "{{.Config.User}}"]
+      pattern: '^(root|0)$'
+    assert: { op: eq, value: 0 }
+    severity: medium
+    remediation: "Задать непривилегированного пользователя (--user или USER в Dockerfile) вместо root/0."
+    refs:
+      - { source: "CIS Docker Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СКО.1.3" }
+
+  - id: docker.memory_limit_set
+    title: У контейнеров задан лимит памяти
+    # HostConfig.Memory = 0 означает «лимита нет» (unlimited).
+    probe:
+      type: cmd_foreach
+      list_cmd: [docker, ps, -q]
+      item_cmd: [docker, inspect, --format, "{{.HostConfig.Memory}}"]
+      pattern: '^0$'
+    assert: { op: eq, value: 0 }
+    severity: medium
+    remediation: "Задать лимит памяти при запуске контейнера (--memory)."
+    refs:
+      - { source: "CIS Docker Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СКО.1.5" }
+
+  - id: docker.cpu_limit_set
+    title: У контейнеров задан лимит CPU
+    # ОГРАНИЧЕНИЕ: смотрит только HostConfig.NanoCpus (заполняется флагом --cpus). Лимит,
+    # заданный через --cpu-quota/--cpu-period напрямую, NanoCpus не отражает — частичное покрытие.
+    probe:
+      type: cmd_foreach
+      list_cmd: [docker, ps, -q]
+      item_cmd: [docker, inspect, --format, "{{.HostConfig.NanoCpus}}"]
+      pattern: '^0$'
+    assert: { op: eq, value: 0 }
+    severity: low
+    remediation: "Задать лимит CPU при запуске контейнера (--cpus)."
+    refs:
+      - { source: "CIS Docker Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СКО.1.5" }
+
+  - id: docker.no_host_network
+    title: Нет контейнеров в режиме hostNetwork
+    probe:
+      type: cmd_foreach
+      list_cmd: [docker, ps, -q]
+      item_cmd: [docker, inspect, --format, "{{.HostConfig.NetworkMode}}"]
+      pattern: '^host$'
+    assert: { op: eq, value: 0 }
+    severity: high
+    remediation: "Не использовать --network host; подключать контейнер к обычной bridge/overlay-сети."
+    refs:
+      - { source: "CIS Docker Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СКО.1.6" }
+
+  - id: docker.no_host_pid
+    title: Нет контейнеров в режиме hostPID
+    probe:
+      type: cmd_foreach
+      list_cmd: [docker, ps, -q]
+      item_cmd: [docker, inspect, --format, "{{.HostConfig.PidMode}}"]
+      pattern: '^host$'
+    assert: { op: eq, value: 0 }
+    severity: high
+    remediation: "Не использовать --pid host; контейнер должен видеть только собственные процессы."
+    refs:
+      - { source: "CIS Docker Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СКО.1.6" }
+
+  # --- Новое в 1.2.0 (методика ФСТЭК, СКО.1.7–1.9) ---------------------------------------------
+
+  - id: docker.icc_disabled
+    title: Контейнеры в сети по умолчанию изолированы друг от друга (icc выключен)
+    probe:
+      type: cmd_regex
+      cmd: [docker, network, inspect, bridge, --format, '{{index .Options "com.docker.network.bridge.enable_icc"}}']
+      pattern: '^(true|false)\s*$'
+    assert: { op: eq, value: "false" }
+    severity: medium
+    remediation: 'В /etc/docker/daemon.json задать "icc": false и перезапустить docker; связь между контейнерами — через пользовательские сети.'
+    refs:
+      - { source: "CIS Docker Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СКО.1.7" }
+
+  - id: docker.no_ports_on_all_interfaces
+    title: Порты контейнеров не опубликованы на всех интерфейсах
+    # Пустой HostIp, 0.0.0.0 или :: — порт доступен со всех адресов хоста (и мимо ufw: Docker пишет
+    # свои правила iptables раньше).
+    probe:
+      type: cmd_foreach
+      list_cmd: [docker, ps, -q]
+      item_cmd: [docker, inspect, --format, "{{json .HostConfig.PortBindings}}"]
+      pattern: '"HostIp":"(0\.0\.0\.0|::)?"'
+    assert: { op: eq, value: 0 }
+    severity: medium
+    remediation: "Публиковать порт на конкретном адресе (-p 127.0.0.1:8000:8000); если доступ извне нужен намеренно — оформить принятый риск."
+    refs:
+      - { source: "CIS Docker Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СКО.1.8" }
+
+  - id: docker.no_new_privileges
+    title: Контейнеры запущены с no-new-privileges
+    # Вывод — null (опций нет) или JSON-список. Шаблон привязан к этому формату: «отрицательное»
+    # выражение без привязки совпало бы с пустой строкой после перевода строки.
+    probe:
+      type: cmd_foreach
+      list_cmd: [docker, ps, -q]
+      item_cmd: [docker, inspect, --format, "{{json .HostConfig.SecurityOpt}}"]
+      pattern: '^(null|\[(?!.*no-new-privileges(?![:=]false)).*\])\s*$'
+    assert: { op: eq, value: 0 }
+    severity: medium
+    remediation: "Запускать контейнеры с --security-opt no-new-privileges (или задать no-new-privileges: true в daemon.json)."
+    refs:
+      - { source: "CIS Docker Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СКО.1.9" }
+
+  - id: docker.socket_permissions
+    title: Сокет Docker доступен только root и группе docker (права не шире 660)
+    probe: { type: file_stat, path: /var/run/docker.sock, field: mode }
+    assert: { op: mode_within, value: "660" }
+    severity: high
+    remediation: "chown root:docker /var/run/docker.sock && chmod 660 /var/run/docker.sock; доступ к сокету равен правам root."
+    refs:
+      - { source: "CIS Docker Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СКО.1.9" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СКО.1.2" }

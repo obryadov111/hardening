@@ -99,14 +99,18 @@ LOCAL_COMMAND_POLICY = {
     "aa-status": re.compile(r"^--enabled$"),
     "timedatectl": re.compile(r"^show( -p [A-Za-z]+)?( --value)?$"),
     "ss": re.compile(r"^-[tuln]+p?$"),
+    # «сухой» прогон: modprobe только показывает, что сделал бы (install /bin/false — модуль запрещён)
+    "modprobe": re.compile(r"^-n -v [a-z0-9_-]+$"),
     # Windows: состояние службы (sc query <имя>); вывод sc не локализуется, состояние — числом и константой
     "sc": re.compile(r"^query [A-Za-z0-9_.-]+$"),
-    # только список запущенных контейнеров и одно поле inspect по конкретному id из закрытого списка
-    # полей (docker.yaml, проверки СКО.1.2/1.3/1.5/1.6 по методике ФСТЭК); run/exec/rm и т.п. — отказ
+    # только список запущенных контейнеров, одно поле inspect по конкретному id из закрытого списка
+    # полей и флаг icc сети bridge (docker.yaml, СКО.1.2/1.3/1.5–1.9 по методике ФСТЭК); run/exec/rm — отказ
     "docker": re.compile(
         r"^(ps -q|inspect --format \{\{(\.HostConfig\.Privileged|\.HostConfig\.Binds|\.Config\.User"
-        r"|\.HostConfig\.Memory|\.HostConfig\.NanoCpus|\.HostConfig\.NetworkMode|\.HostConfig\.PidMode)"
-        r"\}\} [a-f0-9]{6,64})$"
+        r"|\.HostConfig\.Memory|\.HostConfig\.NanoCpus|\.HostConfig\.NetworkMode|\.HostConfig\.PidMode"
+        r"|json \.HostConfig\.PortBindings|json \.HostConfig\.SecurityOpt)"
+        r"\}\} [a-f0-9]{6,64}"
+        r'|network inspect bridge --format \{\{index \.Options "com\.docker\.network\.bridge\.enable_icc"\}\})$'
     ),
 }
 

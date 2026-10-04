@@ -54,6 +54,16 @@ base:
     /proc/sys/net/ipv4/ip_forward: '0
 
       '
+    /sys/module/apparmor/parameters/enabled: 'Y
+
+      '
+    /etc/passwd: 'root:x:0:0:root:/root:/bin/bash
+
+      daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+
+      admin:x:1000:1000::/home/admin:/bin/bash
+
+      '
   commands:
     ufw status verbose: 'Status: active
 
@@ -65,6 +75,25 @@ base:
     systemctl is-active auditd: 'active
 
       '
+    systemctl is-active inetd:
+      stdout: 'inactive
+
+        '
+      code: 3
+    systemctl is-active rsh.socket:
+      stdout: 'inactive
+
+        '
+      code: 3
+    systemctl is-active vsftpd:
+      stdout: 'inactive
+
+        '
+      code: 3
+    modprobe -n -v usb-storage: "install /bin/false \n"
+  stats:
+    /etc/shadow: '640'
+    /etc/passwd: '644'
 cases:
 - name: укреплённый хост — всё соблюдено
   detect: true
@@ -83,6 +112,17 @@ cases:
     password_policy.lockout_on_failure: pass
     kernel.ip_forward: pass
     logging.auditd_active: pass
+    accounts.pam_nullok_absent: pass
+    mac.apparmor_enabled: pass
+    accounts.uid0_only_root: pass
+    files.shadow_permissions: pass
+    files.passwd_permissions: pass
+    services.telnet_inactive: pass
+    services.rsh_inactive: pass
+    services.ftp_inactive: pass
+    ssh.no_weak_ciphers: pass
+    ssh.no_weak_macs: pass
+    kernel.usb_storage_disabled: pass
 - name: слабый хост — нарушено всё
   files:
     /etc/ssh/sshd_config: 'PermitRootLogin yes
@@ -94,6 +134,10 @@ cases:
       X11Forwarding yes
 
       MaxAuthTries 6
+
+      Ciphers aes256-ctr,aes128-cbc
+
+      MACs hmac-sha2-256,hmac-md5
 
       '
     /etc/ufw/ufw.conf: 'ENABLED=no
@@ -118,6 +162,14 @@ cases:
     /proc/sys/net/ipv4/ip_forward: '1
 
       '
+    /sys/module/apparmor/parameters/enabled: 'N
+
+      '
+    /etc/passwd: 'root:x:0:0:root:/root:/bin/bash
+
+      toor:x:0:0::/root:/bin/bash
+
+      '
   commands:
     ufw status verbose: 'Status: inactive
 
@@ -127,6 +179,16 @@ cases:
 
         '
       code: 3
+    systemctl is-active inetd: 'active
+
+      '
+    systemctl is-active rsh.socket: 'active
+
+      '
+    systemctl is-active vsftpd: 'active
+
+      '
+    modprobe -n -v usb-storage: "insmod /lib/modules/6.1.0/kernel/drivers/usb/storage/usb-storage.ko \n"
   expect:
     ssh.permit_root_login: fail
     ssh.password_authentication: fail
@@ -142,6 +204,20 @@ cases:
     password_policy.lockout_on_failure: fail
     kernel.ip_forward: fail
     logging.auditd_active: fail
+    accounts.pam_nullok_absent: fail
+    mac.apparmor_enabled: fail
+    accounts.uid0_only_root: fail
+    files.shadow_permissions: fail
+    files.passwd_permissions: fail
+    services.telnet_inactive: fail
+    services.rsh_inactive: fail
+    services.ftp_inactive: fail
+    ssh.no_weak_ciphers: fail
+    ssh.no_weak_macs: fail
+    kernel.usb_storage_disabled: fail
+  stats:
+    /etc/shadow: '644'
+    /etc/passwd: '666'
 - name: Debian 12 как поставляется (файлы сняты с официального образа 2026-09-27, установлены ufw/auditd/pwquality/unattended-upgrades)
   files:
     /etc/ssh/sshd_config: "Include /etc/ssh/sshd_config.d/*.conf\nKbdInteractiveAuthentication no\nUsePAM yes\nX11Forwarding yes\nPrintMotd no\nAcceptEnv LANG LC_*\nSubsystem\tsftp\t/usr/lib/openssh/sftp-server\n"

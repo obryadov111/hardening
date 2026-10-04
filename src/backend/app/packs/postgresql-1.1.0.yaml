@@ -1,0 +1,157 @@
+# Пак «PostgreSQL» (первая версия) — раздел СУБД методики ФСТЭК «Анализ защищённости
+# информационных систем» (25.11.2025). Закрывает только проверки, для которых достаточно
+# существующих типов проб (file_kv/file_regex/file_stat) — БЕЗ SQL-запросов к самой СУБД.
+#
+# ПОЧЕМУ БЕЗ SQL: у агента принципиально нет сторонних зависимостей (только stdlib Python,
+# см. agent/probes.py) — драйвера БД (psycopg и т. п.) там нет и не будет без отдельного
+# решения. Часть проверок СУБД.1.1 (учётки по умолчанию/с пустым паролем), СУБД.1.6 (Full
+# Access) и им подобные требуют SQL к pg_roles/pg_authid — они НЕ реализованы в этой версии
+# пака. Разумный путь для них — не Python-драйвер, а вызов psql через тот же механизм
+# белого списка команд, что уже есть для docker (LOCAL_COMMAND_POLICY); это отдельная задача.
+#
+# ПОЧЕМУ ОДИН ЖЁСТКИЙ ПУТЬ, А НЕ ЛЮБАЯ ВЕРСИЯ/КЛАСТЕР: типы проб file_kv/file_regex/file_stat
+# принимают только точный абсолютный путь, подстановки версии в путь пробы не поддерживают.
+# Эта версия пака жёстко предполагает пакет `postgresql-16` из apt на Ubuntu (путь конфига
+# /etc/postgresql/16/main/, путь данных /var/lib/postgresql/16/main/, лог — стандартный путь
+# пакета postgresql-common /var/log/postgresql/). Другая версия PostgreSQL или другой способ
+# установки (компиляция из исходников, сборка вендора) паком не определяется вообще (detect
+# не сработает) — это нужно решить отдельно (второй пак на версию, либо параметризация проб).
+#
+# ЧЕСТНО: maturity=draft — проверки написаны по документации и протестированы только на
+# FakeHost (юнит-тесты), а также вручную сверены регэкспы с реальным PostgreSQL 15 (контейнер
+# diploma_db этого же хоста, только чтение через `docker exec ... cat`, без подключения к БД
+# и без записи) — но НЕ прогонялись живым агентом на реальном Ubuntu-хосте с нативно
+# установленным postgresql-16 по стандартным путям пакета. Поднять до baseline можно только
+# после прогона на таком стенде.
+
+# 1.1.0 (2026-10-04, построчная сверка с методикой ФСТЭК от 25.11.2025): три проверки, которым хватает
+# файлов конфигурации:
+#   * postgres.no_trust_auth (СУБД.1.1) — метод trust в pg_hba.conf пускает без пароля, т. е. любая
+#     учётка фактически «с пустым паролем»; вместо него — peer (локально) и scram-sha-256;
+#   * postgres.password_encryption_scram (СУБД.1.2) — пароли хранятся как SCRAM-SHA-256, а не MD5;
+#   * postgres.auth_delay_enabled (СУБД.1.14) — задержка после неудачной аутентификации (модуль
+#     auth_delay) — ограничение перебора паролей; встроенной блокировки учётки в PostgreSQL нет.
+# SQL-проверки (СУБД.1.3/1.4/1.6/1.7/1.8) по-прежнему не реализованы — см. выше.
+
+pack: postgresql
+version: 1.1.0
+maturity: draft
+verified_on: []
+tags: [database, postgresql, debian-family]
+transport: local
+asset_type: database-server
+
+detect:
+  - probe: { type: file_stat, path: /etc/postgresql/16/main/postgresql.conf, field: mode }
+    regex: '^\d+$'
+
+checks:
+  - id: postgres.pg_hba_no_unrestricted_host
+    title: pg_hba.conf не разрешает подключение с любого IP-адреса
+    # Ищет строку вида "host <db> <user> all|0.0.0.0/0|::/0 <метод>" — подключение без
+    # ограничения по адресу источника. Строки local/127.0.0.1/32/::1/128 не считаются нарушением.
+    probe:
+      type: file_regex
+      path: /etc/postgresql/16/main/pg_hba.conf
+      pattern: '(?im)^\s*host\s+\S+\s+\S+\s+(?:all|0\.0\.0\.0/0|::/0)\s+\S+'
+    assert: { op: absent }
+    severity: high
+    remediation: "В pg_hba.conf заменить 'all' в поле адреса на конкретную подсеть источника подключений."
+    refs:
+      - { source: "CIS PostgreSQL Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СУБД.1.5" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СУБД.1.10" }
+
+  - id: postgres.listen_addresses_not_all_interfaces
+    title: СУБД не слушает все сетевые интерфейсы без ограничения
+    # ОГРАНИЧЕНИЕ: file_kv не убирает инлайн-комментарий после значения в той же строке —
+    # для строк вида `listen_addresses = '*'  # комментарий` значение испортится. Рассчитан
+    # на актуально заданную (не закомментированную) строку без хвостового комментария.
+    probe: { type: file_kv, path: /etc/postgresql/16/main/postgresql.conf, key: listen_addresses, separator: equals, default: localhost }
+    assert: { op: not_in, value: ["*", "0.0.0.0"] }
+    severity: medium
+    remediation: "Задать listen_addresses конкретными адресами вместо '*', либо ограничить доступ firewall’ом/pg_hba.conf."
+    refs:
+      - { source: "CIS PostgreSQL Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СУБД.1.9" }
+
+  - id: postgres.ssl_enabled
+    title: Шифрование соединений (SSL/TLS) включено
+    probe: { type: file_kv, path: /etc/postgresql/16/main/postgresql.conf, key: ssl, separator: equals, default: "off" }
+    assert: { op: eq, value: "on" }
+    severity: high
+    remediation: "Включить ssl = on в postgresql.conf, настроить сертификат сервера."
+    refs:
+      - { source: "CIS PostgreSQL Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СУБД.1.11" }
+
+  - id: postgres.ssl_min_protocol_version_modern
+    title: Минимальная версия TLS не ниже TLSv1.2
+    # default соответствует реальному умолчанию PostgreSQL (TLSv1.2) начиная с версии 12 —
+    # отсутствие строки в конфиге НЕ означает уязвимость.
+    probe: { type: file_kv, path: /etc/postgresql/16/main/postgresql.conf, key: ssl_min_protocol_version, separator: equals, default: "TLSv1.2" }
+    assert: { op: not_in, value: ["SSLv2", "SSLv3", "TLSv1", "TLSv1.1"] }
+    severity: medium
+    remediation: "Задать ssl_min_protocol_version = 'TLSv1.2' (или выше) в postgresql.conf."
+    refs:
+      - { source: "CIS PostgreSQL Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СУБД.1.12" }
+
+  - id: postgres.log_directory_not_world_readable
+    title: Журнал СУБД недоступен на чтение посторонним пользователям
+    # Путь — стандартный для логов пакета postgresql-common на Debian/Ubuntu (не PGDATA/log).
+    probe: { type: file_stat, path: /var/log/postgresql/postgresql-16-main.log, field: mode }
+    assert: { op: mode_within, value: "640" }
+    severity: medium
+    remediation: "Ограничить права на файл журнала (например, 640, владелец postgres:postgres или postgres:adm)."
+    refs:
+      - { source: "CIS PostgreSQL Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СУБД.1.13" }
+
+  - id: postgres.data_directory_permissions
+    title: Каталог данных СУБД недоступен посторонним пользователям
+    probe: { type: file_stat, path: /var/lib/postgresql/16/main, field: mode }
+    assert: { op: mode_within, value: "700" }
+    severity: high
+    remediation: "Права на каталог данных PostgreSQL должны быть не шире 700 (или 750, если это требуется группе postgres)."
+    refs:
+      - { source: "CIS PostgreSQL Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СУБД.1.15" }
+
+  # --- Новое в 1.1.0 (методика ФСТЭК: СУБД.1.1, 1.2, 1.14) -------------------------------------
+
+  - id: postgres.no_trust_auth
+    title: pg_hba.conf не пускает без пароля (нет метода trust)
+    probe:
+      type: file_regex
+      path: /etc/postgresql/16/main/pg_hba.conf
+      pattern: '(?im)^\s*(?:local|host|hostssl|hostnossl|hostgssenc|hostnogssenc)\b[^#\n]*\b(trust)\b'
+    assert: { op: absent }
+    severity: critical
+    remediation: "Заменить trust на peer (для local) и scram-sha-256 (для host) в pg_hba.conf, затем `SELECT pg_reload_conf()`."
+    refs:
+      - { source: "CIS PostgreSQL Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СУБД.1.1" }
+
+  - id: postgres.password_encryption_scram
+    title: Пароли хранятся как SCRAM-SHA-256
+    # Умолчание PostgreSQL 14+ — scram-sha-256; md5 — устаревший и слабый способ хранения.
+    probe: { type: file_kv, path: /etc/postgresql/16/main/postgresql.conf, key: password_encryption, separator: equals, default: scram-sha-256 }
+    assert: { op: eq, value: scram-sha-256 }
+    severity: medium
+    remediation: "Задать password_encryption = 'scram-sha-256' и сменить пароли учёток, сохранённые в MD5."
+    refs:
+      - { source: "CIS PostgreSQL Benchmark (адаптировано)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СУБД.1.2" }
+
+  - id: postgres.auth_delay_enabled
+    title: Задержка после неудачного входа (auth_delay) включена
+    probe:
+      type: file_regex
+      path: /etc/postgresql/16/main/postgresql.conf
+      pattern: "(?m)^\\s*shared_preload_libraries\\s*=\\s*'[^'\\n]*\\b(auth_delay)\\b"
+    assert: { op: exists }
+    severity: low
+    remediation: "Добавить auth_delay в shared_preload_libraries и задать auth_delay.milliseconds (например, 500)."
+    refs:
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "СУБД.1.14" }

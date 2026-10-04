@@ -601,6 +601,13 @@ def test_foreach_respects_max_items():
     # поля 1.1.0 — тоже не любое поле inspect, а именно то, что разрешено (проверка неполного совпадения):
     ["docker", "inspect", "--format", "{{.HostConfig.Env}}", "0123456789ab"],
     ["docker", "inspect", "--format", "{{.Config.Cmd}}", "0123456789ab"],
+    # 1.2.0: разрешены только два JSON-поля и icc именно сети bridge
+    ["docker", "inspect", "--format", "{{json .Config.Env}}", "0123456789ab"],
+    ["docker", "inspect", "--format", "{{json .}}", "0123456789ab"],
+    ["docker", "network", "inspect", "host", "--format", '{{index .Options "com.docker.network.bridge.enable_icc"}}'],
+    ["docker", "network", "inspect", "bridge"],
+    ["modprobe", "usb-storage"],                   # загрузка модуля — только «сухой» прогон -n -v
+    ["modprobe", "-r", "usb-storage"],
 ])
 def test_docker_commands_outside_allowlist_are_refused(argv):
     with pytest.raises(ProbeError, match="вне белого списка"):
@@ -618,6 +625,11 @@ def test_allowed_docker_commands_pass_the_policy(monkeypatch):
         "HostConfig.NetworkMode", "HostConfig.PidMode",
     ):
         LocalTransport().run(["docker", "inspect", "--format", "{{." + field + "}}", "0123456789ab"])
+    # 1.2.0 (СКО.1.7–1.9): опубликованные порты, параметры безопасности, icc сети bridge
+    LocalTransport().run(["docker", "inspect", "--format", "{{json .HostConfig.PortBindings}}", "0123456789ab"])
+    LocalTransport().run(["docker", "inspect", "--format", "{{json .HostConfig.SecurityOpt}}", "0123456789ab"])
+    LocalTransport().run(["docker", "network", "inspect", "bridge", "--format", '{{index .Options "com.docker.network.bridge.enable_icc"}}'])
+    LocalTransport().run(["modprobe", "-n", "-v", "usb-storage"])
 
 
 

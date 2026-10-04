@@ -16,6 +16,7 @@ base:
       enable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0
       !
       aaa new-model
+      login block-for 300 attempts 5 within 60
       !
       ip ssh version 2
       no ip http server
@@ -51,6 +52,7 @@ cases:
       cisco_ios.vty_transport_explicit: pass
       cisco_ios.vty_acl_set: pass
       cisco_ios.ntp_configured: pass
+      cisco_ios.login_block_for: pass
 
   - name: слабый коммутатор — каждое нарушение ловит одна проверка
     cli:
@@ -87,6 +89,7 @@ cases:
       cisco_ios.vty_transport_explicit: pass  # транспорт задан явно; что это Telnet — ловит vty_telnet_disabled
       cisco_ios.vty_acl_set: fail
       cisco_ios.ntp_configured: fail
+      cisco_ios.login_block_for: fail
 
   # С 1.1.0 каждое нарушение ловит ровно одна проверка (раньше пары проверок проваливались вместе).
   - name: только обратимый enable password — провал одной проверки, а не двух

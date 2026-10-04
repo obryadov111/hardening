@@ -18,6 +18,7 @@ import SoftwareInventory from "./pages/SoftwareInventory";
 import Scans from "./pages/Scans";
 import ScanCompare from "./pages/ScanCompare";
 import Vulnerabilities from "./pages/Vulnerabilities";
+import FstecCoverage from "./pages/FstecCoverage";
 
 export default function App() {
   return (
@@ -34,6 +35,7 @@ export default function App() {
               <Route path="assets/:assetId" element={<AssetDetails />} />
               <Route path="hardening" element={<Hardening />} />
               <Route path="vulnerabilities" element={<Vulnerabilities />} />
+              <Route path="fstec" element={<FstecCoverage />} />
               <Route path="policies" element={<Policies />} />
               <Route path="report" element={<Report />} />
               <Route path="project" element={<Project />} />

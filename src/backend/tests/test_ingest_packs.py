@@ -299,5 +299,5 @@ def test_shipped_pack_is_served_to_agents_and_evaluated_end_to_end(client, db, a
     }
     body = client.post("/api/ingest", json=payload, headers={"X-Agent-Api-Key": agent_key}).json()
 
-    assert body["checks"] == {"total": 14, "passed": 14, "failed": 0, "errors": 0}  # эталонно защищённый хост (Samba — отдельный пак с 1.2.0)
+    assert body["checks"] == {"total": 25, "passed": 25, "failed": 0, "errors": 0}  # эталонно защищённый хост (Samba — отдельный пак с 1.2.0)
     assert body["compliance_score"] == 100.0 and body["coverage"]["ratio"] == 100.0

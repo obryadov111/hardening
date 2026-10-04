@@ -11,6 +11,7 @@ import {
   History,
   GitCompareArrows,
   Bug,
+  ClipboardCheck,
   X,
 } from "lucide-react";
 
@@ -20,6 +21,7 @@ const menuItems = [
   { to: "/software", label: "Инвентаризация ПО", icon: Boxes },
   { to: "/hardening", label: "Харденинг", icon: ShieldCheck },
   { to: "/vulnerabilities", label: "Уязвимости ПО", icon: Bug },
+  { to: "/fstec", label: "Методика ФСТЭК", icon: ClipboardCheck },
   { to: "/policies", label: "Политики", icon: BookOpen },
   { to: "/report", label: "Отчёты", icon: FileText },
   { to: "/scans", label: "Сканирования", icon: History },

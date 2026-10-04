@@ -38,7 +38,7 @@ def _with_refs(checks: list[dict], cis_source: str) -> list[dict]:
 
 PACKS = {
     "debian-server": {
-        "version": "1.0.0",
+        "version": "1.1.0",
         "tags": ["linux-server", "debian-family", "debian"],
         "detect": [{"probe": {"type": "file_kv", "path": "/etc/os-release", "key": "ID", "separator": "equals"}, "equals": "debian"}],
         "cis": "CIS Debian Linux Benchmark (адаптировано)",
@@ -55,7 +55,7 @@ PACKS = {
 """,
     },
     "astra-linux": {
-        "version": "1.1.0",
+        "version": "1.2.0",
         "tags": ["linux-server", "debian-family", "astra"],
         # Детект прежний (1.0.0): вхождение «astra» в ID/NAME/PRETTY_NAME. На образе 1.8.6: ID=astra.
         "detect": [{"probe": {"type": "file_regex", "path": "/etc/os-release",

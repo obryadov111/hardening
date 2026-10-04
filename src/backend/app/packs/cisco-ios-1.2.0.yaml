@@ -1,0 +1,176 @@
+# Пак «Cisco IOS / IOS XE»: сетевое устройство, сбор по SSH (внешний коллектор на джамп-хосте).
+#
+# maturity: draft. Проверки написаны по документации и проверены ТОЛЬКО на образцах вывода `show running-config`
+# (tests/test_cisco_ios_pack.py); на реальном устройстве пак не запускался, поэтому verified_on пуст, а
+# уровень не выше draft. Перед повышением до baseline — прогон на стенде и запись версий IOS в verified_on.
+#
+# Требования к учётке: только чтение, но полная running-config доступна на уровне привилегий, который
+# у read-only учётки часто не выдан (по умолчанию show running-config требует привилегированного уровня).
+# Без него IOS отвечает `% Invalid input…` вместо конфигурации: проба распознаёт это (и требует завершающий
+# `end` настоящей конфигурации, параметр require), поэтому проверки получают error, а не ложный pass на
+# пустом выводе — иначе все проверки «параметра нет» прошли бы.
+#
+# Известные ограничения:
+#  * Проверки VTY смотрят все блоки `line vty`. Если в блоке НЕТ строки transport input, IOS применит
+#    умолчание платформы — это ловит отдельная проверка vty_transport_explicit.
+#  * «Явно задан во всех vty-блоках» требует счётчика по блокам и в формате пока не выражается:
+#    vty_transport_explicit проходит, если строка есть хотя бы в одном блоке.
+#  * SNMP: ищутся только community public/private в открытом виде, не любые слабые значения.
+#
+# 1.1.0 (2026-09-27): пересекающиеся проверки разведены — теперь каждое нарушение ловит ровно одна
+# проверка, и одно нарушение не удваивает число провалов в отчёте:
+#   * cisco_ios.enable_secret_used -> cisco_ios.enable_credential_set («пароль enable задан хоть как-то»,
+#     medium). Раньше при одном `enable password` проваливались обе проверки; обратимый пароль по-прежнему
+#     ловит enable_password_absent.
+#   * cisco_ios.vty_ssh_only -> cisco_ios.vty_transport_explicit («транспорт VTY задан явно», medium).
+#     Раньше `transport input telnet ssh` проваливал обе проверки; разрешённый Telnet по-прежнему ловит
+#     vty_telnet_disabled, а новая проверка ловит только блок без строки transport input (умолчание IOS).
+#   id заменены, а не переиспользованы: смысл проверок изменился, сравнивать их результаты со
+#   старыми нельзя.
+#
+# 1.2.0 (2026-10-04, построчная сверка с методикой ФСТЭК от 25.11.2025, раздел УСИ — внутренняя
+# сетевая инфраструктура): у всех проверок — ссылки на пункты УСИ.2–УСИ.8. Новая проверка
+# cisco_ios.login_block_for (УСИ.6 — блокировка после неудачных попыток входа): `login block-for`
+# временно запрещает вход после серии неудач. Пак остаётся draft: на устройстве не подтверждён.
+#
+# Источник правил: общие рекомендации по укреплению Cisco IOS (документация вендора). Пункты
+# конкретных бенчмарков не сверялись, поэтому ссылки без номеров.
+
+pack: cisco-ios
+version: 1.2.0
+maturity: draft
+tags: [network-device, cisco-ios]
+transport: ssh
+asset_type: network-device
+
+detect:
+  - probe: { type: cli_config, cmd: show version, match: '(Cisco IOS(?: XE)? Software.*)' }
+    regex: '(?i)cisco ios'
+
+checks:
+  - id: cisco_ios.service_password_encryption
+    title: Включено шифрование паролей в конфигурации (service password-encryption)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^end\s*$', match: '^service password-encryption' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "В режиме конфигурации выполнить `service password-encryption`."
+    refs:
+      - { source: "Рекомендации по укреплению Cisco IOS" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+
+  - id: cisco_ios.enable_credential_set
+    title: Пароль привилегированного режима задан (enable secret или enable password)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^end\s*$', match: '^enable (?:secret|password)\b' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "Задать `enable secret <пароль>` (хэш, а не обратимый пароль)."
+    refs:
+      - { source: "Рекомендации по укреплению Cisco IOS" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.3" }
+
+  - id: cisco_ios.enable_password_absent
+    title: Нет enable password (обратимый или открытый пароль)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^end\s*$', match: '^enable password\b' }
+    assert: { op: absent }
+    severity: high
+    remediation: "Удалить `no enable password`; использовать enable secret."
+    refs:
+      - { source: "Рекомендации по укреплению Cisco IOS" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.3" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+
+  - id: cisco_ios.aaa_new_model
+    title: Включена модель AAA (aaa new-model)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^end\s*$', match: '^aaa new-model' }
+    assert: { op: exists }
+    severity: high
+    remediation: "Включить `aaa new-model` и настроить централизованную аутентификацию (RADIUS/TACACS+)."
+    refs:
+      - { source: "Рекомендации по укреплению Cisco IOS" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.6" }
+
+  - id: cisco_ios.snmp_default_community_absent
+    title: Нет SNMP community со значениями по умолчанию (public / private)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^end\s*$', match: '^snmp-server community (?:public|private)\b' }
+    assert: { op: absent }
+    severity: high
+    remediation: "Удалить community public/private; использовать SNMPv3 или уникальные строки с ACL."
+    refs:
+      - { source: "Рекомендации по укреплению Cisco IOS" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.3" }
+
+  - id: cisco_ios.ssh_version2_only
+    title: SSH только версии 2
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^end\s*$', match: '^ip ssh version 2' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "Выполнить `ip ssh version 2`."
+    refs:
+      - { source: "Рекомендации по укреплению Cisco IOS" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.8" }
+
+  - id: cisco_ios.http_server_disabled
+    title: Встроенный HTTP-сервер отключён
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^end\s*$', match: '^ip http server\b' }
+    assert: { op: absent }
+    severity: medium
+    remediation: "Выполнить `no ip http server` (HTTPS при необходимости — `ip http secure-server`)."
+    refs:
+      - { source: "Рекомендации по укреплению Cisco IOS" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.5" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.7" }
+
+  - id: cisco_ios.vty_telnet_disabled
+    title: На линиях VTY не разрешён Telnet (transport input telnet / all)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^end\s*$', section: '^line vty', match: 'transport input\s+.*\b(telnet|all)\b' }
+    assert: { op: absent }
+    severity: high
+    remediation: "На линиях VTY выполнить `transport input ssh`."
+    refs:
+      - { source: "Рекомендации по укреплению Cisco IOS" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.7" }
+
+  - id: cisco_ios.vty_transport_explicit
+    title: На линиях VTY транспорт задан явно (transport input), а не по умолчанию платформы
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^end\s*$', section: '^line vty', match: 'transport input\s+\S' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "На линиях VTY выполнить `transport input ssh`."
+    refs:
+      - { source: "Рекомендации по укреплению Cisco IOS" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.7" }
+
+  - id: cisco_ios.vty_acl_set
+    title: На линиях VTY ограничен доступ по ACL (access-class)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^end\s*$', section: '^line vty', match: 'access-class\s+\S+\s+in' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "На линиях VTY выполнить `access-class <ACL> in`."
+    refs:
+      - { source: "Рекомендации по укреплению Cisco IOS" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.5" }
+
+  - id: cisco_ios.ntp_configured
+    title: Настроена синхронизация времени (ntp server)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^end\s*$', match: '^ntp server\b' }
+    assert: { op: exists }
+    severity: low
+    remediation: "Настроить `ntp server <адрес>`."
+    refs:
+      - { source: "Рекомендации по укреплению Cisco IOS" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.2" }
+
+  # --- Новое в 1.2.0 (методика ФСТЭК, УСИ.6) ---------------------------------------------------
+
+  - id: cisco_ios.login_block_for
+    title: Блокировка входа после серии неудачных попыток (login block-for)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^end\s*$', match: '^login block-for \d+ attempts \d+ within \d+' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "Задать `login block-for 300 attempts 5 within 60` (и при необходимости `login quiet-mode access-class`)."
+    refs:
+      - { source: "Рекомендации по укреплению Cisco IOS" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.6" }

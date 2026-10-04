@@ -8,8 +8,10 @@ base:
       listen_addresses = 'localhost'
       ssl = on
       ssl_min_protocol_version = 'TLSv1.2'
+      password_encryption = 'scram-sha-256'
+      shared_preload_libraries = 'pg_stat_statements,auth_delay'
     /etc/postgresql/16/main/pg_hba.conf: |
-      local   all all                trust
+      local   all all                peer
       host    all all 127.0.0.1/32 scram-sha-256
       host    all all ::1/128     scram-sha-256
   stats:
@@ -27,6 +29,9 @@ cases:
       postgres.ssl_min_protocol_version_modern: pass
       postgres.log_directory_not_world_readable: pass
       postgres.data_directory_permissions: pass
+      postgres.no_trust_auth: pass
+      postgres.password_encryption_scram: pass
+      postgres.auth_delay_enabled: pass
 
   - name: реальная слабая конфигурация diploma_db — нарушено всё
     files:
@@ -34,6 +39,8 @@ cases:
         listen_addresses = '*'
         ssl = off
         ssl_min_protocol_version = 'TLSv1'
+        password_encryption = md5
+        #shared_preload_libraries = 'auth_delay'
       /etc/postgresql/16/main/pg_hba.conf: |
         local   all             all                                     trust
         host    all             all             127.0.0.1/32            trust
@@ -49,6 +56,9 @@ cases:
       postgres.ssl_min_protocol_version_modern: fail
       postgres.log_directory_not_world_readable: fail
       postgres.data_directory_permissions: fail
+      postgres.no_trust_auth: fail              # trust в local и host
+      postgres.password_encryption_scram: fail
+      postgres.auth_delay_enabled: fail         # строка закомментирована
 
   - name: ssl не задан — по умолчанию off, это нарушение, а не «соблюдено»
     files:

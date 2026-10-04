@@ -26,9 +26,18 @@ base:  # укреплённый хост; сценарии ниже меняют
       auth required pam_faillock.so preauth deny=5
       auth [success=1] pam_unix.so
     /proc/sys/net/ipv4/ip_forward: "0\n"
+    /sys/module/apparmor/parameters/enabled: "Y\n"
+    /etc/passwd: "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\nadmin:x:1000:1000::/home/admin:/bin/bash\n"
+  stats:
+    /etc/shadow: "640"
+    /etc/passwd: "644"
   commands:
     ufw status verbose: "Status: active\nLogging: on (low)\nDefault: deny (incoming), allow (outgoing), disabled (routed)\n"
     systemctl is-active auditd: "active\n"
+    systemctl is-active inetd: { stdout: "inactive\n", code: 3 }
+    systemctl is-active rsh.socket: { stdout: "inactive\n", code: 3 }
+    systemctl is-active vsftpd: { stdout: "inactive\n", code: 3 }
+    modprobe -n -v usb-storage: "install /bin/false \n"
 
 cases:
   - name: укреплённый хост — всё соблюдено
@@ -48,6 +57,17 @@ cases:
       password_policy.lockout_on_failure: pass
       kernel.ip_forward: pass
       logging.auditd_active: pass
+      accounts.pam_nullok_absent: pass
+      mac.apparmor_enabled: pass
+      accounts.uid0_only_root: pass
+      files.shadow_permissions: pass
+      files.passwd_permissions: pass
+      services.telnet_inactive: pass
+      services.rsh_inactive: pass
+      services.ftp_inactive: pass
+      ssh.no_weak_ciphers: pass      # Ciphers/MACs не заданы — набор OpenSSH по умолчанию
+      ssh.no_weak_macs: pass
+      kernel.usb_storage_disabled: pass
 
   - name: слабый хост — нарушено всё
     files:
@@ -57,6 +77,8 @@ cases:
         PermitEmptyPasswords yes
         X11Forwarding yes
         MaxAuthTries 6
+        Ciphers aes256-ctr,aes128-cbc
+        MACs hmac-sha2-256,hmac-md5
       /etc/ufw/ufw.conf: "ENABLED=no\n"
       /etc/default/ufw: "DEFAULT_INPUT_POLICY=\"ACCEPT\"\n"
       /etc/apt/apt.conf.d/20auto-upgrades: "APT::Periodic::Unattended-Upgrade \"0\";\n"
@@ -65,9 +87,18 @@ cases:
       /etc/pam.d/common-password: "password [success=1 default=ignore] pam_unix.so obscure yescrypt\n"
       /etc/pam.d/common-auth: "auth [success=1] pam_unix.so nullok\n"
       /proc/sys/net/ipv4/ip_forward: "1\n"
+      /sys/module/apparmor/parameters/enabled: "N\n"
+      /etc/passwd: "root:x:0:0:root:/root:/bin/bash\ntoor:x:0:0::/root:/bin/bash\n"
+    stats:
+      /etc/shadow: "644"
+      /etc/passwd: "666"
     commands:
       ufw status verbose: "Status: inactive\n"
       systemctl is-active auditd: { stdout: "inactive\n", code: 3 }
+      systemctl is-active inetd: "active\n"
+      systemctl is-active rsh.socket: "active\n"
+      systemctl is-active vsftpd: "active\n"
+      modprobe -n -v usb-storage: "insmod /lib/modules/6.8.0-142-generic/kernel/drivers/usb/storage/usb-storage.ko.zst \n"
     expect:
       ssh.permit_root_login: fail
       ssh.password_authentication: fail
@@ -83,6 +114,17 @@ cases:
       password_policy.lockout_on_failure: fail
       kernel.ip_forward: fail
       logging.auditd_active: fail
+      accounts.pam_nullok_absent: fail   # nullok в common-auth
+      mac.apparmor_enabled: fail
+      accounts.uid0_only_root: fail      # toor с UID 0
+      files.shadow_permissions: fail
+      files.passwd_permissions: fail
+      services.telnet_inactive: fail
+      services.rsh_inactive: fail
+      services.ftp_inactive: fail
+      ssh.no_weak_ciphers: fail          # aes128-cbc
+      ssh.no_weak_macs: fail             # hmac-md5
+      kernel.usb_storage_disabled: fail  # модуль загрузится
 
   - name: агент без root — ufw status отказал, состояние берётся из файлов конфигурации
     commands:
@@ -117,6 +159,30 @@ cases:
       ssh.permit_empty_passwords: error
       password_policy.pass_min_len: error
 
+
+  - name: службы не установлены — systemctl отвечает «unit not found»; это соблюдение
+    commands:
+      systemctl is-active vsftpd: { stdout: "", stderr: "Unit vsftpd.service could not be found.", code: 4 }
+      systemctl is-active rsh.socket: { stdout: "inactive\n", stderr: "", code: 4 }
+    expect:
+      services.ftp_inactive: pass
+      services.rsh_inactive: pass
+
+  - name: шифры и MAC SSH заданы явно и все современные
+    files:
+      /etc/ssh/sshd_config: |
+        PermitRootLogin no
+        Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes256-ctr
+        MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256
+    expect:
+      ssh.no_weak_ciphers: pass
+      ssh.no_weak_macs: pass
+
+  - name: SHA-1 слаб в любом варианте, в том числе ETM
+    files:
+      /etc/ssh/sshd_config: "MACs hmac-sha2-256-etm@openssh.com,hmac-sha1-etm@openssh.com\n"
+    expect:
+      ssh.no_weak_macs: fail
 
   - name: не Ubuntu — пак не применяется
     files:
