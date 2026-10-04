@@ -160,6 +160,8 @@ def organization_vulnerabilities(db: Session, organization_id: str, asset_id: st
         "import": latest_import(db),
         "assets_checked": len(installed) if not asset_id else int(asset_id in installed),
         "products_checked": len(products),
+        # Продукты, установленные на активах (для отчёта по методике: пункт о ПО, которого нет, — «не применялось»).
+        "installed_products": products,
         "total": len(open_items),
         "summary": summary,
         "distro_summary": distro_summary,

@@ -61,6 +61,7 @@ def organization_coverage(db: Session, organization_id: str, registry: PackRegis
 
     vulnerabilities = organization_vulnerabilities(db, organization_id)
     open_findings = [i for i in vulnerabilities["items"] if not (i["distro"] and i["distro"]["status"] == "fixed")]
+    installed = set(vulnerabilities["installed_products"])
 
     sections, summary = [], {s: 0 for s in STATUS_ORDER}
     for section in CATALOG:
@@ -69,6 +70,9 @@ def organization_coverage(db: Session, organization_id: str, registry: PackRegis
             entry = {"code": item.code, "title": item.title, "kind": item.kind, "note": item.note, "checks": [], "findings": None}
             if item.kind == "out":
                 entry["status"] = "out"
+            elif item.kind == "bdu" and item.products and not set(item.products) & installed:
+                entry["status"] = "not_applied"
+                entry["note"] = "на активах нет этого ПО (" + ", ".join(item.products) + ")"
             elif item.kind == "bdu":
                 related = [f for f in open_findings if not item.products or f["product"] in item.products]
                 levels = {lvl: sum(1 for f in related if f["level"] == lvl) for lvl in ("critical", "high", "medium", "low")}

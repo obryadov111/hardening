@@ -61,6 +61,7 @@ def test_coverage_reflects_check_results_and_accepted_risk(client, make_org, mak
     assert items["ОПС.1.5"]["status"] == "out" and items["ОПС.1.5"]["note"]
     assert items["СУБД.1.1"]["status"] == "not_applied"       # пак postgresql есть, PostgreSQL на хосте нет
     assert items["ОПС.2"]["status"] == "not_checked"         # копия БДУ не загружена
+    assert items["УСИ.1"]["status"] == "not_applied"         # ПО сетевого оборудования на активах нет
 
     # Принятый риск по нарушению: пункт — «риск принят», а не «нарушено».
     resp = client.post(f"/api/organizations/{org_id}/risk-exceptions", headers=headers,
