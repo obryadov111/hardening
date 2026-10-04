@@ -17,11 +17,11 @@
 
 ## Статус
 
-- [x] Этап 0 · Фундамент — код и тесты готовы в ветке `feature/stage0-pack-foundation` репозитория `volkodav` (коммит `2ce8c6a`): 122 теста бэкенда + 69 тестов агента, проверено на реальной Ubuntu 24.04. **Влито в `main`** (PR #1, `1b57213`) и **выкачено на живую систему 2026-09-20** · [issue #2](https://github.com/obryadov111/volkodav/issues/2) · [PR #1](https://github.com/obryadov111/volkodav/pull/1)
-- [x] Этап 1 · Перенос существующего — влито в `main` (PR #7, `c37289c`), выкачено 2026-09-20: пак `ubuntu-server` на 12 из 14 правил; результаты сравнены со старым агентом, найдены и исправлены 7 дефектов старой логики (2 из них — ложные «выполнено»); подробно — [Этап 1 — пак ubuntu-server, подробный отчёт](stage1-report.md) · [issue #3](https://github.com/obryadov111/volkodav/issues/3)
-- [x] Этап 2 · Доказательство — влито в `main` (PR #8, `12fdaf2`), выкачено 2026-09-20: несколько паков на актив; паки `docker` (baseline, проверен на реальном Docker), `cisco-ios` (draft, на образцах вывода), `astra-linux` (inventory). Критерий «только данными» выполнен частично: Astra — да, Docker и Cisco потребовали общих возможностей движка; найдена и закрыта угроза ложных «выполнено» при нехватке прав на устройстве. **Не сделано:** пак `postgresql`, инвентарь устройств для Cisco. Подробно — [Этап 2 — несколько паков на актив, docker, Cisco, Astra, подробный отчёт](stage2-report.md) · [issue #4](https://github.com/obryadov111/volkodav/issues/4)
-- [ ] Этап 3 · Инструменты автора — [issue #5](https://github.com/obryadov111/volkodav/issues/5)
-- [ ] Этап 4 · Профили клиентов — [issue #6](https://github.com/obryadov111/volkodav/issues/6)
+- [x] Этап 0 · Фундамент — код и тесты готовы в ветке `feature/stage0-pack-foundation` репозитория `hardening` (коммит `2ce8c6a`): 122 теста бэкенда + 69 тестов агента, проверено на реальной Ubuntu 24.04. **Влито в `main`** (PR #1, `1b57213`) и **выкачено на живую систему 2026-09-20** · [issue #2](https://github.com/obryadov111/hardening/issues/2) · [PR #1](https://github.com/obryadov111/hardening/pull/1)
+- [x] Этап 1 · Перенос существующего — влито в `main` (PR #7, `c37289c`), выкачено 2026-09-20: пак `ubuntu-server` на 12 из 14 правил; результаты сравнены со старым агентом, найдены и исправлены 7 дефектов старой логики (2 из них — ложные «выполнено»); подробно — [Этап 1 — пак ubuntu-server, подробный отчёт](stage1-report.md) · [issue #3](https://github.com/obryadov111/hardening/issues/3)
+- [x] Этап 2 · Доказательство — влито в `main` (PR #8, `12fdaf2`), выкачено 2026-09-20: несколько паков на актив; паки `docker` (baseline, проверен на реальном Docker), `cisco-ios` (draft, на образцах вывода), `astra-linux` (inventory). Критерий «только данными» выполнен частично: Astra — да, Docker и Cisco потребовали общих возможностей движка; найдена и закрыта угроза ложных «выполнено» при нехватке прав на устройстве. **Не сделано:** пак `postgresql`, инвентарь устройств для Cisco. Подробно — [Этап 2 — несколько паков на актив, docker, Cisco, Astra, подробный отчёт](stage2-report.md) · [issue #4](https://github.com/obryadov111/hardening/issues/4)
+- [ ] Этап 3 · Инструменты автора — [issue #5](https://github.com/obryadov111/hardening/issues/5)
+- [ ] Этап 4 · Профили клиентов — [issue #6](https://github.com/obryadov111/hardening/issues/6)
 
 ## Что выяснилось на этапе 0 и переходит дальше
 

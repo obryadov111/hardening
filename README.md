@@ -166,8 +166,8 @@ uvicorn app.main:app --reload
 
 ```bash
 # бэкенд: миграции — до перезапуска, одноразовым контейнером из нового образа
-docker build -t volkodav-backend:latest ./src/backend
-docker run --rm --network diplom-hardening_default --env-file ./src/backend/.env volkodav-backend:latest alembic upgrade head
+docker build -t hardening-backend:latest ./src/backend
+docker run --rm --network diplom-hardening_default --env-file ./src/backend/.env hardening-backend:latest alembic upgrade head
 ./deploy/restart_backend.sh
 
 # фронтенд: nginx без root, порт 80 (FRONTEND_PUBLISH=127.0.0.1:80 — только с этого хоста)

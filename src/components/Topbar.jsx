@@ -104,7 +104,7 @@ export default function Topbar({ onMenuClick }) {
           </button>
 
           <div>
-            <div className="text-lg font-semibold text-white">Volkodav</div>
+            <div className="text-lg font-semibold text-white">Hardening</div>
             <div className="text-sm text-zinc-400">
               {selectedOrganization
                 ? `Текущая организация: ${selectedOrganization.name}`

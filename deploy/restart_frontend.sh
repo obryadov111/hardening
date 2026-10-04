@@ -12,7 +12,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-IMAGE="volkodav-frontend:latest"
+IMAGE="hardening-frontend:latest"
 CONTAINER="hardening_frontend"
 DB_NETWORK="diplom-hardening_default"
 # Порт на хосте: 80 на всех интерфейсах (локально, в LAN и через VPN). Можно переопределить,

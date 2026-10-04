@@ -16,7 +16,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-IMAGE="volkodav-backend:latest"
+IMAGE="hardening-backend:latest"
 CONTAINER="hardening_backend"
 DB_NETWORK="diplom-hardening_default"
 

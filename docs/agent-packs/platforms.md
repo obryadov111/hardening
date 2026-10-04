@@ -16,7 +16,7 @@
 
 ## 2 · Что говорит текущий код
 
-Проверено по `volkodav` (`agent/collector.py`, `app/services/hardening_engine.py`, `app/schemas/ingest.py`):
+Проверено по `hardening` (`agent/collector.py`, `app/services/hardening_engine.py`, `app/schemas/ingest.py`):
 
 | Место | Как сейчас | Что это значит для разного оборудования |
 |---|---|---|

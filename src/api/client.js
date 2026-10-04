@@ -1,6 +1,6 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api";
 
-let accessToken = localStorage.getItem("volkodav_access_token") || null;
+let accessToken = localStorage.getItem("hardening_access_token") || null;
 const listeners = new Set();
 
 function notifyAuthChanged(session) {
@@ -45,10 +45,10 @@ export function getStoredAccessToken() {
 export function setStoredAccessToken(token) {
   accessToken = token;
   if (token) {
-    localStorage.setItem("volkodav_access_token", token);
+    localStorage.setItem("hardening_access_token", token);
     notifyAuthChanged({ access_token: token });
   } else {
-    localStorage.removeItem("volkodav_access_token");
+    localStorage.removeItem("hardening_access_token");
     notifySignedOut();
   }
 }

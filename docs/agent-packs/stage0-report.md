@@ -4,11 +4,11 @@
 
 > [!NOTE]
 > **Где код**
-> Репозиторий `volkodav`, ветка **`feature/stage0-pack-foundation`** (один коммит `2ce8c6a` поверх `main`, 29 файлов, +2531 / −27). **Влито в `main`** (PR #1, merge-коммит `1b57213`; CI зелёный) и **выкачено на живую систему 2026-09-20** вместе с этапами 1–2: бэкап, миграции, ключ подписи, перезапуск — см. [Сводка работ 2026-09-20 — что сделано, влито и выкачено](summary-2026-09-20.md).
+> Репозиторий `hardening`, ветка **`feature/stage0-pack-foundation`** (один коммит `2ce8c6a` поверх `main`, 29 файлов, +2531 / −27). **Влито в `main`** (PR #1, merge-коммит `1b57213`; CI зелёный) и **выкачено на живую систему 2026-09-20** вместе с этапами 1–2: бэкап, миграции, ключ подписи, перезапуск — см. [Сводка работ 2026-09-20 — что сделано, влито и выкачено](summary-2026-09-20.md).
 >
-> Копия этого отчёта и связанных проектных документов лежит **рядом с кодом**: `volkodav/docs/agent-packs/` (та же ветка).
+> Копия этого отчёта и связанных проектных документов лежит **рядом с кодом**: `hardening/docs/agent-packs/` (та же ветка).
 >
-> **Pull Request:** [#1](https://github.com/obryadov111/volkodav/pull/1) · **Issues по этапам:** [#2](https://github.com/obryadov111/volkodav/issues/2), [#3](https://github.com/obryadov111/volkodav/issues/3), [#4](https://github.com/obryadov111/volkodav/issues/4), [#5](https://github.com/obryadov111/volkodav/issues/5), [#6](https://github.com/obryadov111/volkodav/issues/6). PR влит в `main`.
+> **Pull Request:** [#1](https://github.com/obryadov111/hardening/pull/1) · **Issues по этапам:** [#2](https://github.com/obryadov111/hardening/issues/2), [#3](https://github.com/obryadov111/hardening/issues/3), [#4](https://github.com/obryadov111/hardening/issues/4), [#5](https://github.com/obryadov111/hardening/issues/5), [#6](https://github.com/obryadov111/hardening/issues/6). PR влит в `main`.
 
 ## 0 · Итог в цифрах
 
