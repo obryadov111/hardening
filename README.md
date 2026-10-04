@@ -159,6 +159,23 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
+### Продакшен-развёртывание (на сервере)
+
+Бэкенд и фронтенд — отдельные контейнеры; браузер открывает `http://<сервер>/`, nginx фронтенда
+отдаёт собранное приложение и проксирует `/api` в бэкенд. Бэкенд слушает только `127.0.0.1:8000`.
+
+```bash
+# бэкенд: миграции — до перезапуска, одноразовым контейнером из нового образа
+docker build -t volkodav-backend:latest ./src/backend
+docker run --rm --network diplom-hardening_default --env-file ./src/backend/.env volkodav-backend:latest alembic upgrade head
+./deploy/restart_backend.sh
+
+# фронтенд: nginx без root, порт 80 (FRONTEND_PUBLISH=127.0.0.1:80 — только с этого хоста)
+./deploy/restart_frontend.sh
+```
+
+Удалённый агент указывает адрес nginx: `--api-url http://<сервер>`.
+
 ### Тесты backend
 
 ```bash

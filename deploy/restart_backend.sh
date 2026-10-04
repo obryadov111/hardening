@@ -31,11 +31,14 @@ fi
 
 # Лимиты ресурсов: проверки docker.memory_limit_set / docker.cpu_limit_set (ФСТЭК СКО.1.5).
 # Обычное потребление — около 100 МБ; 1 ГБ с запасом покрывает выгрузку PDF/Excel.
+# Порт 8000 — только на localhost: браузеры и удалённые агенты ходят через nginx фронтенда
+# (порт 80, /api -> hardening_backend:8000, deploy/restart_frontend.sh), а локальному агенту
+# на этом хосте хватает 127.0.0.1:8000.
 echo "==> Запускаю ${CONTAINER} на default bridge (для host-port-forward)..."
 docker run -d \
   --name "$CONTAINER" \
   --network bridge \
-  -p 8000:8000 \
+  -p 127.0.0.1:8000:8000 \
   --env-file ./src/backend/.env \
   --restart unless-stopped \
   --memory 1g --cpus 2 \

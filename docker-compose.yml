@@ -18,7 +18,8 @@ services:
     env_file:
       - ./src/backend/.env
     ports:
-      - "8000:8000"
+      # только localhost: снаружи — через nginx фронтенда (/api)
+      - "127.0.0.1:8000:8000"
     networks:
       - diplom_db_net
     restart: unless-stopped
@@ -26,29 +27,29 @@ services:
     mem_limit: 1g
     cpus: 2.0
 
+  # Продакшен-фронтенд: nginx (без root) отдаёт сборку и проксирует /api в backend.
+  # Сейчас тоже запускается вручную — deploy/restart_frontend.sh (та же причина, что у backend).
   frontend:
     build:
       context: .
       dockerfile: Dockerfile.frontend
     container_name: hardening_frontend
-    restart: unless-stopped
-
-  # frontend/nginx are not deployed yet (see chat) — when they are, nginx
-  # will hit the same custom-bridge port-forward issue on its "80:80"
-  # publish and will need the same legacy_bridge treatment as backend,
-  # while still sharing the default network with backend/frontend for
-  # service-name resolution (proxy_pass http://backend:8000/).
-  nginx:
-    image: nginx:1.27-alpine
-    container_name: hardening_nginx
     depends_on:
       - backend
-      - frontend
     ports:
-      - "80:80"
-    volumes:
-      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - "80:8080"
+    networks:
+      - diplom_db_net
     restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.5
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
 networks:
   diplom_db_net:
