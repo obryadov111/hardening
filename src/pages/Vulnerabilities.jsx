@@ -19,6 +19,39 @@ const LEVEL_LABEL = Object.fromEntries(LEVELS.map((l) => [l.key, l.label.toLower
 const INPUT = "rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500";
 const PAGE = 100;
 
+// Статус находки по данным дистрибутива (OVAL Canonical); null — не Ubuntu или данные не загружены.
+const DISTRO = {
+  vulnerable: { label: "уязвимо: исправление не установлено", tone: "border-rose-500/30 bg-rose-500/15 text-rose-300" },
+  unfixed: { label: "затронуто, исправления нет", tone: "border-amber-500/30 bg-amber-500/15 text-amber-300" },
+  fixed: { label: "исправлено в Ubuntu", tone: "border-emerald-500/30 bg-emerald-500/15 text-emerald-300" },
+  unknown: { label: "нет данных Ubuntu — потенциальная", tone: "border-zinc-700 bg-zinc-800 text-zinc-300" },
+};
+const NOT_CHECKED = { label: "не проверено по дистрибутиву", tone: "border-zinc-700 bg-zinc-900 text-zinc-400" };
+
+function DistroCell({ distro }) {
+  const info = distro ? DISTRO[distro.status] : NOT_CHECKED;
+  return (
+    <div className="min-w-[11rem] text-xs">
+      <span className={`inline-flex rounded-full border px-2 py-1 font-medium ${info.tone}`}>{info.label}</span>
+      {distro?.fixed_version ? (
+        <div className="mt-1 text-zinc-400">
+          {distro.status === "fixed" ? "исправлено в" : "исправление:"} {distro.fixed_version}
+        </div>
+      ) : null}
+      {distro?.fix_requires_pro ? <div className="mt-1 text-amber-300">только в ESM — нужна подписка Ubuntu Pro</div> : null}
+      {distro?.usns?.length ? (
+        <div className="mt-1">
+          {distro.usns.map((usn) => (
+            <a key={usn} href={`https://ubuntu.com/security/notices/${usn}`} target="_blank" rel="noreferrer" className="mr-2 text-blue-300 hover:underline">
+              {usn}
+            </a>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function bduLink(bduId) {
   // BDU:2024-04914 → https://bdu.fstec.ru/vul/2024-04914
   return `https://bdu.fstec.ru/vul/${bduId.replace(/^BDU:/, "")}`;
@@ -31,6 +64,8 @@ export default function Vulnerabilities() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [level, setLevel] = useState("");
+  // По умолчанию исправленное в дистрибутиве скрыто: уязвимости на активе уже нет.
+  const [distroFilter, setDistroFilter] = useState("open");
   const [search, setSearch] = useState("");
   const [shown, setShown] = useState(PAGE);
 
@@ -58,11 +93,14 @@ export default function Vulnerabilities() {
     const query = search.trim().toLowerCase();
     return (data?.items || []).filter((item) => {
       if (level && item.level !== level) return false;
+      const status = item.distro?.status || "not_checked";
+      if (distroFilter === "open" && status === "fixed") return false;
+      if (distroFilter !== "open" && distroFilter !== "all" && status !== distroFilter) return false;
       if (!query) return true;
       return [item.bdu_id, item.name, item.package, item.product, item.asset?.hostname, ...(item.cves || [])]
         .some((value) => (value || "").toLowerCase().includes(query));
     });
-  }, [data, level, search]);
+  }, [data, level, search, distroFilter]);
 
   return (
     <OrgGate title="Уязвимости ПО" orgLoading={orgLoading} orgError={orgError} hasOrganizations={hasOrganizations}>
@@ -76,10 +114,10 @@ export default function Vulnerabilities() {
         </div>
 
         <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-          Это <b>потенциальные</b> уязвимости: версия пакета попадает в уязвимый диапазон БДУ. Дистрибутивы переносят
-          исправления в старые версии, не меняя номер, поэтому каждую находку нужно сверить с бюллетенем дистрибутива
-          (для Ubuntu — USN). Уровень критичности V рассчитан по методике ФСТЭК от 30.06.2025:
-          V = CVSS 3.1 × Iinfr × (Iat + Iimp).
+          Версия пакета сравнивается с уязвимыми диапазонами БДУ. Дистрибутивы переносят исправления в старые версии, не
+          меняя номер, поэтому находки дополнительно сверяются с данными Ubuntu (OVAL Canonical): исправленное в
+          дистрибутиве скрыто и в счёт не входит, а находки без данных Ubuntu остаются <b>потенциальными</b>. Уровень
+          критичности V — по методике ФСТЭК от 30.06.2025: V = CVSS 3.1 × Iinfr × (Iat + Iimp).
         </div>
 
         {error ? (
@@ -104,6 +142,15 @@ export default function Vulnerabilities() {
                 <>Копия БДУ ещё не загружена (команда <code>python -m app.commands.bdu import</code>). </>
               )}
               Проверено продуктов: {data.products_checked}, активов: {data.assets_checked}.
+              {data.oval?.length ? (
+                <div className="mt-2">
+                  Данные Ubuntu: {data.oval.map((o) => `${o.release} (${formatDateTime(o.imported_at)})`).join(", ")}.
+                  По ним: подтверждено — {data.distro_summary.vulnerable}, без исправления — {data.distro_summary.unfixed},
+                  исправлено и скрыто — {data.distro_summary.fixed}, нет данных — {data.distro_summary.unknown}.
+                </div>
+              ) : (
+                <div className="mt-2">Данные Ubuntu не загружены: все находки — потенциальные.</div>
+              )}
             </div>
             {data.not_compared?.length ? (
               <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 px-4 py-3">
@@ -122,6 +169,14 @@ export default function Vulnerabilities() {
               <option value="">Все уровни</option>
               {LEVELS.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
             </select>
+            <select className={INPUT} value={distroFilter} onChange={(e) => { setDistroFilter(e.target.value); setShown(PAGE); }}>
+              <option value="open">Без исправленных в Ubuntu</option>
+              <option value="vulnerable">Уязвимо: исправление не установлено</option>
+              <option value="unfixed">Исправления нет</option>
+              <option value="unknown">Нет данных Ubuntu</option>
+              <option value="fixed">Исправлено в Ubuntu</option>
+              <option value="all">Все</option>
+            </select>
             <input
               className={`${INPUT} min-w-[18rem]`}
               placeholder="Поиск: пакет, BDU, CVE, актив…"
@@ -132,7 +187,7 @@ export default function Vulnerabilities() {
           </div>
 
           {loading ? (
-            <SkeletonTable rows={8} cols={7} />
+            <SkeletonTable rows={8} cols={8} />
           ) : items.length === 0 ? (
             <EmptyState
               title="Нет потенциальных уязвимостей"
@@ -147,6 +202,7 @@ export default function Vulnerabilities() {
                     <th className="px-4 py-3">Уязвимость</th>
                     <th className="px-4 py-3">ПО</th>
                     <th className="px-4 py-3">CVSS</th>
+                    <th className="px-4 py-3">Статус в Ubuntu</th>
                     <th className="px-4 py-3">Эксплуатация</th>
                     <th className="px-4 py-3">Срок</th>
                   </tr>
@@ -177,6 +233,7 @@ export default function Vulnerabilities() {
                         <td className="px-4 py-3">
                           {crit ? <>{crit.icvss}<div className="text-xs text-zinc-500">CVSS {crit.cvss_version}</div></> : "—"}
                         </td>
+                        <td className="px-4 py-3"><DistroCell distro={item.distro} /></td>
                         <td className="px-4 py-3 text-xs">{crit?.exploitation || "—"}</td>
                         <td className="px-4 py-3 text-xs">
                           <div className="whitespace-nowrap text-white">{item.deadline || "—"}</div>

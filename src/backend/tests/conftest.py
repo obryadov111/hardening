@@ -43,6 +43,8 @@ TRUNCATE_TABLES = [
     "bdu_software",
     "bdu_vulnerabilities",
     "bdu_imports",
+    "distro_cve_status",
+    "distro_oval_imports",
 ]
 
 

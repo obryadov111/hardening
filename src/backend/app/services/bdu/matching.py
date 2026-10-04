@@ -4,6 +4,10 @@
 переносят исправления в старые версии без смены номера, поэтому каждую находку нужно сверить с
 бюллетенем дистрибутива (для Ubuntu — USN); это сказано и в интерфейсе.
 
+Если для релиза Ubuntu актива загружены OVAL-данные Canonical (ubuntu_oval.py), каждая находка
+получает статус дистрибутива: исправление вышло, но не установлено; исправления нет; исправлено
+(в счёт по уровням не входит); нет данных — остаётся потенциальной.
+
 Если на активе несколько пакетов одного продукта (несколько ядер, openssh-client и openssh-server),
 сравнивается наибольшая версия — остальные, как правило, не используются (старые ядра).
 """
@@ -12,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.services.bdu.criticality import criticality
 from app.services.bdu.products import not_compared_reason, product_for_package
+from app.services.bdu.ubuntu_oval import distro_status, load_distro_index, ubuntu_release
 from app.services.bdu.versions import VersionRange, compare, upstream_version
 from app.services.remediation import REMEDIATION_BY_SEVERITY
 
@@ -57,7 +62,7 @@ def _installed_products(db: Session, asset_ids: list[str], skipped: dict[str, st
 def organization_vulnerabilities(db: Session, organization_id: str, asset_id: str | None = None) -> dict:
     assets = db.execute(
         text("""
-            SELECT a.id, a.hostname, a.asset_type, a.platform_tags FROM assets a
+            SELECT a.id, a.hostname, a.asset_type, a.platform_tags, a.os FROM assets a
             JOIN environments e ON e.id = a.environment_id WHERE e.organization_id = :org_id
         """),
         {"org_id": organization_id},
@@ -94,6 +99,17 @@ def organization_vulnerabilities(db: Session, organization_id: str, asset_id: st
     for _, bdu_id in matches:
         affected[bdu_id] = affected.get(bdu_id, 0) + 1
 
+    oval_releases = {
+        r for (r,) in db.execute(text("SELECT DISTINCT release FROM distro_oval_imports WHERE distro = 'ubuntu'")).all()
+    }
+    # Данные дистрибутива по CVE всех находок — одним запросом на релиз.
+    needed: dict[str, set[str]] = {}
+    for (aid, _), (row, _) in matches.items():
+        release = ubuntu_release(assets_by_id[aid]["os"])
+        if release in oval_releases and row["cves"]:
+            needed.setdefault(release, set()).update(row["cves"].split(","))
+    distro_index = {release: load_distro_index(db, release, cves) for release, cves in needed.items()}
+
     items = []
     for (aid, bdu_id), (row, (package, installed_version, upstream)) in matches.items():
         if asset_id and aid != asset_id:
@@ -107,6 +123,12 @@ def organization_vulnerabilities(db: Session, organization_id: str, asset_id: st
             exploit_status=row["exploit_status"], incident=row["incident"], name=row["name"],
         )
         level = crit.level if crit else None
+        release = ubuntu_release(asset["os"])
+        distro = None
+        if release in oval_releases:
+            cves = row["cves"].split(",") if row["cves"] else []
+            distro = {"distro": "ubuntu", "release": release,
+                      **distro_status(distro_index.get(release, {}), cves, package.split(", "), installed_version)}
         items.append({
             "asset": {"id": aid, "hostname": asset["hostname"]},
             "package": package,
@@ -122,17 +144,29 @@ def organization_vulnerabilities(db: Session, organization_id: str, asset_id: st
             "criticality": crit.__dict__ if crit else None,
             "level": level,
             "deadline": REMEDIATION_BY_SEVERITY[level].deadline if level else None,
+            # Статус по данным дистрибутива; None — релиз не Ubuntu или данные для него не загружены.
+            "distro": distro,
         })
     items.sort(key=lambda i: (LEVEL_ORDER.get(i["level"], 9), -(i["criticality"] or {}).get("v", 0), i["bdu_id"]))
 
-    summary = {level: sum(1 for i in items if i["level"] == level) for level in LEVEL_ORDER}
-    summary["unscored"] = sum(1 for i in items if i["level"] is None)
+    # Исправленное в дистрибутиве в счёт по уровням не входит: уязвимости на активе уже нет.
+    open_items = [i for i in items if not (i["distro"] and i["distro"]["status"] == "fixed")]
+    summary = {level: sum(1 for i in open_items if i["level"] == level) for level in LEVEL_ORDER}
+    summary["unscored"] = sum(1 for i in open_items if i["level"] is None)
+    distro_summary = {s: sum(1 for i in items if i["distro"] and i["distro"]["status"] == s)
+                      for s in ("vulnerable", "unfixed", "fixed", "unknown")}
+    distro_summary["not_checked"] = sum(1 for i in items if not i["distro"])
     return {
         "import": latest_import(db),
         "assets_checked": len(installed) if not asset_id else int(asset_id in installed),
         "products_checked": len(products),
-        "total": len(items),
+        "total": len(open_items),
         "summary": summary,
+        "distro_summary": distro_summary,
+        "oval": [dict(r) for r in db.execute(text(
+            "SELECT DISTINCT ON (release) release, imported_at, cves FROM distro_oval_imports WHERE distro = 'ubuntu' "
+            "ORDER BY release, imported_at DESC"
+        )).mappings().all()],
         "not_compared": [{"example": package, "reason": reason} for reason, package in skipped.items()],
         "items": items,
     }

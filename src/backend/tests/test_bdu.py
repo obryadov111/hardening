@@ -8,7 +8,8 @@ from sqlalchemy import text
 from app.services.bdu.criticality import criticality, impact_of, level_of
 from app.services.bdu.importer import import_bdu
 from app.services.bdu.products import not_compared_reason, product_for_package
-from app.services.bdu.versions import compare, parse_bdu_version, upstream_version
+from app.services.bdu.ubuntu_oval import distro_status, import_oval, parse_oval, ubuntu_release
+from app.services.bdu.versions import compare, compare_deb, parse_bdu_version, upstream_version
 
 # ---------- версии ----------
 
@@ -217,3 +218,115 @@ def test_api_requires_organization_access(client, bdu_loaded, org_with_host, mak
 def test_api_without_bdu_returns_empty_result(client, org_with_host):
     body = client.get(f"/api/organizations/{org_with_host['id']}/vulnerabilities", headers=org_with_host["headers"]).json()
     assert body["total"] == 0 and body["import"] is None
+
+
+# ---------- данные Ubuntu (OVAL Canonical) ----------
+
+
+
+@pytest.mark.parametrize(("a", "b", "expected"), [
+    ("1:9.6p1-3ubuntu13.19", "1:9.6p1-3ubuntu13.3", 1),   # 13.19 > 13.3: ревизии сравниваются как числа
+    ("1.0~rc1", "1.0", -1),                               # «~» раньше релиза
+    ("2:1.0", "1:9.9", 1),                                # эпоха важнее версии
+    ("0.9.24-4", "0.9.24-4ubuntu0.1~esm1", -1),
+    ("1.2.3", "1.2.10", -1),
+    ("1.0", "1.0-0", 0),
+])
+def test_compare_deb(a, b, expected):
+    assert compare_deb(a, b) == expected
+
+
+@pytest.mark.parametrize(("os_name", "release"), [
+    ("Ubuntu 24.04.4 LTS", "noble"), ("Ubuntu 22.04.5 LTS", "jammy"), ("Ubuntu 20.04 LTS", "focal"),
+    ("Debian GNU/Linux 12", None), (None, None),
+])
+def test_ubuntu_release(os_name, release):
+    assert ubuntu_release(os_name) == release
+
+
+SAMPLE_OVAL = """<?xml version="1.0" encoding="utf-8"?>
+<oval_definitions xmlns="http://oval.mitre.org/XMLSchema/oval-definitions-5"
+                  xmlns:linux-def="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
+ <definitions>
+  <definition id="oval:com.ubuntu.noble:def:100" class="inventory" version="1"><metadata><title>noble</title></metadata></definition>
+  <definition id="oval:com.ubuntu.noble:def:1" class="vulnerability" version="1">
+   <metadata><title>CVE-2024-6387</title><description>long text</description>
+    <advisory><cve priority="high" usns="6859-1">CVE-2024-6387</cve></advisory></metadata>
+   <criteria><criterion test_ref="tst:1" comment="openssh source package in noble, is affected and has been fixed (note: '1:9.6p1-3ubuntu13.3')." /></criteria>
+  </definition>
+  <definition id="oval:com.ubuntu.noble:def:2" class="vulnerability" version="1">
+   <metadata><title>CVE-2026-1</title><advisory><cve priority="medium">CVE-2026-1</cve></advisory></metadata>
+   <criteria><criterion test_ref="tst:2" comment="openssh source package in noble, might be affected and may need fixing." /></criteria>
+  </definition>
+  <definition id="oval:com.ubuntu.noble:def:3" class="vulnerability" version="1">
+   <metadata><title>CVE-2026-2</title><advisory><cve priority="high" usns="9000-1">CVE-2026-2</cve></advisory></metadata>
+   <criteria><criterion test_ref="tst:3" comment="openssh source package in noble, is affected and has been fixed (note: '1:9.6p1-3ubuntu13.99~esm1')." /></criteria>
+  </definition>
+ </definitions>
+ <tests>
+  <linux-def:dpkginfo_test id="tst:1" version="1"><linux-def:object object_ref="obj:1" /><linux-def:state state_ref="ste:1" /></linux-def:dpkginfo_test>
+  <linux-def:dpkginfo_test id="tst:2" version="1"><linux-def:object object_ref="obj:1" /></linux-def:dpkginfo_test>
+  <linux-def:dpkginfo_test id="tst:3" version="1"><linux-def:object object_ref="obj:1" /><linux-def:state state_ref="ste:3" /></linux-def:dpkginfo_test>
+ </tests>
+ <objects>
+  <linux-def:dpkginfo_object id="obj:1" version="1"><linux-def:name var_ref="var:1" var_check="at least one" /></linux-def:dpkginfo_object>
+ </objects>
+ <states>
+  <linux-def:dpkginfo_state id="ste:1" version="1"><linux-def:evr datatype="debian_evr_string" operation="less than">1:9.6p1-3ubuntu13.3</linux-def:evr></linux-def:dpkginfo_state>
+  <linux-def:dpkginfo_state id="ste:3" version="1"><linux-def:evr datatype="debian_evr_string" operation="less than">1:9.6p1-3ubuntu13.99~esm1</linux-def:evr></linux-def:dpkginfo_state>
+ </states>
+ <variables>
+  <constant_variable id="var:1" version="1" datatype="string"><value>openssh-client</value><value>openssh-server</value></constant_variable>
+ </variables>
+</oval_definitions>
+"""
+
+
+@pytest.fixture
+def oval_file(tmp_path):
+    path = tmp_path / "com.ubuntu.noble.cve.oval.xml"
+    path.write_text(SAMPLE_OVAL, encoding="utf-8")
+    return path
+
+
+def test_parse_oval(oval_file):
+    rows = {(cve, fixed) for cve, _, _, source, binaries, fixed in parse_oval(oval_file)
+            if source == "openssh" and binaries == ["openssh-client", "openssh-server"]}
+    assert rows == {("CVE-2024-6387", "1:9.6p1-3ubuntu13.3"), ("CVE-2026-1", None), ("CVE-2026-2", "1:9.6p1-3ubuntu13.99~esm1")}
+
+
+def test_distro_status():
+    index = {
+        ("CVE-2024-6387", "openssh-server"): ("1:9.6p1-3ubuntu13.3", "USN-6859-1"),
+        ("CVE-2026-1", "openssh-server"): (None, None),
+        ("CVE-2026-2", "openssh-server"): ("1:9.6p1-3ubuntu13.99~esm1", "USN-9000-1"),
+    }
+    installed = "1:9.6p1-3ubuntu13.19"
+    assert distro_status(index, ["CVE-2024-6387"], ["openssh-server"], installed)["status"] == "fixed"
+    assert distro_status(index, ["CVE-2024-6387"], ["openssh-server"], "1:9.6p1-3ubuntu13.2")["status"] == "vulnerable"
+    assert distro_status(index, ["CVE-2026-1"], ["openssh-server"], installed)["status"] == "unfixed"
+    pro = distro_status(index, ["CVE-2026-2"], ["openssh-server"], installed)
+    assert (pro["status"], pro["fix_requires_pro"], pro["usns"]) == ("vulnerable", True, ["USN-9000-1"])
+    assert distro_status(index, ["CVE-2030-1"], ["openssh-server"], installed)["status"] == "unknown"
+    # несколько CVE: самое тяжёлое состояние определяет находку
+    assert distro_status(index, ["CVE-2024-6387", "CVE-2026-1"], ["openssh-server"], installed)["status"] == "unfixed"
+
+
+def test_api_applies_ubuntu_status(client, db, bdu_loaded, org_with_host, oval_file):
+    db.execute(text("UPDATE assets SET os = 'Ubuntu 24.04.4 LTS' WHERE id = :a"), {"a": org_with_host["asset_id"]})
+    db.commit()
+    stats = import_oval(db, "noble", oval_file)
+    assert (stats.cves, stats.rows) == (3, 6)
+
+    body = client.get(f"/api/organizations/{org_with_host['id']}/vulnerabilities", headers=org_with_host["headers"]).json()
+
+    # CVE-2024-6387 исправлен в 13.3, установлена 13.19 — уязвимости на хосте нет, в счёт не входит.
+    (item,) = body["items"]
+    assert item["distro"]["status"] == "fixed" and item["distro"]["fixed_version"] == "1:9.6p1-3ubuntu13.3"
+    assert body["total"] == 0 and body["summary"]["medium"] == 0
+    assert body["distro_summary"]["fixed"] == 1 and body["oval"][0]["release"] == "noble"
+
+
+def test_api_without_oval_leaves_findings_potential(client, bdu_loaded, org_with_host):
+    body = client.get(f"/api/organizations/{org_with_host['id']}/vulnerabilities", headers=org_with_host["headers"]).json()
+    assert body["items"][0]["distro"] is None and body["distro_summary"]["not_checked"] == 1
