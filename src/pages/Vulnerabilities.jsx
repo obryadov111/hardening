@@ -157,7 +157,7 @@ export default function Vulnerabilities() {
                     return (
                       <tr key={`${item.asset.id}:${item.bdu_id}`} className="border-b border-zinc-800/60 align-top text-zinc-200">
                         <td className="px-4 py-3">
-                          <SeverityBadge value={item.level ? LEVEL_LABEL[item.level] : "нет оценки"} />
+                          <SeverityBadge value={item.level} label={item.level ? LEVEL_LABEL[item.level] : "нет оценки"} />
                           {crit ? <div className="mt-1 text-xs text-zinc-400">V = {crit.v}</div> : null}
                         </td>
                         <td className="max-w-xl px-4 py-3">
