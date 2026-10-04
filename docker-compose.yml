@@ -26,6 +26,8 @@ services:
     # как в deploy/restart_backend.sh — проверки docker.*_limit_set (ФСТЭК СКО.1.5)
     mem_limit: 1g
     cpus: 2.0
+    security_opt:
+      - no-new-privileges:true
 
   # Продакшен-фронтенд: nginx (без root) отдаёт сборку и проксирует /api в backend.
   # Сейчас тоже запускается вручную — deploy/restart_frontend.sh (та же причина, что у backend).

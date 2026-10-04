@@ -29,7 +29,8 @@ if docker ps -a --format '{{.Names}}' | grep -qx "$CONTAINER"; then
   docker rm "$CONTAINER" >/dev/null
 fi
 
-# Лимиты ресурсов: проверки docker.memory_limit_set / docker.cpu_limit_set (ФСТЭК СКО.1.5).
+# Лимиты ресурсов: проверки docker.memory_limit_set / docker.cpu_limit_set (ФСТЭК СКО.1.5);
+# no-new-privileges — процессы контейнера не повышают привилегии (docker.no_new_privileges, СКО.1.9).
 # Обычное потребление — около 100 МБ; 1 ГБ с запасом покрывает выгрузку PDF/Excel.
 # Порт 8000 — только на localhost: браузеры и удалённые агенты ходят через nginx фронтенда
 # (порт 80, /api -> hardening_backend:8000, deploy/restart_frontend.sh), а локальному агенту
@@ -42,6 +43,7 @@ docker run -d \
   --env-file ./src/backend/.env \
   --restart unless-stopped \
   --memory 1g --cpus 2 \
+  --security-opt no-new-privileges \
   "$IMAGE"
 
 echo "==> Подключаю к ${DB_NETWORK} (резолв diploma_db по имени)..."
