@@ -163,7 +163,7 @@ export default function Vulnerabilities() {
           </div>
         ) : null}
 
-        <AppCard title="Потенциальные уязвимости" subtitle="Сначала самые критичные; номер БДУ ведёт на страницу уязвимости на сайте ФСТЭК">
+        <AppCard title="Находки" subtitle="Сначала самые критичные; номер БДУ ведёт на страницу уязвимости на сайте ФСТЭК, USN — на бюллетень Ubuntu">
           <div className="mb-4 flex flex-wrap gap-3">
             <select className={INPUT} value={level} onChange={(e) => { setLevel(e.target.value); setShown(PAGE); }}>
               <option value="">Все уровни</option>
