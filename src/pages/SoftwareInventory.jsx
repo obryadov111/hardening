@@ -5,6 +5,7 @@ import EmptyState from "../components/ui/EmptyState";
 import ErrorState from "../components/ui/ErrorState";
 import { useOrganization } from "../context/OrganizationContext";
 import { getSoftwareByOrganization } from "../api/software";
+import { formatDate } from "../utils/datetime";
 
 export default function SoftwareInventory() {
   const {
@@ -120,7 +121,7 @@ export default function SoftwareInventory() {
                     <td className="px-4 py-3">{item.type || "—"}</td>
                     <td className="px-4 py-3">{item.asset?.hostname || "—"}</td>
                     <td className="px-4 py-3">{item.asset?.os || "—"}</td>
-                    <td className="px-4 py-3">{item.created_at?.slice(0, 10) || "—"}</td>
+                    <td className="px-4 py-3">{formatDate(item.created_at)}</td>
                   </tr>
                 ))}
               </tbody>

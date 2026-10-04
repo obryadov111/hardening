@@ -8,6 +8,7 @@ import { useOrganization } from "../context/OrganizationContext";
 import { createPolicy, deletePolicy, getPoliciesByOrganization, updatePolicy } from "../api/policies";
 import { getCurrentUserRoleInOrganization } from "../api/users";
 import ErrorState from "../components/ui/ErrorState";
+import { formatDate } from "../utils/datetime";
 
 const STATUSES = ["draft", "active", "review", "archived"];
 const EMPTY_FORM = { name: "", scope: "", description: "", status: "draft", owner_name: "", source: "" };
@@ -214,12 +215,12 @@ export default function Policies() {
 
                   <div>
                     <div className="text-xs uppercase tracking-wide text-zinc-500">Создано</div>
-                    <div className="mt-1 text-sm text-zinc-200">{item.created_at?.slice(0, 10) || "—"}</div>
+                    <div className="mt-1 text-sm text-zinc-200">{formatDate(item.created_at)}</div>
                   </div>
 
                   <div>
                     <div className="text-xs uppercase tracking-wide text-zinc-500">Обновлено</div>
-                    <div className="mt-1 text-sm text-zinc-200">{item.updated_at?.slice(0, 10) || "—"}</div>
+                    <div className="mt-1 text-sm text-zinc-200">{formatDate(item.updated_at)}</div>
                   </div>
                 </div>
 

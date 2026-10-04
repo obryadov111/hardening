@@ -11,6 +11,7 @@ import { getScoreTone } from "../utils/score";
 import { useOrganization } from "../context/OrganizationContext";
 import { getSnapshotsByOrganization } from "../api/snapshots";
 import { downloadSnapshotExport } from "../api/exports";
+import { formatDateTime } from "../utils/datetime";
 
 function getStatusBadgeClass(status) {
   switch (status) {
@@ -272,7 +273,7 @@ export default function Scans() {
                       </td>
 
                       <td className="px-4 py-3">
-                        {item.created_at ? item.created_at.slice(0, 16).replace("T", " ") : "—"}
+                        {formatDateTime(item.created_at)}
                       </td>
 
                       <td className="px-4 py-3">

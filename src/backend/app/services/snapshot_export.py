@@ -18,11 +18,21 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from xml.sax.saxutils import escape
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.services.remediation import REMEDIATION_BY_SEVERITY, SOURCE_NOTE, get_remediation
+
+
+def _local(value: datetime | None, fmt: str, fallback: str) -> str:
+    """Время из БД (UTC) — в поясе DISPLAY_TIMEZONE, как его видит читатель отчёта."""
+    if value is None:
+        return fallback
+    return value.astimezone(ZoneInfo(settings.DISPLAY_TIMEZONE)).strftime(fmt)
+
 
 STATUS_LABELS = {"pass": "Соблюдено", "fail": "Нарушение", "error": "Не проверено"}
 ACCEPTED_LABEL = "Нарушение (риск принят)"
@@ -112,7 +122,7 @@ class SnapshotReport:
 
     @property
     def filename_stem(self) -> str:
-        date = self.created_at.strftime("%Y-%m-%d") if self.created_at else "без-даты"
+        date = _local(self.created_at, "%Y-%m-%d", "без-даты")
         return f"scan-{self.scan_number}-{date}"
 
 
@@ -198,7 +208,7 @@ def _summary_pairs(report: SnapshotReport) -> list[tuple[str, str]]:
     return [
         ("Организация", report.organization),
         ("Снимок", f"№ {report.scan_number}" + (f" — {report.label}" if report.label else "")),
-        ("Дата", report.created_at.strftime("%Y-%m-%d %H:%M") if report.created_at else "—"),
+        ("Дата", _local(report.created_at, "%Y-%m-%d %H:%M", "—")),
         ("Активов", str(report.total_assets)),
         ("Проверок всего", str(report.total)),
         ("Соблюдено", str(report.passed)),
@@ -276,7 +286,7 @@ def to_xlsx(report: SnapshotReport) -> bytes:
             row.hostname, row.check_id, row.title, row.severity, row.status_label,
             row.actual, row.expected, fix.deadline if fix else "", fix.procedure if fix else "",
             row.fix_text, row.pack, row.evidence,
-            row.checked_at.strftime("%Y-%m-%d %H:%M") if row.checked_at else "",
+            _local(row.checked_at, "%Y-%m-%d %H:%M", ""),
         )
         for col, value in enumerate(values, start=1):
             put(results, line, col, value).alignment = Alignment(wrap_text=True, vertical="top")

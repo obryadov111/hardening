@@ -8,6 +8,7 @@ import SeverityBadge from "../components/ui/SeverityBadge";
 import CheckStatusBadge from "../components/ui/CheckStatusBadge";
 import { Skeleton, SkeletonTable } from "../components/ui/Skeleton";
 import { getAssetById } from "../api/assets";
+import { formatDateTime } from "../utils/datetime";
 
 export default function AssetDetails() {
   const params = useParams();
@@ -164,7 +165,7 @@ export default function AssetDetails() {
                       <CheckStatusBadge value={item.status} />
                     </td>
                     <td className="px-4 py-3 text-zinc-300">
-                      {item.checked_at ? new Date(item.checked_at).toLocaleString("ru-RU") : "—"}
+                      {formatDateTime(item.checked_at)}
                     </td>
                   </tr>
                 ))}

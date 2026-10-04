@@ -4,6 +4,7 @@ import AppCard from "../components/ui/AppCard";
 import StatCard from "../components/ui/StatCard";
 import { compareSnapshots, getSnapshotsByOrganization } from "../api/snapshots";
 import { useOrganization } from "../context/OrganizationContext";
+import { formatDateTime } from "../utils/datetime";
 
 function getChangeLabel(changeType) {
   switch (changeType) {
@@ -48,7 +49,7 @@ function getChangeClass(changeType) {
 }
 
 function snapshotLabel(snapshot) {
-  const date = snapshot.created_at ? snapshot.created_at.slice(0, 16).replace("T", " ") : "без даты";
+  const date = formatDateTime(snapshot.created_at, "без даты");
   const score = snapshot.compliance_score != null ? ` · ${Math.round(snapshot.compliance_score)}%` : "";
   return `#${snapshot.scan_number}${snapshot.snapshot_label ? ` «${snapshot.snapshot_label}»` : ""} · ${date}${score}`;
 }
@@ -234,7 +235,7 @@ function ComparisonResult({ data }) {
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
             <div className="text-sm text-zinc-400">Было</div>
             <div className="mt-2 text-lg font-semibold text-white">
-              #{beforeSnapshot.scan_number} · {beforeSnapshot.created_at?.slice(0, 10)}
+              #{beforeSnapshot.scan_number} · {formatDateTime(beforeSnapshot.created_at)}
             </div>
             <div className="mt-2 text-sm text-zinc-400">
               Score: {Math.round(beforeSnapshot.compliance_score || 0)}%
@@ -244,7 +245,7 @@ function ComparisonResult({ data }) {
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
             <div className="text-sm text-zinc-400">Стало</div>
             <div className="mt-2 text-lg font-semibold text-white">
-              #{afterSnapshot.scan_number} · {afterSnapshot.created_at?.slice(0, 10)}
+              #{afterSnapshot.scan_number} · {formatDateTime(afterSnapshot.created_at)}
             </div>
             <div className="mt-2 text-sm text-zinc-400">
               Score: {Math.round(afterSnapshot.compliance_score || 0)}%

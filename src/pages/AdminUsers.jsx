@@ -11,6 +11,7 @@ import {
   generateTemporaryPassword,
   getCurrentUserProfile,
 } from "../api/users";
+import { formatDateTime } from "../utils/datetime";
 
 const ROLES = [
   { value: "viewer", label: "Наблюдатель" },
@@ -214,7 +215,7 @@ export default function AdminUsers() {
                         : <span className="text-zinc-500">{user.is_superadmin ? "все" : "нет"}</span>}
                     </td>
                     <td className="px-4 py-3"><StatusBadge user={user} /></td>
-                    <td className="px-4 py-3 text-xs text-zinc-400">{user.last_login_at?.slice(0, 16).replace("T", " ") || "—"}</td>
+                    <td className="px-4 py-3 text-xs text-zinc-400">{formatDateTime(user.last_login_at)}</td>
                     <td className="px-4 py-3">
                       {self ? (
                         <span className="text-xs text-zinc-500">свой пароль — в меню профиля</span>

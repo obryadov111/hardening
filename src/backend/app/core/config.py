@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     # Каталог YAML-паков; по умолчанию app/packs рядом с кодом.
     PACKS_DIR: str | None = None
 
+    # Часовой пояс для времени в выгрузках PDF/Excel (в БД и API время — UTC). Интерфейс переводит
+    # время в пояс браузера сам; отчёт формируется на сервере, поэтому пояс задаётся здесь.
+    DISPLAY_TIMEZONE: str = "UTC"
+
     ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost,http://192.168.0.147:5173,http://10.8.0.1:5173"
 
     @property

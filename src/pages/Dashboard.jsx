@@ -9,6 +9,7 @@ import { Skeleton, SkeletonTable } from "../components/ui/Skeleton";
 import { useOrganization } from "../context/OrganizationContext";
 import { getDashboardSummary } from "../api/dashboard";
 import { getReportsByOrganization } from "../api/reports";
+import { formatDateTime } from "../utils/datetime";
 
 function formatTrendDate(isoDate) {
   if (!isoDate) return "";
@@ -237,7 +238,7 @@ export default function Dashboard() {
                   <div className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950/70 px-4 py-3">
                     <span className="text-sm text-zinc-400">Дата</span>
                     <span className="text-sm text-white">
-                      {summary.latestReport.generated_at?.slice(0, 10) || "—"}
+                      {formatDateTime(summary.latestReport.generated_at)}
                     </span>
                   </div>
 

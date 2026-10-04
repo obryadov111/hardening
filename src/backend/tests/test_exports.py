@@ -123,3 +123,20 @@ def test_snapshot_without_results_still_exports(client, db, make_org, viewer):
     assert resp.status_code == 200
     summary = {row[0]: row[1] for row in load_workbook(io.BytesIO(resp.content))["Сводка"].iter_rows(values_only=True) if row[0]}
     assert "Нарушений нет." in summary and summary["Проверок всего"] == "0"
+
+
+def test_report_times_are_shown_in_display_timezone(monkeypatch):
+    """В БД время в UTC; в отчёте — в поясе DISPLAY_TIMEZONE (раньше печаталось UTC)."""
+    from datetime import UTC, datetime
+
+    from app.core.config import settings
+    from app.services.snapshot_export import SnapshotReport, _summary_pairs
+
+    monkeypatch.setattr(settings, "DISPLAY_TIMEZONE", "Asia/Yekaterinburg")
+    report = SnapshotReport(
+        organization="Org", scan_number=7, label=None, created_at=datetime(2026, 10, 4, 22, 26, tzinfo=UTC),
+        total=0, passed=0, failed=0, compliance_score=None, total_assets=0,
+    )
+
+    assert dict(_summary_pairs(report))["Дата"] == "2026-10-05 03:26"  # +05, уже следующий день
+    assert report.filename_stem == "scan-7-2026-10-05"

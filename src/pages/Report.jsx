@@ -13,6 +13,7 @@ import { getHardeningByOrganization } from "../api/hardening";
 import SeverityBadge from "../components/ui/SeverityBadge";
 import { REMEDIATION_BY_SEVERITY, REMEDIATION_SOURCE_NOTE, getRemediation } from "../utils/remediation";
 import { Link } from "react-router-dom";
+import { formatDateTime } from "../utils/datetime";
 
 /** Текущие нарушения по уровням: сколько, на скольких активах, в какой срок и обязательно ли. */
 function remediationPlan(checks) {
@@ -181,7 +182,7 @@ export default function Report() {
               <tbody>
                 {sortedRows.map((item) => (
                   <tr key={item.id} className="border-b border-zinc-800/60 text-zinc-200 hover:bg-zinc-800/40">
-                    <td className="px-4 py-3">{item.generated_at?.slice(0, 10) || "—"}</td>
+                    <td className="px-4 py-3">{formatDateTime(item.generated_at)}</td>
                     <td className="px-4 py-3">{item.total_checks ?? 0}</td>
                     <td className="px-4 py-3">{item.passed ?? 0}</td>
                     <td className="px-4 py-3">{item.failed ?? 0}</td>

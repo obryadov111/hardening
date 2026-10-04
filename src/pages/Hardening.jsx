@@ -14,6 +14,7 @@ import { getHardeningByOrganization } from "../api/hardening";
 import { createRiskException, getRiskExceptions, revokeRiskException } from "../api/riskExceptions";
 import { getCurrentUserRoleInOrganization } from "../api/users";
 import { getRemediation, REMEDIATION_SOURCE_NOTE } from "../utils/remediation";
+import { endOfLocalDayIso, formatDate, formatDateTime } from "../utils/datetime";
 
 const INPUT = "rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500";
 const EXCEPTION_STATES = {
@@ -48,7 +49,7 @@ function AcceptRiskForm({ row, onSubmit, onCancel }) {
       check_key: row.rule?.rule_code,
       asset_id: form.scope === "asset" ? row.asset?.id : null,
       reason: form.reason,
-      expires_at: form.expires_at ? `${form.expires_at}T23:59:59Z` : null,
+      expires_at: form.expires_at ? endOfLocalDayIso(form.expires_at) : null,
     });
   }
 
@@ -243,7 +244,7 @@ export default function Hardening() {
                         {isAccepted(item) ? (
                           <div className="mt-1 max-w-md text-xs text-violet-300">
                             Риск принят{item.risk_exception.org_wide ? " для всех активов" : ""}
-                            {item.risk_exception.expires_at ? ` до ${item.risk_exception.expires_at.slice(0, 10)}` : ""}:{" "}
+                            {item.risk_exception.expires_at ? ` до ${formatDate(item.risk_exception.expires_at)}` : ""}:{" "}
                             <span className="text-zinc-300">{item.risk_exception.reason}</span>
                           </div>
                         ) : item.status === "fail" && item.rule?.remediation ? (
@@ -268,7 +269,7 @@ export default function Hardening() {
                         </div>
                       </td>
                       <td className="px-4 py-3"><RemediationCell row={item} /></td>
-                      <td className="px-4 py-3">{item.checked_at?.slice(0, 10) || "—"}</td>
+                      <td className="px-4 py-3">{formatDateTime(item.checked_at)}</td>
                     </tr>
                     {acceptingId === item.id ? (
                       <tr className="border-b border-zinc-800/60">
@@ -325,14 +326,14 @@ export default function Hardening() {
                       <td className="max-w-md px-4 py-3 text-zinc-300">{item.reason}</td>
                       <td className="px-4 py-3">
                         <div>{item.created_by_email || "—"}</div>
-                        <div className="text-xs text-zinc-500">{item.created_at?.slice(0, 10)}</div>
+                        <div className="text-xs text-zinc-500">{formatDate(item.created_at)}</div>
                       </td>
-                      <td className="px-4 py-3">{item.expires_at ? item.expires_at.slice(0, 10) : "бессрочно"}</td>
+                      <td className="px-4 py-3">{formatDate(item.expires_at, "бессрочно")}</td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col items-start gap-2">
                           <span className={`rounded-full border px-2 py-1 text-xs ${state.tone}`}>{state.label}</span>
                           {item.state === "revoked" && item.revoked_by_email ? (
-                            <span className="text-xs text-zinc-500">{item.revoked_by_email}, {item.revoked_at?.slice(0, 10)}</span>
+                            <span className="text-xs text-zinc-500">{item.revoked_by_email}, {formatDate(item.revoked_at)}</span>
                           ) : null}
                           {canManage && item.state === "active" ? (
                             <button type="button" onClick={() => handleRevoke(item.id)} className="text-xs text-zinc-400 underline hover:text-white">
