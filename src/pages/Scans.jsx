@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import AppCard from "../components/ui/AppCard";
 import StatCard from "../components/ui/StatCard";
 import EmptyState from "../components/ui/EmptyState";
@@ -55,6 +55,9 @@ export default function Scans() {
   const [loading, setLoading] = useState(false);
   const [busyKey, setBusyKey] = useState("");
   const [exportError, setExportError] = useState("");
+  // Два скана для сравнения, отмеченные пользователем (любые, не только соседние).
+  const [selected, setSelected] = useState([]);
+  const navigate = useNavigate();
 
   useEffect(() => {
     async function loadData() {
@@ -66,6 +69,7 @@ export default function Scans() {
 
       try {
         setLoading(true);
+        setSelected([]);
         const data = await getSnapshotsByOrganization(selectedOrganizationId);
         setRows(data);
       } catch (error) {
@@ -113,6 +117,22 @@ export default function Scans() {
     } finally {
       setBusyKey("");
     }
+  }
+
+  function toggleSelected(id) {
+    setSelected((current) => {
+      if (current.includes(id)) return current.filter((item) => item !== id);
+      // Третий отмеченный скан вытесняет отмеченный первым — выбранными всегда остаются два последних.
+      return [...current, id].slice(-2);
+    });
+  }
+
+  function compareSelected() {
+    const [a, b] = selected.map((id) => rows.find((row) => row.id === id)).filter(Boolean);
+    if (!a || !b) return;
+    // «Было» — более ранний скан, «стало» — более поздний, в каком бы порядке их ни отметили.
+    const [before, after] = new Date(a.created_at) <= new Date(b.created_at) ? [a, b] : [b, a];
+    navigate(`/scan-compare?before=${before.id}&after=${after.id}`);
   }
 
   const { sortedRows, activeKey, sortDir, toggleSort } = useSort(rows, {
@@ -173,6 +193,26 @@ export default function Scans() {
       ) : null}
 
       <AppCard title="История snapshot-сканов" subtitle="Сравнение и экспорт по каждому запуску">
+        {rows.length > 1 ? (
+          <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950/70 px-4 py-3 text-sm">
+            <span className="text-zinc-400">
+              Отметьте два любых скана для сравнения: выбрано {selected.length} из 2
+            </span>
+            <button
+              type="button"
+              disabled={selected.length !== 2}
+              onClick={compareSelected}
+              className="rounded-lg border border-blue-500/30 bg-blue-500/15 px-3 py-1.5 text-xs text-blue-200 hover:bg-blue-500/25 disabled:opacity-40"
+            >
+              Сравнить выбранные
+            </button>
+            {selected.length ? (
+              <button type="button" onClick={() => setSelected([])} className="text-xs text-zinc-400 underline hover:text-white">
+                сбросить
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {loading ? (
           <SkeletonTable rows={6} cols={8} />
         ) : rows.length === 0 ? (
@@ -185,6 +225,7 @@ export default function Scans() {
             <table className="min-w-full text-sm">
               <thead className="border-b border-zinc-800 text-left text-zinc-400">
                 <tr>
+                  <th className="px-4 py-3"><span className="sr-only">Выбрать для сравнения</span></th>
                   <SortableHeader label="Snapshot" sortKey="snapshot" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
                   <SortableHeader label="Дата" sortKey="date" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
                   <SortableHeader label="Статус" sortKey="status" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
@@ -195,7 +236,7 @@ export default function Scans() {
                   <SortableHeader label="Score" sortKey="score" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
                   <th className="px-4 py-3">PDF</th>
                   <th className="px-4 py-3">Excel</th>
-                  <th className="px-4 py-3">Сравнить</th>
+                  <th className="px-4 py-3">С предыдущим</th>
                 </tr>
               </thead>
               <tbody>
@@ -208,8 +249,19 @@ export default function Scans() {
                   return (
                     <tr
                       key={item.id}
-                      className="border-b border-zinc-800/60 text-zinc-200 transition hover:bg-zinc-800/40"
+                      className={`border-b border-zinc-800/60 text-zinc-200 transition hover:bg-zinc-800/40 ${
+                        selected.includes(item.id) ? "bg-blue-500/10" : ""
+                      }`}
                     >
+                      <td className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          aria-label={`Выбрать Snapshot #${item.scan_number} для сравнения`}
+                          checked={selected.includes(item.id)}
+                          onChange={() => toggleSelected(item.id)}
+                          className="h-4 w-4 accent-blue-500"
+                        />
+                      </td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-white">
                           {item.snapshot_label || `Snapshot #${item.scan_number}`}

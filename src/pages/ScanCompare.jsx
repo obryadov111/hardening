@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import AppCard from "../components/ui/AppCard";
 import StatCard from "../components/ui/StatCard";
-import { compareSnapshots } from "../api/snapshots";
+import { compareSnapshots, getSnapshotsByOrganization } from "../api/snapshots";
+import { useOrganization } from "../context/OrganizationContext";
 
 function getChangeLabel(changeType) {
   switch (changeType) {
@@ -46,28 +47,116 @@ function getChangeClass(changeType) {
   }
 }
 
+function snapshotLabel(snapshot) {
+  const date = snapshot.created_at ? snapshot.created_at.slice(0, 16).replace("T", " ") : "без даты";
+  const score = snapshot.compliance_score != null ? ` · ${Math.round(snapshot.compliance_score)}%` : "";
+  return `#${snapshot.scan_number}${snapshot.snapshot_label ? ` «${snapshot.snapshot_label}»` : ""} · ${date}${score}`;
+}
+
+const SELECT = "w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white outline-none";
+
+/** Выбор двух снимков: любые снимки организации, а не только «предыдущий». */
+function SnapshotPicker({ snapshots, beforeId, afterId, onCompare }) {
+  const [before, setBefore] = useState(beforeId || "");
+  const [after, setAfter] = useState(afterId || "");
+
+  const byId = useMemo(() => Object.fromEntries(snapshots.map((s) => [s.id, s])), [snapshots]);
+  const reversed = before && after && byId[before] && byId[after]
+    && new Date(byId[before].created_at) > new Date(byId[after].created_at);
+
+  return (
+    <AppCard title="Какие сканы сравнить" subtitle="Выберите любые два снимка организации: «было» — исходное состояние, «стало» — результат">
+      <form
+        className="grid items-end gap-3 md:grid-cols-[1fr_auto_1fr_auto]"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (before && after) onCompare(before, after);
+        }}
+      >
+        <label className="text-sm text-zinc-400">
+          Было
+          <select className={`${SELECT} mt-1`} value={before} onChange={(e) => setBefore(e.target.value)}>
+            <option value="">— выберите скан —</option>
+            {snapshots.map((s) => <option key={s.id} value={s.id}>{snapshotLabel(s)}</option>)}
+          </select>
+        </label>
+        <button
+          type="button"
+          title="Поменять местами"
+          onClick={() => { setBefore(after); setAfter(before); }}
+          className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
+        >
+          ⇄
+        </button>
+        <label className="text-sm text-zinc-400">
+          Стало
+          <select className={`${SELECT} mt-1`} value={after} onChange={(e) => setAfter(e.target.value)}>
+            <option value="">— выберите скан —</option>
+            {snapshots.map((s) => <option key={s.id} value={s.id}>{snapshotLabel(s)}</option>)}
+          </select>
+        </label>
+        <button
+          type="submit"
+          disabled={!before || !after || before === after}
+          className="rounded-xl border border-blue-500/30 bg-blue-500/15 px-4 py-2 text-sm text-blue-200 hover:bg-blue-500/25 disabled:opacity-40"
+        >
+          Сравнить
+        </button>
+      </form>
+      {before && before === after ? (
+        <div className="mt-3 text-sm text-amber-300">Выбран один и тот же скан — выберите два разных.</div>
+      ) : reversed ? (
+        <div className="mt-3 text-sm text-amber-300">
+          «Было» новее, чем «стало»: изменения покажутся в обратную сторону. Нажмите ⇄, чтобы поменять местами.
+        </div>
+      ) : null}
+    </AppCard>
+  );
+}
+
 export default function ScanCompare() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const beforeId = searchParams.get("before");
   const afterId = searchParams.get("after");
+  const { selectedOrganizationId, loading: orgLoading } = useOrganization();
 
+  const [snapshots, setSnapshots] = useState([]);
   const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (orgLoading || !selectedOrganizationId) return;
+    getSnapshotsByOrganization(selectedOrganizationId)
+      .then((list) => setSnapshots(Array.isArray(list) ? list : []))
+      .catch((err) => {
+        console.error("Ошибка загрузки списка сканов:", err.message);
+        setSnapshots([]);
+      });
+  }, [selectedOrganizationId, orgLoading]);
+
+  // Без параметров — по умолчанию последний скан и предыдущий скан того же актива; выбор меняется в форме.
+  useEffect(() => {
+    if (beforeId || afterId || snapshots.length < 2) return;
+    const latest = snapshots[0];
+    const previous = latest.previous_snapshot_id || snapshots[1].id;
+    setSearchParams({ before: previous, after: latest.id }, { replace: true });
+  }, [beforeId, afterId, snapshots, setSearchParams]);
 
   useEffect(() => {
     async function loadData() {
-      if (!beforeId || !afterId) {
-        setLoading(false);
+      if (!beforeId || !afterId || beforeId === afterId) {
+        setData(null);
         return;
       }
-
       try {
         setLoading(true);
-        const result = await compareSnapshots(beforeId, afterId);
-        setData(result);
-      } catch (error) {
-        console.error("Ошибка сравнения сканов:", error.message);
+        setError("");
+        setData(await compareSnapshots(beforeId, afterId));
+      } catch (err) {
+        console.error("Ошибка сравнения сканов:", err.message);
         setData(null);
+        setError(err.message);
       } finally {
         setLoading(false);
       }
@@ -76,42 +165,48 @@ export default function ScanCompare() {
     loadData();
   }, [beforeId, afterId]);
 
-  const rows = useMemo(() => data?.diffs || [], [data]);
-
-  if (loading) {
-    return <div className="text-zinc-400">Загрузка сравнения...</div>;
-  }
-
-  if (!beforeId || !afterId) {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-2xl font-semibold text-white">Сравнение сканов</h1>
-        <AppCard title="Недостаточно параметров" subtitle="Нужно передать before и after">
-          <div className="text-zinc-400">
-            Открой страницу в формате:
-            <div className="mt-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 font-mono text-sm text-white">
-              /scan-compare?before=SNAPSHOT_ID_1&after=SNAPSHOT_ID_2
-            </div>
-          </div>
-        </AppCard>
-      </div>
-    );
-  }
-
-  if (!data) {
-    return <div className="text-zinc-500">Не удалось загрузить данные сравнения</div>;
-  }
-
-  const { beforeSnapshot, afterSnapshot, summary, commonAssets, onlyBeforeAssets, onlyAfterAssets } = data;
-
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-white">Сравнение сканов</h1>
         <p className="mt-1 text-sm text-zinc-400">
-          Snapshot #{beforeSnapshot?.scan_number} → Snapshot #{afterSnapshot?.scan_number}
+          {data
+            ? `Snapshot #${data.beforeSnapshot?.scan_number} → Snapshot #${data.afterSnapshot?.scan_number}`
+            : "Выберите два скана для сравнения"}
         </p>
       </div>
+
+      <SnapshotPicker
+        // Пересоздаётся при смене выбора в адресе (в т.ч. «Назад» в браузере) — форма показывает актуальную пару.
+        key={`${beforeId}-${afterId}`}
+        snapshots={snapshots}
+        beforeId={beforeId}
+        afterId={afterId}
+        onCompare={(before, after) => setSearchParams({ before, after })}
+      />
+
+      {loading ? (
+        <div className="text-zinc-400">Загрузка сравнения...</div>
+      ) : error ? (
+        <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+          Не удалось сравнить сканы: {error}
+        </div>
+      ) : data ? (
+        <ComparisonResult data={data} />
+      ) : snapshots.length < 2 && !orgLoading ? (
+        <div className="text-zinc-500">Для сравнения нужно хотя бы два скана в организации.</div>
+      ) : null}
+    </div>
+  );
+}
+
+function ComparisonResult({ data }) {
+  const { beforeSnapshot, afterSnapshot, summary, commonAssets, onlyBeforeAssets, onlyAfterAssets } = data;
+
+  const rows = data.diffs || [];
+
+  return (
+    <div className="space-y-6">
 
       {commonAssets === 0 ? (
         <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
