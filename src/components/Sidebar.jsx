@@ -10,6 +10,7 @@ import {
   Boxes,
   History,
   GitCompareArrows,
+  Bug,
   X,
 } from "lucide-react";
 
@@ -18,6 +19,7 @@ const menuItems = [
   { to: "/assets", label: "Активы", icon: Server },
   { to: "/software", label: "Инвентаризация ПО", icon: Boxes },
   { to: "/hardening", label: "Харденинг", icon: ShieldCheck },
+  { to: "/vulnerabilities", label: "Уязвимости ПО", icon: Bug },
   { to: "/policies", label: "Политики", icon: BookOpen },
   { to: "/report", label: "Отчёты", icon: FileText },
   { to: "/scans", label: "Сканирования", icon: History },

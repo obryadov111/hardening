@@ -17,6 +17,7 @@ import Project from "./pages/Project";
 import SoftwareInventory from "./pages/SoftwareInventory";
 import Scans from "./pages/Scans";
 import ScanCompare from "./pages/ScanCompare";
+import Vulnerabilities from "./pages/Vulnerabilities";
 
 export default function App() {
   return (
@@ -32,6 +33,7 @@ export default function App() {
               <Route path="assets" element={<Assets />} />
               <Route path="assets/:assetId" element={<AssetDetails />} />
               <Route path="hardening" element={<Hardening />} />
+              <Route path="vulnerabilities" element={<Vulnerabilities />} />
               <Route path="policies" element={<Policies />} />
               <Route path="report" element={<Report />} />
               <Route path="project" element={<Project />} />

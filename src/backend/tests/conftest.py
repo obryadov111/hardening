@@ -40,6 +40,9 @@ TRUNCATE_TABLES = [
     "client_organizations",
     "user_roles",
     "auditor_organizations",
+    "bdu_software",
+    "bdu_vulnerabilities",
+    "bdu_imports",
 ]
 
 

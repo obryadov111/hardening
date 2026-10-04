@@ -12,6 +12,7 @@ from app.api.routes.policies import router as policies_router
 from app.api.routes.risk_exceptions import router as risk_exceptions_router
 from app.api.routes.snapshots import router as snapshots_router
 from app.api.routes.twofa import router as twofa_router
+from app.api.routes.vulnerabilities import router as vulnerabilities_router
 from app.core.config import settings
 
 app = FastAPI(title=settings.APP_NAME)
@@ -35,6 +36,7 @@ app.include_router(policies_router, prefix=settings.API_PREFIX)
 app.include_router(risk_exceptions_router, prefix=settings.API_PREFIX)
 app.include_router(members_router, prefix=settings.API_PREFIX)
 app.include_router(admin_users_router, prefix=settings.API_PREFIX)
+app.include_router(vulnerabilities_router, prefix=settings.API_PREFIX)
 
 
 @app.get("/health")
