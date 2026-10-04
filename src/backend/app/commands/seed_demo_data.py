@@ -5,7 +5,7 @@
 Usage: python -m app.commands.seed_demo_data
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -42,7 +42,7 @@ def main():
             print(f"Организация '{DEMO_ORG_NAME}' уже существует (id={exists.id}) — пропускаю.")
             return
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         org = ClientOrganization(name=DEMO_ORG_NAME, industry="IT", country="Russia", created_at=now)
         db.add(org)

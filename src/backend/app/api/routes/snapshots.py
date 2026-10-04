@@ -4,6 +4,9 @@
 только снимки с общими активами. Ключ сравнения — (актив, проверка); проверка — код правила или
 id проверки пака. id проверки сохраняется между версиями пака, поэтому результаты разных версий
 сравнимы, а переименованная проверка честно видна как «удалено» + «новое».
+
+Нарушение с принятым риском остаётся fail; если риск приняли между снимками, изменение — «accepted»
+(не «не исправлено»), а нарушение, риск по которому принят в обоих снимках, в таблицу не попадает.
 """
 from uuid import UUID
 
@@ -17,10 +20,10 @@ from app.models.user import User
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
 # Порядок в таблице: сначала то, что требует внимания.
-CHANGE_ORDER = {"regressed": 0, "new": 1, "still_failed": 2, "changed": 3, "fixed": 4, "removed": 5}
+CHANGE_ORDER = {"regressed": 0, "new": 1, "still_failed": 2, "changed": 3, "accepted": 4, "fixed": 5, "removed": 6}
 
 _SNAPSHOT_HEAD = """
-    SELECT id, organization_id, scan_number, snapshot_label, total_checks, passed, failed,
+    SELECT id, organization_id, scan_number, snapshot_label, total_checks, passed, failed, accepted_risks,
            compliance_score, status, total_assets, created_at
     FROM scan_snapshots WHERE id = :sid
 """
@@ -30,26 +33,34 @@ _SNAPSHOT_RESULTS = """
            COALESCE(scr.expected_value, r.expected_value) AS expected_value,
            COALESCE(r.rule_code, scr.check_id) AS check_key,
            COALESCE(r.title, scr.title) AS title,
-           COALESCE(r.severity, scr.severity) AS severity
+           COALESCE(r.severity, scr.severity) AS severity,
+           scr.status = 'fail' AND scr.risk_exception_id IS NOT NULL AS accepted,
+           re.reason AS exception_reason
     FROM scan_check_results scr
     LEFT JOIN assets a ON a.id = scr.asset_id
     LEFT JOIN hardening_rules r ON r.id = scr.rule_id
+    LEFT JOIN risk_exceptions re ON re.id = scr.risk_exception_id
     WHERE scr.snapshot_id = :sid
 """
 
 
-def classify(before: str | None, after: str | None) -> str | None:
-    """Тип изменения; None — изменений нет (pass→pass, error→error), в таблицу не попадает."""
+def classify(before: str | None, after: str | None, before_accepted: bool = False, after_accepted: bool = False) -> str | None:
+    """Тип изменения; None — изменений нет (pass→pass, error→error), в таблицу не попадает.
+    *_accepted — нарушение с принятым риском (статус при этом fail)."""
     if before is None:
-        return "new"
+        return "accepted" if after_accepted else "new"
     if after is None:
         return "removed"
     if before == "fail" and after == "pass":
         return "fixed"
     if before == "pass" and after == "fail":
-        return "regressed"
+        return "regressed"  # даже при принятом риске: хост реально стал хуже
     if before == "fail" and after == "fail":
+        if after_accepted:
+            return None if before_accepted else "accepted"
         return "still_failed"
+    if after_accepted:
+        return "accepted"  # error → fail, риск по которому уже принят
     if before != after:
         return "changed"  # с участием error: стало/перестало проверяться
     return None
@@ -92,7 +103,10 @@ def compare_snapshots(
     # «новый» — он просто не сканировался в этом прогоне.
     for key in sorted({k for k in (*before_rows, *after_rows) if k[0] in common}):
         was, now = before_rows.get(key), after_rows.get(key)
-        change = classify(was and was["status"], now and now["status"])
+        change = classify(
+            was and was["status"], now and now["status"],
+            bool(was and was["accepted"]), bool(now and now["accepted"]),
+        )
         if change is None:
             continue
         meta = now or was
@@ -102,6 +116,8 @@ def compare_snapshots(
             "rule": {"title": meta["title"], "rule_code": key[1], "severity": meta["severity"]},
             "beforeStatus": was and was["status"],
             "afterStatus": now and now["status"],
+            "afterAccepted": bool(now and now["accepted"]),
+            "exceptionReason": now and now["exception_reason"],
             "expectedValue": meta["expected_value"],
             "changeType": change,
         })
@@ -123,6 +139,7 @@ def compare_snapshots(
             "newIssues": count("new", "fail"),
             "removed": count("removed"),
             "changed": count("changed"),
+            "accepted": count("accepted"),
         },
         "diffs": diffs,
     }

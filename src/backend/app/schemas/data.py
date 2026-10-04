@@ -61,6 +61,7 @@ class ScanSnapshotOut(BaseModel):
     total_checks: int | None = 0
     passed: int | None = 0
     failed: int | None = 0
+    accepted_risks: int = 0
     compliance_score: Decimal | None = None
     snapshot_label: str | None = None
     status: str | None = None
@@ -83,6 +84,7 @@ class DashboardSummaryOut(BaseModel):
     checksCount: int = 0
     passedChecks: int = 0
     failedChecks: int = 0
+    acceptedChecks: int = 0  # нарушения с принятым риском: не в failedChecks и не в score
     notEvaluatedChecks: int = 0  # error: проверка не выполнилась, в score не входит
     coverage: float | None = None  # доля выполненных (pass/fail) проверок, %
     reportsCount: int = 0

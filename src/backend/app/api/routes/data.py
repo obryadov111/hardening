@@ -104,7 +104,7 @@ def get_assets_by_organization(organization_id: str, _: User = Depends(require_o
                 ), 0) AS software_count,
                 COALESCE((
                     SELECT COUNT(*) FROM hardening_checks hc
-                    WHERE hc.asset_id = a.id AND hc.status = 'fail'
+                    WHERE hc.asset_id = a.id AND hc.status = 'fail' AND hc.risk_exception_id IS NULL
                 ), 0) AS failed_checks_count
             FROM assets a
             JOIN environments e ON e.id = a.environment_id
@@ -139,7 +139,7 @@ def get_asset_details(asset_id: str, current_user: User = Depends(get_current_us
                 ), 0) AS checks_count,
                 COALESCE((
                     SELECT COUNT(*) FROM hardening_checks hc
-                    WHERE hc.asset_id = a.id AND hc.status = 'fail'
+                    WHERE hc.asset_id = a.id AND hc.status = 'fail' AND hc.risk_exception_id IS NULL
                 ), 0) AS failed_checks_count
             FROM assets a
             LEFT JOIN environments e ON e.id = a.environment_id
@@ -164,7 +164,7 @@ def get_asset_details(asset_id: str, current_user: User = Depends(get_current_us
 
     checks_rows = db.execute(
         text("""
-            SELECT id, asset_id, rule_id, actual_value, expected_value, status, checked_at
+            SELECT id, asset_id, rule_id, actual_value, expected_value, status, checked_at, risk_exception_id
             FROM hardening_checks WHERE asset_id = :asset_id ORDER BY checked_at DESC NULLS LAST
         """),
         {"asset_id": asset_id},
@@ -266,11 +266,14 @@ _HARDENING_SELECT = """
         COALESCE(r.title, hc.title) AS rule_title,
         COALESCE(r.rule_code, hc.check_id) AS rule_code,
         COALESCE(r.severity, hc.severity) AS severity,
-        COALESCE(r.remediation, hc.remediation) AS remediation
+        COALESCE(r.remediation, hc.remediation) AS remediation,
+        re.id AS exception_id, re.reason AS exception_reason, re.expires_at AS exception_expires_at,
+        re.asset_id IS NULL AS exception_org_wide
     FROM hardening_checks hc
     JOIN assets a ON a.id = hc.asset_id
     JOIN environments e ON e.id = a.environment_id
     LEFT JOIN hardening_rules r ON r.id = hc.rule_id
+    LEFT JOIN risk_exceptions re ON re.id = hc.risk_exception_id
 """
 
 
@@ -291,6 +294,13 @@ def _hardening_row_to_dict(row: dict) -> dict:
             "severity": row["severity"],
             "remediation": row["remediation"],
         },
+        # Принятый риск: нарушение осознанно не устраняется и не входит в оценку.
+        "risk_exception": {
+            "id": row["exception_id"],
+            "reason": row["exception_reason"],
+            "expires_at": row["exception_expires_at"],
+            "org_wide": row["exception_org_wide"],
+        } if row["exception_id"] else None,
     }
 
 
@@ -396,7 +406,8 @@ def get_dashboard_summary(organization_id: str, _: User = Depends(require_org_ac
             SELECT
                 COUNT(*) AS total,
                 COUNT(*) FILTER (WHERE hc.status = 'pass') AS passed,
-                COUNT(*) FILTER (WHERE hc.status = 'fail') AS failed
+                COUNT(*) FILTER (WHERE hc.status = 'fail' AND hc.risk_exception_id IS NULL) AS failed,
+                COUNT(*) FILTER (WHERE hc.status = 'fail' AND hc.risk_exception_id IS NOT NULL) AS accepted
             FROM hardening_checks hc
             JOIN assets a ON a.id = hc.asset_id
             JOIN environments e ON e.id = a.environment_id
@@ -407,7 +418,8 @@ def get_dashboard_summary(organization_id: str, _: User = Depends(require_org_ac
     checks_count = checks["total"] or 0
     passed_checks = checks["passed"] or 0
     failed_checks = checks["failed"] or 0
-    evaluated = passed_checks + failed_checks
+    accepted_checks = checks["accepted"] or 0
+    evaluated = passed_checks + failed_checks + accepted_checks
 
     reports_count = db.execute(
         text("SELECT COUNT(*) FROM hardening_reports WHERE organization_id = :org_id"),
@@ -431,6 +443,7 @@ def get_dashboard_summary(organization_id: str, _: User = Depends(require_org_ac
         "checksCount": checks_count,
         "passedChecks": passed_checks,
         "failedChecks": failed_checks,
+        "acceptedChecks": accepted_checks,
         "notEvaluatedChecks": checks_count - evaluated,
         "coverage": round(evaluated / checks_count * 100, 2) if checks_count else None,
         "reportsCount": reports_count or 0,

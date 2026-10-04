@@ -22,6 +22,7 @@ TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=Fals
 TRUNCATE_TABLES = [
     "scan_check_results",
     "hardening_checks",
+    "risk_exceptions",
     "agent_collections",
     "ingestion_batches",
     "hardening_reports",

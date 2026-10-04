@@ -43,6 +43,10 @@ class HardeningCheck(Base):
     severity: Mapped[str | None] = mapped_column(Text, nullable=True)
     remediation: Mapped[str | None] = mapped_column(Text, nullable=True)
     evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Принятый риск на момент прогона (только у fail); такое нарушение не входит в score.
+    risk_exception_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("public.risk_exceptions.id", ondelete="SET NULL"), nullable=True
+    )
 
 
 class ScanCheckResult(Base):
@@ -64,6 +68,10 @@ class ScanCheckResult(Base):
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     severity: Mapped[str | None] = mapped_column(Text, nullable=True)
     remediation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Принятый риск на момент прогона (только у fail); такое нарушение не входит в score.
+    risk_exception_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("public.risk_exceptions.id", ondelete="SET NULL"), nullable=True
+    )
 
 
 class HardeningReport(Base):

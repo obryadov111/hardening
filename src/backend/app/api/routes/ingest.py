@@ -10,7 +10,6 @@ from app.models.environment import Environment
 from app.models.hardening import (
     AgentCollection,
     HardeningCheck,
-    HardeningReport,
     HardeningRule,
     IngestionBatch,
     ScanCheckResult,
@@ -25,9 +24,15 @@ from app.schemas.ingest import (
     IngestRequest,
     IngestResponse,
 )
-from app.services.hardening_engine import compute_compliance_score, compute_coverage, evaluate_asset
+from app.services.hardening_engine import (
+    compute_compliance_score,
+    compute_coverage,
+    count_accepted,
+    evaluate_asset,
+)
 from app.services.packs.evaluate import evaluate_pack
 from app.services.packs.registry import PackRegistry
+from app.services.risk_exceptions import active_exceptions, apply_exceptions, record_org_report
 
 router = APIRouter(tags=["ingest"])
 
@@ -169,8 +174,10 @@ def ingest(
                 errors=sum(1 for r in pack_results if r.status == "error"),
             )
         )
+    apply_exceptions(results, active_exceptions(db, organization_id, asset.id, now))
     score, total, passed, failed = compute_compliance_score(results)
-    errors = total - passed - failed
+    accepted = count_accepted(results)
+    errors = total - passed - failed - accepted
 
     db.query(HardeningCheck).filter(HardeningCheck.asset_id == asset.id).delete()
     for r in results:
@@ -189,6 +196,7 @@ def ingest(
                 severity=r.severity,
                 remediation=r.remediation,
                 evidence=r.evidence,
+                risk_exception_id=r.risk_exception_id,
             )
         )
 
@@ -208,6 +216,7 @@ def ingest(
         total_checks=total,
         passed=passed,
         failed=failed,
+        accepted_risks=accepted,
         compliance_score=score,
         ingestion_batch_id=batch.id,
         snapshot_label=payload.scan_label,
@@ -236,43 +245,12 @@ def ingest(
                 title=r.title,
                 severity=r.severity,
                 remediation=r.remediation,
+                risk_exception_id=r.risk_exception_id,
             )
         )
 
-    # Оргуровневый отчёт — агрегат по ТЕКУЩЕМУ состоянию всех активов организации
-    # (hardening_checks хранит только последний прогон на актив), не только этого прогона.
-    org_totals = db.execute(
-        text(
-            """
-            SELECT
-                COUNT(*) AS total,
-                COUNT(*) FILTER (WHERE hc.status = 'pass') AS passed,
-                COUNT(*) FILTER (WHERE hc.status = 'fail') AS failed
-            FROM hardening_checks hc
-            JOIN assets a ON a.id = hc.asset_id
-            JOIN environments e ON e.id = a.environment_id
-            WHERE e.organization_id = :org_id
-            """
-        ),
-        {"org_id": organization_id},
-    ).mappings().first()
-
-    org_total = org_totals["total"] or 0
-    org_passed = org_totals["passed"] or 0
-    org_failed = org_totals["failed"] or 0
-    org_scoreable = org_passed + org_failed
-    org_score = round((org_passed / org_scoreable) * 100, 2) if org_scoreable else None
-
-    report = HardeningReport(
-        organization_id=organization_id,
-        total_checks=org_total,
-        passed=org_passed,
-        failed=org_failed,
-        compliance_score=org_score,
-        generated_at=now,
-    )
-    db.add(report)
-    db.flush()
+    # Оргуровневый отчёт — по текущему состоянию всех активов организации, не только этого прогона.
+    report = record_org_report(db, organization_id, now)
 
     batch.status = "completed"
     batch.assets_count = 1
@@ -288,6 +266,7 @@ def ingest(
         snapshot_id=str(snapshot.id),
         checks=IngestChecksSummary(total=total, passed=passed, failed=failed, errors=errors),
         compliance_score=score,
+        accepted_risks=accepted,
         coverage=IngestCoverage(**compute_coverage(results)),
         packs=pack_summaries,
         report_id=str(report.id),

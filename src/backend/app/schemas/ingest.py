@@ -90,6 +90,7 @@ class IngestResponse(BaseModel):
     snapshot_id: str
     checks: IngestChecksSummary
     compliance_score: float | None = None
+    accepted_risks: int = Field(default=0, description="Нарушения с принятым риском: не входят в failed и в score")
     coverage: IngestCoverage | None = None
     packs: list[IngestPackSummary] = Field(default_factory=list, description="Итоги по каждому паку прогона")
     report_id: str

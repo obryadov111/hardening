@@ -34,6 +34,12 @@ class CheckResult:
     title: str | None = None
     severity: str | None = None
     remediation: str | None = None
+    # Принятый риск (app/services/risk_exceptions.py): только у fail, в score такое нарушение не входит.
+    risk_exception_id: str | None = None
+
+    @property
+    def accepted(self) -> bool:
+        return self.status == "fail" and self.risk_exception_id is not None
 
 
 def _lookup_fact(facts: dict, rule_code: str) -> tuple[object | None, bool]:
@@ -117,10 +123,16 @@ def compute_coverage(results: list[CheckResult]) -> dict:
 def compute_compliance_score(results: list[CheckResult]) -> tuple[float | None, int, int, int]:
     """Возвращает (compliance_score 0-100 | None, total, passed, failed).
     error/skipped считаются в total, но не в passed/failed — не участвуют
-    в score как самостоятельная категория, но не искажают числитель."""
+    в score как самостоятельная категория, но не искажают числитель.
+    Нарушение с принятым риском тоже не входит ни в failed, ни в score (считается отдельно,
+    count_accepted): риск осознанно оставлен, а не «соблюдено»."""
     total = len(results)
     passed = sum(1 for r in results if r.status == "pass")
-    failed = sum(1 for r in results if r.status == "fail")
+    failed = sum(1 for r in results if r.status == "fail" and not r.accepted)
     scoreable = passed + failed
     score = round((passed / scoreable) * 100, 2) if scoreable else None
     return score, total, passed, failed
+
+
+def count_accepted(results: list[CheckResult]) -> int:
+    return sum(1 for r in results if r.accepted)

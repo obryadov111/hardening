@@ -22,6 +22,8 @@ class ScanSnapshot(Base):
     total_checks: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     passed: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     failed: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    # Нарушения с принятым риском: в failed и в score не входят.
+    accepted_risks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     compliance_score: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     exported_pdf_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     exported_excel_path: Mapped[str | None] = mapped_column(Text, nullable=True)

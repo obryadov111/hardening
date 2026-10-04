@@ -25,8 +25,9 @@ from sqlalchemy.orm import Session
 from app.services.remediation import REMEDIATION_BY_SEVERITY, SOURCE_NOTE, get_remediation
 
 STATUS_LABELS = {"pass": "Соблюдено", "fail": "Нарушение", "error": "Не проверено"}
-# Порядок строк: сначала нарушения по убыванию критичности, затем «не проверено», затем соблюдённые.
-_STATUS_ORDER = {"fail": 0, "error": 1, "pass": 2}
+ACCEPTED_LABEL = "Нарушение (риск принят)"
+# Порядок строк: сначала нарушения по убыванию критичности, затем принятые риски, «не проверено», соблюдённые.
+_STATUS_ORDER = {"fail": 0, "accepted": 1, "error": 2, "pass": 3}
 
 
 @dataclass
@@ -42,10 +43,26 @@ class ResultRow:
     pack: str
     evidence: str
     checked_at: datetime | None
+    exception_reason: str | None = None  # принятый риск на момент прогона
+
+    @property
+    def accepted(self) -> bool:
+        return self.status == "fail" and self.exception_reason is not None
+
+    @property
+    def status_label(self) -> str:
+        return ACCEPTED_LABEL if self.accepted else STATUS_LABELS.get(self.status, self.status)
+
+    @property
+    def fix_text(self) -> str:
+        if self.accepted:
+            return f"Риск принят: {self.exception_reason}"
+        return self.remediation if self.status == "fail" else ""
 
     @property
     def fix(self):
-        return get_remediation(self.status, self.severity)
+        # Принятое нарушение не устраняется — срока устранения у него нет.
+        return None if self.accepted else get_remediation(self.status, self.severity)
 
 
 @dataclass
@@ -68,15 +85,16 @@ class SnapshotReport:
     failed: int
     compliance_score: float | None
     total_assets: int
+    accepted: int = 0
     rows: list[ResultRow] = field(default_factory=list)
 
     @property
     def not_evaluated(self) -> int:
-        return self.total - self.passed - self.failed
+        return self.total - self.passed - self.failed - self.accepted
 
     @property
     def coverage(self) -> float | None:
-        return round((self.passed + self.failed) / self.total * 100, 2) if self.total else None
+        return round((self.passed + self.failed + self.accepted) / self.total * 100, 2) if self.total else None
 
     @property
     def plan(self) -> list[PlanRow]:
@@ -100,14 +118,14 @@ class SnapshotReport:
 
 def _sort_key(row: ResultRow):
     fix = row.fix
-    return (_STATUS_ORDER.get(row.status, 3), fix.order if fix else 9, row.hostname, row.check_id)
+    return (_STATUS_ORDER.get("accepted" if row.accepted else row.status, 4), fix.order if fix else 9, row.hostname, row.check_id)
 
 
 def load_snapshot_report(db: Session, snapshot_id: str) -> SnapshotReport | None:
     head = db.execute(
         text("""
             SELECT s.scan_number, s.snapshot_label, COALESCE(s.completed_at, s.created_at) AS created_at,
-                   s.total_checks, s.passed, s.failed, s.compliance_score, s.total_assets,
+                   s.total_checks, s.passed, s.failed, s.accepted_risks, s.compliance_score, s.total_assets,
                    o.name AS organization
             FROM scan_snapshots s
             LEFT JOIN client_organizations o ON o.id = s.organization_id
@@ -127,10 +145,12 @@ def load_snapshot_report(db: Session, snapshot_id: str) -> SnapshotReport | None
                    COALESCE(r.rule_code, scr.check_id) AS check_id,
                    COALESCE(r.title, scr.title) AS title,
                    COALESCE(r.severity, scr.severity) AS severity,
-                   COALESCE(r.remediation, scr.remediation) AS remediation
+                   COALESCE(r.remediation, scr.remediation) AS remediation,
+                   re.reason AS exception_reason
             FROM scan_check_results scr
             LEFT JOIN assets a ON a.id = scr.asset_id
             LEFT JOIN hardening_rules r ON r.id = scr.rule_id
+            LEFT JOIN risk_exceptions re ON re.id = scr.risk_exception_id
             WHERE scr.snapshot_id = :sid
         """),
         {"sid": snapshot_id},
@@ -144,6 +164,7 @@ def load_snapshot_report(db: Session, snapshot_id: str) -> SnapshotReport | None
         total=head["total_checks"] or 0,
         passed=head["passed"] or 0,
         failed=head["failed"] or 0,
+        accepted=head["accepted_risks"] or 0,
         compliance_score=float(head["compliance_score"]) if head["compliance_score"] is not None else None,
         total_assets=head["total_assets"] or 0,
     )
@@ -161,6 +182,7 @@ def load_snapshot_report(db: Session, snapshot_id: str) -> SnapshotReport | None
                 pack=f"{r['pack_id']} {r['pack_version']}" if r["pack_id"] else "",
                 evidence=r["evidence"] or "",
                 checked_at=r["checked_at"],
+                exception_reason=r["exception_reason"],
             )
             for r in rows
         ),
@@ -181,6 +203,7 @@ def _summary_pairs(report: SnapshotReport) -> list[tuple[str, str]]:
         ("Проверок всего", str(report.total)),
         ("Соблюдено", str(report.passed)),
         ("Нарушений", str(report.failed)),
+        ("Риск принят (не входит в оценку)", str(report.accepted)),
         ("Не проверено", str(report.not_evaluated)),
         ("Соответствие (соблюдено / выполненные)", fmt_pct(report.compliance_score)),
         ("Покрытие (выполненные / все)", fmt_pct(report.coverage)),
@@ -250,9 +273,9 @@ def to_xlsx(report: SnapshotReport) -> bytes:
     for line, row in enumerate(report.rows, start=2):
         fix = row.fix
         values = (
-            row.hostname, row.check_id, row.title, row.severity, STATUS_LABELS.get(row.status, row.status),
+            row.hostname, row.check_id, row.title, row.severity, row.status_label,
             row.actual, row.expected, fix.deadline if fix else "", fix.procedure if fix else "",
-            row.remediation if row.status == "fail" else "", row.pack, row.evidence,
+            row.fix_text, row.pack, row.evidence,
             row.checked_at.strftime("%Y-%m-%d %H:%M") if row.checked_at else "",
         )
         for col, value in enumerate(values, start=1):
@@ -354,10 +377,10 @@ def to_pdf(report: SnapshotReport) -> bytes:
                 p(row.hostname),
                 [p(row.title), p(row.check_id, small)],
                 p(row.severity or "—"),
-                p(STATUS_LABELS.get(row.status, row.status)),
+                p(row.status_label),
                 [p(row.actual or "—"), p(f"ожидалось: {row.expected or '—'}", small)],
                 [p(fix.deadline), p(fix.procedure, small)] if fix else p("—"),
-                p(row.remediation if row.status == "fail" else ""),
+                p(row.fix_text),
             ])
         story.append(table(data, [28 * mm, 62 * mm, 18 * mm, 22 * mm, 45 * mm, 30 * mm, 62 * mm]))
     else:

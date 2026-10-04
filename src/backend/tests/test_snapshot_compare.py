@@ -54,7 +54,7 @@ def test_fixed_and_regressed_on_the_same_asset(client, org):
     body = compare(client, headers, first, second).json()
 
     assert body["commonAssets"] == 1
-    assert body["summary"] == {"fixed": 1, "regressed": 1, "stillFailed": 0, "newIssues": 0, "removed": 0, "changed": 0}
+    assert body["summary"] == {"fixed": 1, "regressed": 1, "stillFailed": 0, "newIssues": 0, "removed": 0, "changed": 0, "accepted": 0}
     changes = {d["rule"]["rule_code"]: (d["beforeStatus"], d["afterStatus"], d["changeType"]) for d in body["diffs"]}
     assert changes == {
         "ssh.max_auth_tries": ("pass", "fail", "regressed"),

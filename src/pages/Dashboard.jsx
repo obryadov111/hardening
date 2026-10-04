@@ -23,6 +23,7 @@ const EMPTY_SUMMARY = {
   checksCount: 0,
   passedChecks: 0,
   failedChecks: 0,
+  acceptedChecks: 0,
   notEvaluatedChecks: 0,
   coverage: null,
   reportsCount: 0,
@@ -132,6 +133,11 @@ export default function Dashboard() {
                   {notEvaluated > 0
                     ? ` — ${notEvaluated} из ${summary.checksCount} проверок не выполнены (нет прав, файла или ответа от устройства); оценка по ним неизвестна`
                     : " — все проверки выполнены"}
+                </div>
+              ) : null}
+              {summary.acceptedChecks > 0 ? (
+                <div className="mt-2 rounded-xl border border-zinc-800 bg-zinc-950/70 px-4 py-3 text-sm text-zinc-300">
+                  Риск принят: {summary.acceptedChecks} — нарушения осознанно оставлены и не входят в оценку соответствия
                 </div>
               ) : null}
             </>

@@ -18,6 +18,8 @@ function getChangeLabel(changeType) {
       return "Удалено";
     case "changed":
       return "Изменилось";
+    case "accepted":
+      return "Риск принят";
     default:
       return "Без изменений";
   }
@@ -37,6 +39,8 @@ function getChangeClass(changeType) {
       return "text-zinc-300";
     case "changed":
       return "text-violet-300";
+    case "accepted":
+      return "text-fuchsia-300";
     default:
       return "text-zinc-400";
   }
@@ -121,11 +125,12 @@ export default function ScanCompare() {
         </div>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
         <StatCard label="Исправлено" value={summary.fixed} hint="fail → pass" tone="success" />
         <StatCard label="Ухудшилось" value={summary.regressed} hint="pass → fail" tone="danger" />
         <StatCard label="Не исправлено" value={summary.stillFailed} hint="fail → fail" tone="warning" />
         <StatCard label="Новые проблемы" value={summary.newIssues} hint="Проверка появилась и провалена" tone="info" />
+        <StatCard label="Риск принят" value={summary.accepted || 0} hint="Нарушение осталось, но исключено из оценки" tone="default" />
         <StatCard label="Удалено" value={summary.removed} hint="Проверки нет в новом снимке (например, изменилась версия пака)" tone="default" />
       </div>
 
@@ -163,6 +168,11 @@ export default function ScanCompare() {
             <div className="mt-2 text-lg font-semibold text-emerald-300">
               {beforeSnapshot.failed} → {afterSnapshot.failed}
             </div>
+            {beforeSnapshot.accepted_risks || afterSnapshot.accepted_risks ? (
+              <div className="mt-2 text-xs text-zinc-400">
+                риск принят: {beforeSnapshot.accepted_risks || 0} → {afterSnapshot.accepted_risks || 0}
+              </div>
+            ) : null}
           </div>
         </div>
       </AppCard>
@@ -198,6 +208,9 @@ export default function ScanCompare() {
                   <td className="px-4 py-3">{item.expectedValue || "—"}</td>
                   <td className={`px-4 py-3 font-medium ${getChangeClass(item.changeType)}`}>
                     {getChangeLabel(item.changeType)}
+                    {item.afterAccepted && item.exceptionReason ? (
+                      <div className="mt-1 max-w-xs text-xs font-normal text-zinc-400">{item.exceptionReason}</div>
+                    ) : null}
                   </td>
                 </tr>
               ))}
