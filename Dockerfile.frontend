@@ -9,8 +9,10 @@ COPY . .
 RUN npm run build
 
 FROM nginxinc/nginx-unprivileged:1.27-alpine
+COPY deploy/nginx/limits.conf /etc/nginx/conf.d/00-limits.conf
+COPY deploy/nginx/app.conf /etc/nginx/hardening-app.conf
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 # Явно, а не только по умолчанию образа: пользователь nginx (uid 101), не root.
 USER 101
-EXPOSE 8080
+EXPOSE 8080 8443

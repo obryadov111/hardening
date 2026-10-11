@@ -31,3 +31,6 @@ dist-ssr
 **/.venv/
 **/.pytest_cache/
 *.pyc
+# Конфигурация nginx для HTTPS, сгенерированная deploy/restart_frontend.sh; домен — deploy/frontend.env
+deploy/generated/
+deploy/frontend.env

@@ -1,0 +1,38 @@
+# Продакшен-фронтенд по HTTPS для домена __DOMAIN__ (агенты и сайт из интернета).
+# Генерируется deploy/restart_frontend.sh при HARDENING_DOMAIN; сертификат — deploy/enable_https.sh.
+# Настройки TLS — Mozilla «intermediate»: TLS 1.2 и 1.3, только AEAD-шифры с прямой секретностью.
+
+server {
+    listen 8080;
+    server_name __DOMAIN__ _;
+    server_tokens off;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/acme;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+    # Всё остальное — только по HTTPS. Агент сам http:// не принимает (кроме localhost).
+    location / {
+        return 301 https://__DOMAIN__$request_uri;
+    }
+}
+
+server {
+    listen 8443 ssl;
+    http2 on;
+    server_name __DOMAIN__;
+
+    ssl_certificate /etc/hardening-tls/fullchain.pem;
+    ssl_certificate_key /etc/hardening-tls/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:TLS:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    set $hsts "max-age=63072000";
+
+    include /etc/nginx/hardening-app.conf;
+}
