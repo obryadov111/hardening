@@ -751,3 +751,14 @@ def test_declared_pack_is_accepted_only_when_detect_output_is_absent(tmp_path):
     assert select_manifests(t, [manifest], declared="cisco-ios") == [manifest]
     (tmp_path / "show_version.txt").write_text("Huawei VRP\n", encoding="utf-8")
     assert select_manifests(OfflineConfigTransport(str(tmp_path)), [manifest], declared="cisco-ios") == []
+
+
+def test_cli_value_does_not_carry_secrets():
+    t = FakeTransport("ssh", cli="enable secret 5 $1$abcd$HASH\nsnmp-server community S3cr3t RO\nhostname sw\n")
+    whole = run_probe(t, {"type": "cli_config", "cmd": "show running-config", "match": r"^enable (?:secret|password)\b"})
+    assert whole["value"] == "enable secret ***" and "HASH" not in whole["evidence"]
+    community = run_probe(t, {"type": "cli_config", "cmd": "show running-config", "match": r"^snmp-server community (\S+)"})
+    assert community["value"] == "***"
+    keyword = run_probe(t, {"type": "cli_config", "cmd": "show running-config", "match": r"^enable (secret|password)"})
+    assert keyword["value"] == "secret"  # само слово — не секрет, его проверяют утверждения пака
+    assert run_probe(t, {"type": "cli_config", "cmd": "show running-config", "match": r"^hostname (\S+)"})["value"] == "sw"

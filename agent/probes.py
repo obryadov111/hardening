@@ -614,9 +614,20 @@ def probe_cli_config(t, p: dict) -> dict:
     for line in lines:
         m = re.search(p["match"], line)
         if m:
-            return _ok(m.group(1) if m.groups() else line.strip(), line)
+            return _ok(_cli_value(m, line), line)
     return _ok(None)
 
+
+def _cli_value(m, line: str) -> str:
+    """Значение для сервера — без секретов, как и свидетельство: значение сохраняется в снимке и попадает
+    в интерфейс и отчёты. Строка целиком маскируется (`enable secret ***`); группа, захватившая текст
+    после слова-секрета (`snmp-server community (\S+)`), заменяется на «***»."""
+    if not m.groups():
+        return redact(line)
+    secret = _SECRET_WORDS.search(line)
+    if secret and m.end(1) > secret.end(1):
+        return "***"
+    return m.group(1)
 
 
 # Состояния, которые печатает systemctl is-active / is-enabled (systemd 219+, RHEL 7 и новее).
