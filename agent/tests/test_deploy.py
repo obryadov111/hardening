@@ -24,7 +24,7 @@ def test_every_variable_used_by_the_unit_is_in_the_example():
     used = set(re.findall(r"\$\{?([A-Z_]+)\}?", exec_start()))
     assert used <= set(example_env()), used - set(example_env())
     # ключи читает collector.py из окружения — они тоже должны быть в образце
-    assert {"HARDENING_AGENT_API_KEY", "HARDENING_PACK_KEY"} <= set(example_env())
+    assert {"HARDENING_AGENT_API_KEY", "HARDENING_PACK_PUBLIC_KEY"} <= set(example_env())
 
 
 def test_exec_start_arguments_are_accepted_by_the_agent_cli():

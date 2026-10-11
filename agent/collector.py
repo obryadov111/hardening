@@ -471,7 +471,10 @@ class ServerConnection:
             if isinstance(reason, ssl.SSLError) and "закреплённым" in str(reason):
                 # Подмена сервера — событие безопасности, а не «сервер недоступен»: в очередь не откладывается.
                 raise SystemExit(f"Ошибка безопасности: {reason.args[0] if reason.args else reason}") from None
-            if isinstance(reason, getattr(ssl, "SSLCertVerificationError", ssl.CertificateError)):
+            # Python 3.7+: SSLCertVerificationError; 3.6 (RHEL 8): SSLError с reason CERTIFICATE_VERIFY_FAILED
+            # или CertificateError (имя в сертификате не совпало) — проверяется по признаку, а не по классу.
+            if isinstance(reason, ssl.CertificateError) or (
+                    isinstance(reason, ssl.SSLError) and getattr(reason, "reason", None) == "CERTIFICATE_VERIFY_FAILED"):
                 raise SystemExit(f"Ошибка безопасности: сертификат сервера не прошёл проверку ({reason}); "
                                  "для корпоративного корневого сертификата — --ca-file") from None
             raise TransientError(f"нет связи с {self.api_url}: {reason}") from None
