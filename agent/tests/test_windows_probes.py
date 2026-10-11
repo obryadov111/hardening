@@ -161,3 +161,81 @@ def test_real_windows_exports_are_parsed():
     assert "MinimumPasswordLength" in local.secpol()["System Access"]
     assert "{0CCE9215-69AE-11D9-BED3-505054503030}" in local.auditpol()
     assert local.secpol() is local.secpol()
+
+
+# ---------- Active Directory (win_ad) ----------
+
+def _ad_output(facts: dict) -> str:
+    import base64
+    import json
+    return base64.b64encode(json.dumps(facts, ensure_ascii=False).encode("utf-8")).decode("ascii")
+
+
+class AdHost:
+    name, platform = "local", "windows"
+
+    def __init__(self, stdout):
+        self.stdout = stdout
+
+    def ad_facts(self):
+        return probes.parse_ad_facts(self.stdout)
+
+
+def test_win_ad_counter_with_names_and_plain_value():
+    host = AdHost(_ad_output({
+        "password_never_expires_count": {"value": 12, "names": ["svc-backup", "Сервис-1С"]},
+        "machine_account_quota": {"value": 10},
+        "krbtgt_password_age_days": {"value": 400, "evidence": "pwdLastSet 2025-09-06"},
+    }))
+    counted = run_probe(host, {"type": "win_ad", "fact": "password_never_expires_count"})
+    assert counted["found"] and counted["value"] == 12
+    assert counted["evidence"] == "12: svc-backup, Сервис-1С …"  # кириллица переживает Base64, «…» — показаны не все
+    assert run_probe(host, {"type": "win_ad", "fact": "machine_account_quota"})["evidence"] == "machine_account_quota = 10"
+    assert run_probe(host, {"type": "win_ad", "fact": "krbtgt_password_age_days"})["evidence"] == "pwdLastSet 2025-09-06"
+
+
+def test_win_ad_failed_fact_and_missing_fact_are_errors_not_values():
+    host = AdHost(_ad_output({"schema_admins_count": {"error": "Access is denied."}}))
+    failed = run_probe(host, {"type": "win_ad", "fact": "schema_admins_count"})
+    assert failed["found"] is False and "Access is denied" in failed["error"]
+    missing = run_probe(host, {"type": "win_ad", "fact": "asrep_roastable_count"})
+    assert missing["found"] is False and "не получено" in missing["error"]
+
+
+@pytest.mark.parametrize("stdout", [_ad_output({"_error": "The specified domain either does not exist or could not be contacted."}),
+                                    "", "not base64 at all", _ad_output(["list"])])
+def test_win_ad_whole_script_failure_is_probe_error_for_every_check(stdout):
+    """Не контроллер домена, каталог недоступен, вывод испорчен — «не проверено», а не «нарушений нет»."""
+    result = run_probe(AdHost(stdout), {"type": "win_ad", "fact": "privileged_users_count"})
+    assert result["found"] is False and result["error"].startswith("сведения AD")
+
+
+def test_win_ad_script_is_fixed_read_only_and_not_from_manifest():
+    argv = probes.ad_facts_argv()
+    assert argv[:6] == ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand"]
+    import base64
+    script = base64.b64decode(argv[6]).decode("utf-16-le")
+    assert script == probes.AD_FACTS_SCRIPT
+    # только поиск по каталогу: ни записи, ни удаления, ни вызова внешних команд
+    for verb in ("CommitChanges", "Put(", "DeleteTree", "Remove", "Set-AD", "New-AD", "Invoke-Expression", "Start-Process"):
+        assert verb not in script
+    # powershell не попадает в белый список команд манифеста: запускается только этот сценарий
+    assert "powershell" not in probes.LOCAL_COMMAND_POLICY
+
+
+def test_win_ad_on_linux_and_on_bare_transport_is_error():
+    if not probes.IS_WINDOWS:
+        assert run_probe(probes.LocalTransport(), {"type": "win_ad", "fact": "recycle_bin_enabled"})["found"] is False
+
+    class Bare:
+        name = "local"
+
+    assert "не поддерживает" in run_probe(Bare(), {"type": "win_ad", "fact": "recycle_bin_enabled"})["error"]
+
+
+@pytest.mark.skipif(not probes.IS_WINDOWS, reason="настоящий PowerShell есть только на Windows")
+def test_real_powershell_runs_ad_script_outside_a_domain():
+    """Раннер CI не в домене: сценарий должен запуститься, разобраться и честно сказать «каталог недоступен».
+    Так проверяются синтаксис сценария, запуск powershell из агента и разбор Base64-вывода."""
+    with pytest.raises(ProbeError, match="сведения AD недоступны"):
+        probes.LocalTransport().ad_facts()

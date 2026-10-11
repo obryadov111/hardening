@@ -15,6 +15,8 @@ def test_windows_packs_match_their_source(tmp_path):
         committed = (BACKEND / "app" / "packs" / f"windows-{kind}-1.0.0.yaml").read_text(encoding="utf-8")
         generated = module.HEADER[kind] + "\n" + yaml.safe_dump(module.build(kind), allow_unicode=True, sort_keys=False, width=200)
         assert committed == generated, f"windows-{kind}: YAML правили вручную — перегенерируйте из pack_sources/windows.py"
+    committed = (BACKEND / "app" / "packs" / "windows-dc-1.0.0.yaml").read_text(encoding="utf-8")
+    assert committed == module.render_dc(), "windows-dc: YAML правили вручную — перегенерируйте из pack_sources/windows.py"
 
 
 def test_debian_family_packs_match_their_source_and_share_ubuntu_checks():

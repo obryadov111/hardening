@@ -97,7 +97,7 @@ def _probe_findings(pack: Pack, probe, where: str, agent) -> list[Finding]:
     windows = "windows" in pack.tags
     if windows and probe.type in ("file_kv", "file_regex", "file_stat", "pkg_version"):
         findings.append(Finding("error", where, f"проба {probe.type} рассчитана на Linux, в Windows-паке она не выполнится"))
-    if not windows and probe.type in ("reg_value", "win_secpol", "win_auditpol"):
+    if not windows and probe.type in ("reg_value", "win_secpol", "win_auditpol", "win_ad"):
         findings.append(Finding("error", where, f"проба {probe.type} выполняется только на Windows — у пака нет тега windows"))
     for argv in _local_argvs(probe, windows):
         policy = agent.LOCAL_COMMAND_POLICY.get(argv[0])
@@ -170,7 +170,7 @@ class FixtureHost:
     фикстура не может «разрешить» то, что агент на хосте не выполнит."""
 
     def __init__(self, agent, transport: str, files=None, stats=None, commands=None, cli=None,
-                 platform="posix", registry=None, secpol=None, auditpol=None):
+                 platform="posix", registry=None, secpol=None, auditpol=None, ad=None):
         self.agent, self.name = agent, transport
         # Windows: реестр {"HKLM\\…\\Ключ\\Значение": значение}, политика безопасности {ключ: значение}
         # (раздел System Access), аудит {GUID: 0–3}. Запреты агента (SAM/SECURITY) действуют и здесь.
@@ -178,6 +178,8 @@ class FixtureHost:
         self.registry = {k.upper(): v for k, v in (registry or {}).items()}
         self.secpol_values = None if secpol is None else {k: str(v) for k, v in secpol.items()}
         self.auditpol_values = None if auditpol is None else {k.upper(): int(v) for k, v in auditpol.items()}
+        # AD: {сведение: значение | {value, names, evidence} | {error}} — как разобранный вывод сценария агента
+        self.ad_values = None if ad is None else {k: v if isinstance(v, dict) else {"value": v} for k, v in ad.items()}
         self.files = dict(files or {})
         self.stats = dict(stats or {})
         self.commands = {k: _command_output(v) for k, v in (commands or {}).items()}
@@ -228,6 +230,11 @@ class FixtureHost:
             raise self.agent.ProbeError("политика аудита недоступна (нет в фикстуре или не Windows)")
         return self.auditpol_values
 
+    def ad_facts(self):
+        if self.platform != "windows" or self.ad_values is None:
+            raise self.agent.ProbeError("сведения AD недоступны (нет в фикстуре или не контроллер домена)")
+        return self.ad_values
+
     def run_cli(self, command):
         if self.name != "ssh":
             raise self.agent.ProbeError("cli_config недоступна на локальном транспорте")
@@ -242,19 +249,20 @@ def _command_output(value) -> tuple[str, str, int]:
     return value.get("stdout", ""), value.get("stderr", ""), int(value.get("code", 0))
 
 
-_MERGED_KEYS = ("files", "stats", "commands", "cli", "registry", "secpol", "auditpol")
+_MERGED_KEYS = ("files", "stats", "commands", "cli", "registry", "secpol", "auditpol", "ad")
+_OPTIONAL_SOURCES = ("secpol", "auditpol", "ad")
 
 
 def _merge(base: dict, case: dict) -> dict:
     merged = {key: {**(base.get(key) or {}), **(case.get(key) or {})} for key in _MERGED_KEYS}
-    for key in ("secpol", "auditpol"):  # отсутствие в фикстуре = «недоступно» (как без прав администратора)
+    for key in _OPTIONAL_SOURCES:  # отсутствие в фикстуре = «недоступно» (как без прав администратора)
         if key not in base and key not in case:
             merged[key] = None
     for name in case.get("drop_registry") or []:
         merged["registry"].pop(name, None)
-    for key in case.get("unavailable") or []:  # например, агент без прав администратора: secpol, auditpol
-        if key not in ("secpol", "auditpol"):
-            raise PackError(f"unavailable: только secpol и auditpol, а не {key!r}")
+    for key in case.get("unavailable") or []:  # например, агент без прав администратора: secpol, auditpol; ad — DC недоступен
+        if key not in _OPTIONAL_SOURCES:
+            raise PackError(f"unavailable: только {', '.join(_OPTIONAL_SOURCES)}, а не {key!r}")
         merged[key] = None
     merged["platform"] = case.get("platform") or base.get("platform") or "posix"
     for path in case.get("drop") or []:

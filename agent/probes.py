@@ -33,8 +33,11 @@ SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 IS_WINDOWS = os.name == "nt"
 # На Windows команды ищутся только в System32 — как SAFE_PATH на Linux, без PATH пользователя.
 WINDOWS_SYSTEM32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+# Windows PowerShell 5.1 — только для встроенного в агент сценария чтения AD (AD_FACTS_SCRIPT), не из манифеста.
+WINDOWS_POWERSHELL_DIR = os.path.join(WINDOWS_SYSTEM32, "WindowsPowerShell", "v1.0")
 MAX_FILE_BYTES = 2_000_000
 COMMAND_TIMEOUT = 15
+AD_TIMEOUT = 120
 MAX_INCLUDE_DEPTH = 5
 MAX_INCLUDE_FILES = 50
 
@@ -176,6 +179,128 @@ def parse_auditpol_backup(text: str) -> dict:
     return result
 
 
+# --- Active Directory (контроллер домена) ------------------------------------------
+# Сведения о домене читаются одним сценарием PowerShell, ЗАШИТЫМ В АГЕНТ: манифест выбирает только имя
+# сведения (win_ad, fact) из закрытого списка, но не текст запроса. Сценарий только читает каталог через
+# ADSI (System.DirectoryServices, LDAP к самому контроллеру) — модуль ActiveDirectory и RSAT не нужны,
+# ничего не изменяет. Группы ищутся по SID, а не по имени: на русской Windows «Администраторы домена».
+# Вывод — JSON в Base64: только ASCII, кодовая страница консоли не важна (имена учётных записей бывают
+# на кириллице). Каждое сведение со своей ошибкой: сбой одного запроса не обнуляет остальные.
+AD_FACTS_SCRIPT = r"""
+$ErrorActionPreference = 'Stop'
+$out = [ordered]@{}
+function Find-All([string]$base, [string]$filter, [string]$scope, [string[]]$props) {
+    $s = New-Object System.DirectoryServices.DirectorySearcher
+    $s.SearchRoot = New-Object System.DirectoryServices.DirectoryEntry("LDAP://$base")
+    $s.Filter = $filter
+    $s.SearchScope = $scope
+    $s.PageSize = 1000
+    foreach ($p in $props) { [void]$s.PropertiesToLoad.Add($p) }
+    $r = $s.FindAll()
+    try { foreach ($x in $r) { ,$x.Properties } } finally { $r.Dispose() }
+}
+function Get-Attr([string]$dn, [string]$attr) {
+    $p = @(Find-All $dn '(objectClass=*)' 'Base' @($attr))
+    if ($p.Count -eq 0 -or $p[0][$attr.ToLower()].Count -eq 0) { return $null }
+    return $p[0][$attr.ToLower()][0]
+}
+function Required([string]$dn, [string]$attr) {
+    $v = Get-Attr $dn $attr
+    if ($null -eq $v) { throw "$attr is not set on $dn" }
+    return $v
+}
+function Esc([string]$v) { $v -replace '\\', '\5c' -replace '\*', '\2a' -replace '\(', '\28' -replace '\)', '\29' }
+function Sid([byte[]]$b) { (New-Object System.Security.Principal.SecurityIdentifier($b, 0)).Value }
+function Group-Dn([string]$sid) { [string](Get-Attr "<SID=$sid>" 'distinguishedName') }
+function Users([string]$filter) {
+    @(Find-All $dn "(&(objectCategory=person)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2))$filter)" 'Subtree' @('samaccountname'))
+}
+function Counted($items) {
+    $names = @($items | ForEach-Object { [string]$_['samaccountname'][0] } | Sort-Object | Select-Object -First 10)
+    @{ value = @($items).Count; names = $names }
+}
+function Fact([string]$name, [scriptblock]$body) {
+    try { $out[$name] = & $body } catch { $out[$name] = @{ error = $_.Exception.Message } }
+}
+function InChain([string[]]$sids) {
+    # Группа леса (518, 519) из дочернего домена может не разрешиться — считаются остальные.
+    $parts = foreach ($s in $sids) { try { $g = Group-Dn $s; if ($g) { '(memberOf:1.2.840.113556.1.4.1941:=' + (Esc $g) + ')' } } catch { } }
+    if (-not $parts) { throw 'privileged groups not resolved' }
+    '(|' + ($parts -join '') + ')'
+}
+try {
+    $rootDse = New-Object System.DirectoryServices.DirectoryEntry('LDAP://RootDSE')
+    $dn = [string]$rootDse.Properties['defaultNamingContext'][0]
+    $cfg = [string]$rootDse.Properties['configurationNamingContext'][0]
+    $forest = [string]$rootDse.Properties['rootDomainNamingContext'][0]
+    $schema = [string]$rootDse.Properties['schemaNamingContext'][0]
+    if (-not $dn) { throw 'RootDSE: defaultNamingContext is empty' }
+    $domSid = Sid (Get-Attr $dn 'objectSid')
+    $rootSid = Sid (Get-Attr $forest 'objectSid')
+    $privileged = @("$domSid-512", "$rootSid-519", "$rootSid-518", 'S-1-5-32-544')
+    Fact 'krbtgt_password_age_days' {
+        $k = @(Find-All $dn '(&(objectClass=user)(sAMAccountName=krbtgt))' 'Subtree' @('pwdlastset'))
+        $set = [DateTime]::FromFileTimeUtc([int64]$k[0]['pwdlastset'][0])
+        @{ value = [int][Math]::Floor(((Get-Date).ToUniversalTime() - $set).TotalDays); evidence = 'pwdLastSet ' + $set.ToString('yyyy-MM-dd') }
+    }
+    Fact 'privileged_users_count' { Counted (Users (InChain $privileged)) }
+    Fact 'schema_admins_count' { Counted (Users (InChain @("$rootSid-518"))) }
+    Fact 'privileged_spn_users_count' { Counted (Users ('(servicePrincipalName=*)(!(sAMAccountName=krbtgt))' + (InChain $privileged))) }
+    Fact 'unconstrained_delegation_count' {
+        Counted @(Find-All $dn '(&(userAccountControl:1.2.840.113556.1.4.803:=524288)(!(userAccountControl:1.2.840.113556.1.4.803:=8192))(!(userAccountControl:1.2.840.113556.1.4.803:=2)))' 'Subtree' @('samaccountname'))
+    }
+    Fact 'asrep_roastable_count' { Counted (Users '(userAccountControl:1.2.840.113556.1.4.803:=4194304)') }
+    Fact 'password_never_expires_count' { Counted (Users '(userAccountControl:1.2.840.113556.1.4.803:=65536)') }
+    Fact 'password_not_required_count' { Counted (Users '(userAccountControl:1.2.840.113556.1.4.803:=32)') }
+    Fact 'reversible_encryption_users_count' { Counted (Users '(userAccountControl:1.2.840.113556.1.4.803:=128)') }
+    Fact 'des_only_users_count' { Counted (Users '(userAccountControl:1.2.840.113556.1.4.803:=2097152)') }
+    Fact 'machine_account_quota' { @{ value = [int](Required $dn 'ms-DS-MachineAccountQuota') } }
+    Fact 'domain_functional_level' { @{ value = [int](Required $dn 'msDS-Behavior-Version') } }
+    Fact 'recycle_bin_enabled' {
+        $bl = @(Find-All "CN=Recycle Bin Feature,CN=Optional Features,CN=Directory Service,CN=Windows NT,CN=Services,$cfg" '(objectClass=*)' 'Base' @('msds-enabledfeaturebl'))
+        @{ value = [int]($bl.Count -gt 0 -and $bl[0]['msds-enabledfeaturebl'].Count -gt 0) }
+    }
+    Fact 'anonymous_ldap_allowed' {
+        $h = [string](Get-Attr "CN=Directory Service,CN=Windows NT,CN=Services,$cfg" 'dSHeuristics')
+        @{ value = [int]($h.Length -ge 7 -and $h[6] -eq '2'); evidence = "dSHeuristics=$h" }
+    }
+    Fact 'laps_schema_present' {
+        $a = @(Find-All $schema '(|(lDAPDisplayName=ms-Mcs-AdmPwd)(lDAPDisplayName=msLAPS-Password))' 'OneLevel' @('ldapdisplayname'))
+        @{ value = [int]($a.Count -gt 0); evidence = (@($a | ForEach-Object { [string]$_['ldapdisplayname'][0] }) -join ', ') }
+    }
+} catch {
+    $out['_error'] = $_.Exception.Message
+}
+$json = $out | ConvertTo-Json -Depth 4 -Compress
+[Console]::Out.Write([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json)))
+"""
+
+
+def ad_facts_argv() -> "list[str]":
+    """Запуск встроенного сценария: -EncodedCommand (UTF-16LE в Base64) — без файлов и без экранирования."""
+    import base64
+
+    encoded = base64.b64encode(AD_FACTS_SCRIPT.encode("utf-16-le")).decode("ascii")
+    return ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded]
+
+
+def parse_ad_facts(stdout: str) -> dict:
+    """Base64(JSON) сценария → {сведение: {value[, names, evidence] | error}}. Общая ошибка (_error) —
+    контроллер домена недоступен, хост не в домене: ProbeError для всех проверок, а не «нарушений нет»."""
+    import base64
+
+    text = stdout.strip()
+    try:
+        facts = json.loads(base64.b64decode(text, validate=True).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise ProbeError(f"сведения AD: не удалось разобрать вывод ({text[:120]!r})") from exc
+    if not isinstance(facts, dict):
+        raise ProbeError("сведения AD: неожиданный формат")
+    if facts.get("_error"):
+        raise ProbeError(f"сведения AD недоступны: {str(facts['_error'])[:300]}")
+    return facts
+
+
 CLI_FILTERS = ("include", "exclude", "begin", "section", "count", "match", "except")
 _CLI_SEGMENT = re.compile(r"^[A-Za-z0-9 _./^:\-]+$")
 _CLI_READONLY = re.compile(r"^(show|display) [A-Za-z0-9 _./^:\-]+$|^/export( [A-Za-z0-9 _./=\-]+)?$|^/[a-z0-9/ -]+ print( [A-Za-z0-9 _./=\-]+)?$")
@@ -224,7 +349,7 @@ class LocalTransport:
 
     def __init__(self):
         self.platform = "windows" if IS_WINDOWS else "posix"
-        self._secpol = self._auditpol = None  # кэш на прогон: экспорт дорогой и одинаков для всех проверок
+        self._secpol = self._auditpol = self._ad = None  # кэш на прогон: экспорт дорогой и одинаков для всех проверок
 
     def _check_path(self, path: str) -> str:
         real = os.path.realpath(path)
@@ -258,10 +383,10 @@ class LocalTransport:
             raise ProbeError(f"команда вне белого списка агента: {' '.join(argv)}")
         return self._execute(argv)
 
-    def _execute(self, argv: "list[str]") -> CmdOutput:
+    def _execute(self, argv: "list[str]", timeout: int = COMMAND_TIMEOUT) -> CmdOutput:
         """Запуск без shell из системного каталога. Команды из манифеста попадают сюда только через run()
         (белый список); secedit и auditpol с фиксированными аргументами агент вызывает сам."""
-        search = WINDOWS_SYSTEM32 if IS_WINDOWS else SAFE_PATH
+        search = WINDOWS_SYSTEM32 + os.pathsep + WINDOWS_POWERSHELL_DIR if IS_WINDOWS else SAFE_PATH
         exe = shutil.which(argv[0], path=search)
         if exe is None:
             raise ProbeError(f"команда {argv[0]} не найдена")
@@ -270,7 +395,7 @@ class LocalTransport:
                if IS_WINDOWS else {"PATH": SAFE_PATH, "LANG": "C", "LC_ALL": "C"})
         try:
             proc = subprocess.run(
-                [exe, *argv[1:]], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=COMMAND_TIMEOUT,
+                [exe, *argv[1:]], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout,
                 env=env, check=False, errors="replace",
             )
         except (OSError, subprocess.SubprocessError) as exc:
@@ -328,6 +453,16 @@ class LocalTransport:
                 raise ProbeError("резервная копия политики аудита: подкатегории не найдены")
             self._auditpol = parsed
         return self._auditpol
+
+    def ad_facts(self) -> dict:
+        if not IS_WINDOWS:
+            raise ProbeError("сведения AD доступны только на контроллере домена Windows")
+        if self._ad is None:
+            out = self._execute(ad_facts_argv(), timeout=AD_TIMEOUT)
+            if out.code != 0 and not out.stdout.strip():
+                raise ProbeError(f"сведения AD: powershell, код {out.code}: {out.stderr.strip()[:200]}")
+            self._ad = parse_ad_facts(out.stdout)
+        return self._ad
 
     def run_cli(self, command: str) -> CmdOutput:
         raise ProbeError("cli_config недоступна на локальном транспорте")
@@ -695,6 +830,22 @@ def probe_win_auditpol(t, p: dict) -> dict:
     return _ok(policy[guid], f"{guid}: {labels.get(policy[guid], policy[guid])}")
 
 
+def probe_win_ad(t, p: dict) -> dict:
+    """Сведение о домене из закрытого списка (AD_FACTS_SCRIPT). Счётчики учётных записей — число, в
+    свидетельстве до 10 имён: администратору сразу видно, кого исправлять."""
+    fact = _capability(t, "ad_facts")().get(p["fact"])
+    if fact is None:
+        raise ProbeError(f"сведение AD {p['fact']} не получено")
+    if "error" in fact:
+        raise ProbeError(f"сведение AD {p['fact']}: {str(fact['error'])[:300]}")
+    value, names = fact.get("value"), fact.get("names") or []
+    if names:
+        evidence = f"{value}: {', '.join(names)}" + (" …" if isinstance(value, int) and value > len(names) else "")
+    else:
+        evidence = fact.get("evidence") or f"{p['fact']} = {value}"
+    return _ok(value, evidence)
+
+
 def probe_service_state(t, p: dict) -> dict:
     if getattr(t, "platform", "posix") == "windows":
         return _windows_service_state(t, p)
@@ -757,6 +908,7 @@ PROBES = {
     "reg_value": probe_reg_value,
     "win_secpol": probe_win_secpol,
     "win_auditpol": probe_win_auditpol,
+    "win_ad": probe_win_ad,
 }
 
 

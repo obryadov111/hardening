@@ -1,0 +1,244 @@
+# Образцы для пака windows-dc: реестр контроллера домена, политика аудита (GUID -> 0..3) и сведения о
+# домене в том виде, в каком их отдаёт встроенный сценарий агента (win_ad): {сведение: значение} или
+# {value, names, evidence}; {error} — запрос не выполнился. Живого контроллера домена пока нет — это
+# единственная проверка пака (maturity: draft).
+pack: windows-dc
+base:
+  platform: windows
+  registry:
+    HKLM\SYSTEM\CurrentControlSet\Control\ProductOptions\ProductType: LanmanNt
+    HKLM\SYSTEM\CurrentControlSet\Services\NTDS\Parameters\LDAPServerIntegrity: 2
+    HKLM\SYSTEM\CurrentControlSet\Services\NTDS\Parameters\LdapEnforceChannelBinding: 2
+    HKLM\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters\RefusePasswordChange: 0
+  auditpol:
+    '{0CCE923C-69AE-11D9-BED3-505054503030}': 1
+    '{0CCE923B-69AE-11D9-BED3-505054503030}': 2
+    '{0CCE9242-69AE-11D9-BED3-505054503030}': 3
+    '{0CCE9240-69AE-11D9-BED3-505054503030}': 3
+    '{0CCE9236-69AE-11D9-BED3-505054503030}': 1
+  ad:
+    krbtgt_password_age_days:
+      value: 35
+      evidence: pwdLastSet 2026-09-06
+    privileged_users_count:
+      value: 2
+      names:
+      - adm-ivanov
+      - Administrator
+    schema_admins_count:
+      value: 0
+      names: []
+    privileged_spn_users_count: 0
+    unconstrained_delegation_count: 0
+    asrep_roastable_count: 0
+    password_never_expires_count: 0
+    password_not_required_count: 0
+    reversible_encryption_users_count: 0
+    des_only_users_count: 0
+    machine_account_quota: 0
+    domain_functional_level: 7
+    recycle_bin_enabled: 1
+    anonymous_ldap_allowed:
+      value: 0
+      evidence: dSHeuristics=
+    laps_schema_present:
+      value: 1
+      evidence: msLAPS-Password
+cases:
+- name: укреплённый контроллер домена — всё соблюдено
+  detect: true
+  expect:
+    windc.ldap_signing_required: pass
+    windc.ldap_channel_binding: pass
+    windc.netlogon_full_secure_channel: pass
+    windc.netlogon_no_vulnerable_allowlist: pass
+    windc.machine_password_change_allowed: pass
+    windc.dsrm_network_logon_disabled: pass
+    windc.audit_ds_changes: pass
+    windc.audit_ds_access: pass
+    windc.audit_kerberos_authentication: pass
+    windc.audit_kerberos_service_tickets: pass
+    windc.audit_computer_account_management: pass
+    windc.krbtgt_password_rotated: pass
+    windc.privileged_users_limited: pass
+    windc.schema_admins_empty: pass
+    windc.privileged_without_spn: pass
+    windc.no_unconstrained_delegation: pass
+    windc.no_asrep_roastable: pass
+    windc.no_password_not_required: pass
+    windc.no_reversible_encryption_users: pass
+    windc.no_des_only_users: pass
+    windc.no_password_never_expires: pass
+    windc.machine_account_quota_zero: pass
+    windc.anonymous_ldap_disabled: pass
+    windc.functional_level_2016: pass
+    windc.recycle_bin_enabled: pass
+    windc.laps_schema_present: pass
+- name: слабый контроллер домена — нарушено всё
+  registry:
+    HKLM\SYSTEM\CurrentControlSet\Services\NTDS\Parameters\LDAPServerIntegrity: 1
+    HKLM\SYSTEM\CurrentControlSet\Services\NTDS\Parameters\LdapEnforceChannelBinding: 1
+    HKLM\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters\FullSecureChannelProtection: 0
+    HKLM\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters\vulnerablechannelallowlist: O:SYG:SYD:(A;;RC;;;WD)
+    HKLM\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters\RefusePasswordChange: 1
+    HKLM\SYSTEM\CurrentControlSet\Control\Lsa\DsrmAdminLogonBehavior: 2
+  auditpol:
+    '{0CCE923C-69AE-11D9-BED3-505054503030}': 0
+    '{0CCE923B-69AE-11D9-BED3-505054503030}': 1
+    '{0CCE9242-69AE-11D9-BED3-505054503030}': 1
+    '{0CCE9240-69AE-11D9-BED3-505054503030}': 0
+    '{0CCE9236-69AE-11D9-BED3-505054503030}': 2
+  ad:
+    krbtgt_password_age_days:
+      value: 2140
+      evidence: pwdLastSet 2020-11-30
+    privileged_users_count:
+      value: 14
+      names:
+      - adm1
+      - adm2
+      - adm3
+      - adm4
+      - adm5
+      - adm6
+      - adm7
+      - adm8
+      - adm9
+      - Administrator
+    schema_admins_count:
+      value: 1
+      names:
+      - Administrator
+    privileged_spn_users_count:
+      value: 1
+      names:
+      - svc-sql
+    unconstrained_delegation_count:
+      value: 2
+      names:
+      - APP01$
+      - svc-iis
+    asrep_roastable_count:
+      value: 1
+      names:
+      - test
+    password_never_expires_count:
+      value: 9
+      names:
+      - svc-backup
+      - svc-sql
+    password_not_required_count:
+      value: 1
+      names:
+      - kiosk
+    reversible_encryption_users_count:
+      value: 1
+      names:
+      - radius
+    des_only_users_count:
+      value: 1
+      names:
+      - legacy
+    machine_account_quota: 10
+    domain_functional_level: 4
+    recycle_bin_enabled: 0
+    anonymous_ldap_allowed:
+      value: 1
+      evidence: dSHeuristics=0000002
+    laps_schema_present:
+      value: 0
+      evidence: ''
+  expect:
+    windc.ldap_signing_required: fail
+    windc.ldap_channel_binding: fail
+    windc.netlogon_full_secure_channel: fail
+    windc.netlogon_no_vulnerable_allowlist: fail
+    windc.machine_password_change_allowed: fail
+    windc.dsrm_network_logon_disabled: fail
+    windc.audit_ds_changes: fail
+    windc.audit_ds_access: fail
+    windc.audit_kerberos_authentication: fail
+    windc.audit_kerberos_service_tickets: fail
+    windc.audit_computer_account_management: fail
+    windc.krbtgt_password_rotated: fail
+    windc.privileged_users_limited: fail
+    windc.schema_admins_empty: fail
+    windc.privileged_without_spn: fail
+    windc.no_unconstrained_delegation: fail
+    windc.no_asrep_roastable: fail
+    windc.no_password_not_required: fail
+    windc.no_reversible_encryption_users: fail
+    windc.no_des_only_users: fail
+    windc.no_password_never_expires: fail
+    windc.machine_account_quota_zero: fail
+    windc.anonymous_ldap_disabled: fail
+    windc.functional_level_2016: fail
+    windc.recycle_bin_enabled: fail
+    windc.laps_schema_present: fail
+- name: рядовой сервер (ServerNT) — пак не применяется
+  registry:
+    HKLM\SYSTEM\CurrentControlSet\Control\ProductOptions\ProductType: ServerNT
+  detect: false
+- name: рабочая станция (WinNT) — пак не применяется
+  registry:
+    HKLM\SYSTEM\CurrentControlSet\Control\ProductOptions\ProductType: WinNT
+  detect: false
+- name: каталог недоступен (служба AD остановлена, нет прав) — сведения о домене не проверены, а не соблюдены
+  unavailable:
+  - ad
+  expect:
+    windc.krbtgt_password_rotated: error
+    windc.privileged_users_limited: error
+    windc.schema_admins_empty: error
+    windc.privileged_without_spn: error
+    windc.no_unconstrained_delegation: error
+    windc.no_asrep_roastable: error
+    windc.no_password_not_required: error
+    windc.no_reversible_encryption_users: error
+    windc.no_des_only_users: error
+    windc.no_password_never_expires: error
+    windc.machine_account_quota_zero: error
+    windc.anonymous_ldap_disabled: error
+    windc.functional_level_2016: error
+    windc.recycle_bin_enabled: error
+    windc.laps_schema_present: error
+    windc.ldap_signing_required: pass
+- name: один запрос к каталогу не выполнился — ошибка только у его проверки
+  ad:
+    privileged_users_count:
+      error: privileged groups not resolved
+  expect:
+    windc.privileged_users_limited: error
+    windc.schema_admins_empty: pass
+    windc.krbtgt_password_rotated: pass
+- name: без прав администратора — аудит не проверен
+  unavailable:
+  - auditpol
+  expect:
+    windc.audit_ds_changes: error
+    windc.audit_kerberos_authentication: error
+    windc.krbtgt_password_rotated: pass
+- name: 'умолчания Windows: значений в реестре нет'
+  drop_registry:
+  - HKLM\SYSTEM\CurrentControlSet\Services\NTDS\Parameters\LDAPServerIntegrity
+  - HKLM\SYSTEM\CurrentControlSet\Services\NTDS\Parameters\LdapEnforceChannelBinding
+  - HKLM\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters\RefusePasswordChange
+  expect:
+    windc.ldap_signing_required: fail
+    windc.ldap_channel_binding: fail
+    windc.netlogon_full_secure_channel: pass
+    windc.netlogon_no_vulnerable_allowlist: pass
+    windc.machine_password_change_allowed: pass
+    windc.dsrm_network_logon_disabled: pass
+- name: 'граница: krbtgt ровно 180 дней — соблюдено, 181 — нарушено; 5 администраторов — соблюдено'
+  ad:
+    krbtgt_password_age_days: 180
+    privileged_users_count: 5
+  expect:
+    windc.krbtgt_password_rotated: pass
+    windc.privileged_users_limited: pass
+- name: 'граница: krbtgt 181 день'
+  ad:
+    krbtgt_password_age_days: 181
+  expect:
+    windc.krbtgt_password_rotated: fail

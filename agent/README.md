@@ -132,7 +132,7 @@ RHEL, Rocky Linux, AlmaLinux, Oracle Linux, CentOS Stream, **РЕД ОС 7.3 и 
 официальных образов всех семи систем (workflow **Linux packs**), файловые пробы работают на настоящих файлах
 ОС; пробы служб в контейнере без systemd — «не проверено» по построению.
 
-## Windows (паки `windows-server`, `windows-client`)
+## Windows (паки `windows-server`, `windows-client`, `windows-dc`)
 
 На Windows-хостах нет Python, поэтому агент собирается в один файл `hardening-agent.exe` (PyInstaller) —
 тот же `collector.py` + `probes.py`, только стандартная библиотека (реестр — модуль `winreg`). Готовый
@@ -171,6 +171,7 @@ schtasks /Create /TN "Hardening agent" /RU SYSTEM /SC DAILY /ST 03:00 /RL HIGHES
 | `win_secpol` | `secedit /export` — ключи вида `MinimumPasswordLength` | администратор |
 | `win_auditpol` | `auditpol /backup` — GUID подкатегорий и числа 0–3 | администратор |
 | `service_state` | `sc query` (состояние — число и константа) и `Start` службы в реестре | пользователь |
+| `win_ad` | контроллер домена: встроенный в агент сценарий PowerShell читает каталог по LDAP (ADSI), манифест выбирает только имя сведения из закрытого списка | SYSTEM на DC |
 
 `secedit` и `auditpol` пишут результат во временный файл в новом временном каталоге агента — он читается
 и сразу удаляется; системная конфигурация не меняется. Пустой экспорт — «не проверено», а не «не задано».
@@ -178,6 +179,14 @@ schtasks /Create /TN "Hardening agent" /RU SYSTEM /SC DAILY /ST 03:00 /RL HIGHES
 Проверено на **настоящих** Windows Server 2022 и 2025 (CI, `.github/workflows/windows-packs.yml`): все пробы
 выполняются, распознавание верное, собранный `.exe` работает по подписанным манифестам и отказывает при
 неверном ключе подписи. Windows 10/11 в CI нет — пак `windows-client` в статусе `draft`.
+
+**Контроллер домена** (`windows-dc`, распознаётся по `ProductType = LanmanNt`) — дополняет `windows-server`:
+подпись и привязка LDAP, защита Netlogon (ZeroLogon), DSRM, аудит каталога и Kerberos и состояние домена
+(`win_ad`): возраст пароля `krbtgt`, привилегированные учётные записи, делегирование, AS-REP, бессрочные
+и пустые пароли, `ms-DS-MachineAccountQuota`, анонимный LDAP, корзина AD, схема LAPS. Сценарий только
+ищет по каталогу, группы определяет по SID (язык системы не важен) и выводит JSON в Base64; счётчики дают в
+свидетельстве до 10 имён. Живого домена в CI нет — пак в статусе `draft`; в CI проверяется, что сценарий
+запускается и вне домена честно отвечает «каталог недоступен».
 
 ## Установка как служба systemd (`deploy/`)
 

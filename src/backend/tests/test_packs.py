@@ -455,7 +455,7 @@ def test_shipped_packs_and_their_maturity():
     assert {name: p.maturity for name, p in packs.items()} == {
         "ubuntu-server": "baseline", "docker": "baseline", "cisco-ios": "draft", "astra-linux": "draft",
         "postgresql": "draft", "samba": "draft", "windows-server": "baseline", "windows-client": "draft",
-        "rhel-family": "draft", "debian-server": "draft", "alt-linux": "draft",
+        "rhel-family": "draft", "debian-server": "draft", "alt-linux": "draft", "windows-dc": "draft",
     }
     assert packs["cisco-ios"].verified_on == []
     assert all(p.verified_on for p in packs.values() if p.maturity == "baseline")  # baseline = подтверждено на оборудовании

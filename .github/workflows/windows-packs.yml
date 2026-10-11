@@ -56,14 +56,15 @@ jobs:
         working-directory: src/backend
         run: python -m app.commands.pack live --pack windows-server --require-found --json ../../live-${{ matrix.os }}.json
 
-      - name: Client pack must not match a server
+      - name: Client and domain controller packs must not match a member server
         working-directory: src/backend
         shell: pwsh
         run: |
           python -m app.commands.pack live --json ../../all-${{ matrix.os }}.json
           $detected = (Get-Content ../../all-${{ matrix.os }}.json | ConvertFrom-Json) | Where-Object { $_.detected } | ForEach-Object { $_.pack }
           Write-Output "распознаны: $detected"
-          if ($detected -contains 'windows-client' -or -not ($detected -contains 'windows-server')) { exit 1 }
+          # раннер — рядовой сервер (ProductType = ServerNT), не контроллер домена
+          if ($detected -contains 'windows-client' -or $detected -contains 'windows-dc' -or -not ($detected -contains 'windows-server')) { exit 1 }
 
       - uses: actions/upload-artifact@v4
         if: always()

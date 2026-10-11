@@ -262,9 +262,28 @@ class WinAuditpolProbe(StrictModel):
         return guid.upper()
 
 
+# Сведения о домене, которые агент умеет получить на контроллере домена (agent/probes.py, AD_FACTS_SCRIPT).
+# Закрытый список: манифест выбирает сведение по имени, текст запроса к каталогу — только в агенте.
+AD_FACTS = (
+    "krbtgt_password_age_days", "privileged_users_count", "schema_admins_count", "privileged_spn_users_count",
+    "unconstrained_delegation_count", "asrep_roastable_count", "password_never_expires_count",
+    "password_not_required_count", "reversible_encryption_users_count", "des_only_users_count",
+    "machine_account_quota", "domain_functional_level", "recycle_bin_enabled", "anonymous_ldap_allowed",
+    "laps_schema_present",
+)
+
+
+class WinAdProbe(StrictModel):
+    """Сведение об Active Directory с контроллера домена: счётчик учётных записей с опасным признаком,
+    возраст пароля krbtgt, параметр домена или леса. Агент читает каталог по LDAP только на чтение."""
+
+    type: Literal["win_ad"]
+    fact: Literal[AD_FACTS]  # type: ignore[valid-type]
+
+
 LeafProbe = (
     FileKvProbe | FileRegexProbe | FileStatProbe | CmdRegexProbe | CmdForeachProbe | CliConfigProbe | ServiceStateProbe
-    | PkgVersionProbe | RegValueProbe | WinSecpolProbe | WinAuditpolProbe
+    | PkgVersionProbe | RegValueProbe | WinSecpolProbe | WinAuditpolProbe | WinAdProbe
 )
 
 
