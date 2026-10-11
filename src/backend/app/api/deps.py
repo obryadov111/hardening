@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from sqlalchemy import text
@@ -126,28 +126,38 @@ def get_accessible_org_ids(db: Session, user: User) -> list[str] | None:
     return [str(r) for r in rows]
 
 
+def client_ip(request: Request) -> str | None:
+    """Адрес клиента. Бэкенд слушает только 127.0.0.1, снаружи до него доходит лишь nginx фронтенда,
+    который сам выставляет X-Real-IP ($remote_addr) и затирает присланный клиентом, — поэтому заголовку
+    можно верить; без nginx (локальный агент) — адрес соединения."""
+    return request.headers.get("x-real-ip") or (request.client.host if request.client else None)
+
+
 def get_agent_organization_id(
+    request: Request,
     x_agent_api_key: str | None = Header(default=None, alias="X-Agent-Api-Key"),
     db: Session = Depends(get_db),
 ) -> str:
-    """Аутентификация агента-сборщика по статичному ключу (см. app/commands/create_agent_key.py).
+    """Аутентификация агента-сборщика по ключу (выдаётся в интерфейсе: «Ключи агентов»).
     Organization_id берётся из самого ключа, а не из тела запроса — агент не может
-    выдать себя за другую организацию, даже подделав payload."""
+    выдать себя за другую организацию, даже подделав payload. Отозванный и просроченный ключ — 401
+    с одинаковым ответом: перебором нельзя узнать, существует ли ключ."""
     if not x_agent_api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Отсутствует X-Agent-Api-Key")
 
     key_hash = hash_agent_api_key(x_agent_api_key)
     row = db.execute(
-        text("SELECT id, organization_id, is_active FROM agent_api_keys WHERE key_hash = :key_hash"),
+        text("SELECT id, organization_id, is_active, expires_at FROM agent_api_keys WHERE key_hash = :key_hash"),
         {"key_hash": key_hash},
     ).mappings().first()
 
-    if not row or not row["is_active"]:
+    now = datetime.now(UTC)
+    if not row or not row["is_active"] or (row["expires_at"] is not None and row["expires_at"] <= now):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Недействительный ключ агента")
 
     db.execute(
-        text("UPDATE agent_api_keys SET last_used_at = :now WHERE id = :id"),
-        {"now": datetime.now(UTC), "id": row["id"]},
+        text("UPDATE agent_api_keys SET last_used_at = :now, last_used_ip = :ip WHERE id = :id"),
+        {"now": now, "ip": client_ip(request), "id": row["id"]},
     )
     db.commit()
 

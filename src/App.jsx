@@ -17,6 +17,7 @@ import Project from "./pages/Project";
 import SoftwareInventory from "./pages/SoftwareInventory";
 import Scans from "./pages/Scans";
 import OfflineScan from "./pages/OfflineScan";
+import AgentKeys from "./pages/AgentKeys";
 import ScanCompare from "./pages/ScanCompare";
 import Vulnerabilities from "./pages/Vulnerabilities";
 import FstecCoverage from "./pages/FstecCoverage";
@@ -43,6 +44,7 @@ export default function App() {
               <Route path="software" element={<SoftwareInventory />} />
               <Route path="scans" element={<Scans />} />
               <Route path="offline-scan" element={<OfflineScan />} />
+              <Route path="agents" element={<AgentKeys />} />
               <Route path="scan-compare" element={<ScanCompare />} />
               <Route path="organization-users" element={<OrganizationUsers />} />
               <Route path="admin/users" element={<AdminUsers />} />

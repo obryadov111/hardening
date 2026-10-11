@@ -58,18 +58,129 @@ def canonical_json(manifest: dict) -> bytes:
 
 
 def verify_manifest(manifest: dict, signature: str, key: str) -> bool:
+    """Старая схема: HMAC-SHA256 общим ключом. Им же можно и подписать — ключ с любого хоста с агентом
+    позволяет подделывать паки для всех. Оставлена для перехода; новая схема — Ed25519 (ниже)."""
     expected = hmac.new(key.encode("utf-8"), canonical_json(manifest), hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature or "")
 
 
-def load_verified_manifests(response: dict, key: str) -> "list[dict]":
+# Ed25519 (RFC 8032, раздел 5.1.7): у агента только ОТКРЫТЫЙ ключ сервера — подписать им нельзя, и
+# компрометация хоста с агентом не даёт подделать паки для других. Только проверка подписи, на чистом
+# Python (в стандартной библиотеке Ed25519 нет): агент остаётся без зависимостей. Проверка по тестовым
+# векторам RFC 8032 и сверка с библиотекой cryptography — agent/tests, src/backend/tests.
+_ED_P = 2 ** 255 - 19
+_ED_L = 2 ** 252 + 27742317777372353535851937790883648493
+_ED_D = -121665 * pow(121666, _ED_P - 2, _ED_P) % _ED_P
+_ED_SQRT_M1 = pow(2, (_ED_P - 1) // 4, _ED_P)
+
+
+def _ed_add(a, b):
+    """Сложение точек в расширенных координатах (X, Y, Z, T)."""
+    p = _ED_P
+    x = (a[1] - a[0]) * (b[1] - b[0]) % p
+    y = (a[1] + a[0]) * (b[1] + b[0]) % p
+    c = 2 * a[3] * b[3] * _ED_D % p
+    d = 2 * a[2] * b[2] % p
+    e, f, g, h = y - x, d - c, d + c, y + x
+    return (e * f, g * h, f * g, e * h)
+
+
+def _ed_mul(scalar: int, point):
+    result = (0, 1, 1, 0)
+    while scalar > 0:
+        if scalar & 1:
+            result = _ed_add(result, point)
+        point = _ed_add(point, point)
+        scalar >>= 1
+    return result
+
+
+def _ed_equal(a, b) -> bool:
+    p = _ED_P
+    return (a[0] * b[2] - b[0] * a[2]) % p == 0 and (a[1] * b[2] - b[1] * a[2]) % p == 0
+
+
+def _ed_recover_x(y: int, sign: int):
+    p = _ED_P
+    if y >= p:
+        return None
+    x2 = (y * y - 1) * pow(_ED_D * y * y + 1, p - 2, p) % p
+    if x2 == 0:
+        return None if sign else 0
+    x = pow(x2, (p + 3) // 8, p)
+    if (x * x - x2) % p:
+        x = x * _ED_SQRT_M1 % p
+    if (x * x - x2) % p:
+        return None
+    return p - x if (x & 1) != sign else x
+
+
+def _ed_decompress(data: bytes):
+    y = int.from_bytes(data, "little")
+    sign, y = y >> 255, y & ((1 << 255) - 1)
+    x = _ed_recover_x(y, sign)
+    return None if x is None else (x, y, 1, x * y % _ED_P)
+
+
+_ED_GY = 4 * pow(5, _ED_P - 2, _ED_P) % _ED_P
+_ED_G = (_ed_recover_x(_ED_GY, 0), _ED_GY, 1, _ed_recover_x(_ED_GY, 0) * _ED_GY % _ED_P)
+
+
+def ed25519_verify(public_key: bytes, message: bytes, signature: bytes) -> bool:
+    if len(public_key) != 32 or len(signature) != 64:
+        return False
+    a = _ed_decompress(public_key)
+    r = _ed_decompress(signature[:32])
+    if a is None or r is None:
+        return False
+    s = int.from_bytes(signature[32:], "little")
+    if s >= _ED_L:  # неканоническая подпись (RFC 8032: отвергать)
+        return False
+    h = int.from_bytes(hashlib.sha512(signature[:32] + public_key + message).digest(), "little") % _ED_L
+    return _ed_equal(_ed_mul(s, _ED_G), _ed_add(r, _ed_mul(h, a)))
+
+
+def decode_public_key(text: str) -> bytes:
+    """Открытый ключ сервера: 32 байта в Base64 (как его показывает сервер) или в hex."""
+    import base64
+    import binascii
+
+    text = (text or "").strip()
+    try:
+        raw = bytes.fromhex(text) if len(text) == 64 else base64.b64decode(text, validate=True)
+    except (ValueError, binascii.Error):
+        raw = b""
+    if len(raw) != 32:
+        raise ManifestError("открытый ключ подписи паков — 32 байта в Base64 или hex")
+    return raw
+
+
+def verify_manifest_ed25519(manifest: dict, signature: str, public_key: bytes) -> bool:
+    import base64
+    import binascii
+
+    try:
+        raw = base64.b64decode(signature or "", validate=True)
+    except (ValueError, binascii.Error):
+        return False
+    return ed25519_verify(public_key, canonical_json(manifest), raw)
+
+
+def load_verified_manifests(response: dict, key: "str | None" = None, public_key: "bytes | None" = None) -> "list[dict]":
     """Проверяет подпись каждого манифеста из ответа сервера. Любая подделка — ManifestError:
-    это событие безопасности, а не повод молча пропустить один пак."""
+    это событие безопасности, а не повод молча пропустить один пак. С открытым ключом (Ed25519)
+    HMAC-подпись не принимается вовсе: иначе подделка HMAC обошла бы новую схему."""
+    if public_key is None and not key:
+        raise ManifestError("нет ключа проверки подписи паков (открытый ключ Ed25519 или старый общий ключ)")
     verified = []
     for item in response.get("manifests", []):
-        manifest, signature = item.get("manifest"), item.get("signature")
-        if not isinstance(manifest, dict) or not verify_manifest(manifest, signature, key):
-            name = manifest.get("pack") if isinstance(manifest, dict) else "?"
+        manifest = item.get("manifest")
+        name = manifest.get("pack") if isinstance(manifest, dict) else "?"
+        if public_key is not None:
+            ok = isinstance(manifest, dict) and verify_manifest_ed25519(manifest, item.get("signature_ed25519"), public_key)
+        else:
+            ok = isinstance(manifest, dict) and verify_manifest(manifest, item.get("signature"), key)
+        if not ok:
             raise ManifestError(f"Подпись манифеста {name!r} неверна — выполнение остановлено")
         if manifest.get("schema") != MANIFEST_SCHEMA:
             raise ManifestError(f"Неподдерживаемая схема манифеста {manifest.get('schema')!r}")

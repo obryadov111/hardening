@@ -1,7 +1,8 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_agent_organization_id, get_db, get_pack_registry
@@ -35,6 +36,24 @@ from app.services.packs.registry import PackRegistry
 from app.services.risk_exceptions import active_exceptions, apply_exceptions, record_org_report
 
 router = APIRouter(tags=["ingest"])
+
+# Насколько время сбора от агента может опережать часы сервера (расхождение часов) и насколько отставать
+# (прогон пролежал в очереди агента; очередь агента хранит не дольше 30 дней).
+MAX_CLOCK_SKEW = timedelta(minutes=10)
+MAX_QUEUE_AGE = timedelta(days=31)
+
+
+def _collected_at(collected_at: datetime | None, received: datetime) -> datetime:
+    """Время снимка — когда агент собрал данные, а не когда прогон дошёл до сервера (из очереди — позже)."""
+    if collected_at is None:
+        return received
+    if collected_at.tzinfo is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="collected_at — с часовым поясом")
+    if collected_at > received + MAX_CLOCK_SKEW:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="collected_at в будущем: проверьте часы на хосте агента")
+    if collected_at < received - MAX_QUEUE_AGE:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="collected_at старше 31 дня: прогон устарел")
+    return min(collected_at, received)
 
 
 def _get_or_create_environment(db: Session, organization_id: str, name: str) -> Environment:
@@ -124,7 +143,13 @@ def ingest_payload(
     (POST /ingest) и для выгрузки, загруженной через интерфейс (source="offline-upload").
     collection — источник данных снимка; задаётся вызывающим, а не берётся из payload: у загрузки
     через интерфейс в нём есть поля (кто загрузил), которые агент присылать не может."""
-    now = datetime.now(UTC)
+    received = datetime.now(UTC)
+    now = _collected_at(payload.collected_at, received)
+    if payload.run_id is not None and db.query(IngestionBatch.id).filter(
+        IngestionBatch.organization_id == organization_id, IngestionBatch.run_id == payload.run_id,
+    ).first():
+        # Агент повторил отправку (ответ на первую потерялся, прогон остался в очереди): уже принято.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Прогон {payload.run_id} уже принят")
 
     # Все паки разрешаются до записи в БД: неизвестный пак — 422 без побочных записей.
     resolved = []
@@ -137,9 +162,16 @@ def ingest_payload(
             )
         resolved.append((pack, run))
 
-    batch = IngestionBatch(organization_id=organization_id, received_at=now, source=source, status="processing")
+    batch = IngestionBatch(
+        organization_id=organization_id, received_at=received, source=source, status="processing",
+        run_id=payload.run_id, collected_at=payload.collected_at and now,
+    )
     db.add(batch)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:  # тот же прогон пришёл одновременно двумя запросами — уникальный индекс
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Прогон {payload.run_id} уже принят") from None
 
     environment = _get_or_create_environment(db, organization_id, payload.environment)
     asset = _get_or_create_asset(db, str(environment.id), payload.asset, payload.platform_tags)

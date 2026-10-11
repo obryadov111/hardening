@@ -91,14 +91,17 @@ def cmd_manifests(args) -> int:
     а не из аргумента, — чтобы не остаться в истории shell и в списке процессов."""
     import json
 
-    from app.services.packs.manifest import build_manifest, sign_manifest
+    from app.services.packs.manifest import signed_manifests
 
-    key = Path(args.key_file).read_text(encoding="utf-8").strip()
-    if not key:
+    if not args.key_file and not args.ed25519_key_file:
+        print("Нужен --key-file (HMAC) и/или --ed25519-key-file", file=sys.stderr)
+        return 1
+    keys = [Path(f).read_text(encoding="utf-8").strip() if f else None for f in (args.key_file, args.ed25519_key_file)]
+    if any(f and not k for f, k in zip((args.key_file, args.ed25519_key_file), keys, strict=True)):
         print("Пустой ключ подписи", file=sys.stderr)
         return 1
     packs = load_registry(Path(args.packs)).latest(args.transport)
-    response = {"manifests": [{"manifest": m, "signature": sign_manifest(m, key)} for m in (build_manifest(p) for p in packs)]}
+    response = {"manifests": signed_manifests(packs, *keys)}
     Path(args.out).write_text(json.dumps(response, ensure_ascii=False), encoding="utf-8")
     print(f"{len(packs)} манифестов ({', '.join(p.pack for p in packs)}) -> {args.out}")
     return 0
@@ -148,7 +151,8 @@ def main(argv=None) -> int:
     live.add_argument("--packs", default=str(PACKS_DIR), help="каталог паков")
     live.set_defaults(func=cmd_live)
     manifests = sub.add_parser("manifests", help="выгрузить подписанные манифесты (формат /api/agent/manifests)")
-    manifests.add_argument("--key-file", required=True, help="файл с ключом подписи (PACK_SIGNING_KEY)")
+    manifests.add_argument("--key-file", help="файл с ключом подписи HMAC (PACK_SIGNING_KEY)")
+    manifests.add_argument("--ed25519-key-file", help="файл с закрытым ключом Ed25519 (PACK_SIGNING_ED25519_KEY)")
     manifests.add_argument("--out", required=True)
     manifests.add_argument("--transport", default="local", choices=["local", "ssh"])
     manifests.add_argument("--packs", default=str(PACKS_DIR), help="каталог паков")

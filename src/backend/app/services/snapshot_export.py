@@ -220,8 +220,17 @@ def source_label(collection: dict | None) -> str:
             when = " (дата выгрузки не указана)"
         declared = "; пак задан оператором, платформа по выгрузке не подтверждена" if collection.get("declared_pack") else ""
         uploaded = f"; загружена через интерфейс: {collection['uploaded_by']}" if collection.get("uploaded_by") else ""
-        return f"Выгрузка конфигурации{when}, не живое устройство{declared}{uploaded}"
+        return f"Выгрузка конфигурации{when}, не живое устройство{declared}{uploaded}{_file_transfer(collection)}"
+    if collection.get("source") == "agent-report":
+        return f"Живой хост (агент){_file_transfer(collection)}; загрузил {collection.get('uploaded_by', '—')}"
     return str(collection.get("source"))
+
+
+def _file_transfer(collection: dict) -> str:
+    """Отчёт агента из изолированного сегмента, перенесённый файлом (подпись ключом агента проверена)."""
+    if collection.get("transfer") != "file":
+        return ""
+    return f"; отчёт перенесён файлом, подпись ключа «{collection.get('agent_key', '?')}» проверена"
 
 
 def _summary_pairs(report: SnapshotReport) -> list[tuple[str, str]]:

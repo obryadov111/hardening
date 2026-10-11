@@ -1,4 +1,5 @@
-
+import uuid
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -77,6 +78,12 @@ class IngestRequest(BaseModel):
         description="Несколько паков за один прогон актива: ОС + Docker + СУБД. Один прогон — один снимок и общая оценка",
     )
     collection: IngestCollection | None = Field(default=None, description="Источник данных; нет — живой хост или устройство")
+    run_id: uuid.UUID | None = Field(
+        default=None, description="Идентификатор прогона от агента: повторная отправка из очереди не создаёт второй снимок",
+    )
+    collected_at: datetime | None = Field(
+        default=None, description="Когда агент собрал данные (прогон из очереди приходит позже); нет — время приёма",
+    )
 
 
 class IngestChecksSummary(BaseModel):

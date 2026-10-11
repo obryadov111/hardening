@@ -95,7 +95,18 @@ jobs:
           Set-Content -NoNewline -Path ci.key -Value $key
           Push-Location src/backend
           python -m app.commands.pack manifests --key-file ../../ci.key --out ../../manifests.json
+          # Ed25519: закрытый ключ — только у «сервера», агенту — открытый
+          $ed = python -c "from app.services.packs.manifest import generate_ed25519_key as g; print(g())"
+          Set-Content -NoNewline -Path ../../ci-ed.key -Value $ed
+          $edPublic = python -c "from app.services.packs.manifest import ed25519_public_key as p; print(p('$ed'))"
+          python -m app.commands.pack manifests --ed25519-key-file ../../ci-ed.key --out ../../manifests-ed.json
+          $otherPublic = python -c "from app.services.packs.manifest import ed25519_public_key as p, generate_ed25519_key as g; print(p(g()))"
           Pop-Location
+          .\dist\hardening-agent.exe --api-url http://localhost --environment ci --use-packs --dry-run --manifests-file manifests-ed.json --pack-public-key $edPublic | Out-File -Encoding utf8 payload-ed.json
+          if ($LASTEXITCODE -ne 0) { Write-Output 'Ed25519: подпись не принята'; exit 1 }
+          # открытый ключ другого сервера — отказ
+          .\dist\hardening-agent.exe --api-url http://localhost --environment ci --use-packs --dry-run --manifests-file manifests-ed.json --pack-public-key $otherPublic
+          if ($LASTEXITCODE -eq 0) { Write-Output 'Ed25519: чужая подпись принята'; exit 1 }
           $env:HARDENING_PACK_KEY = $key
           .\dist\hardening-agent.exe --api-url http://localhost --environment ci --use-packs --dry-run --manifests-file manifests.json | Out-File -Encoding utf8 payload.json
           $payload = Get-Content payload.json -Raw | ConvertFrom-Json

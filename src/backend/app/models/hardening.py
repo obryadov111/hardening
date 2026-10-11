@@ -102,6 +102,9 @@ class IngestionBatch(Base):
     report_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("public.hardening_reports.id"), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     scan_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Задаёт агент: повторная отправка прогона из очереди агента не создаёт второй снимок.
+    run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AgentCollection(Base):
@@ -126,3 +129,6 @@ class AgentApiKey(Base):
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_ip: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

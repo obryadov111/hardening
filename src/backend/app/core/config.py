@@ -27,8 +27,11 @@ class Settings(BaseSettings):
     FIRST_ADMIN_PASSWORD: str | None = None
     FIRST_ADMIN_NAME: str | None = None
 
-    # Ключ подписи манифестов паков (HMAC). Не задан — выдача манифестов агентам отключена (503).
+    # Ключи подписи манифестов паков. Ed25519 (32 байта в Base64, `python -m app.commands.pack_signing_key`) —
+    # основной: у агентов только открытый ключ. HMAC — старая схема на время перехода. Не задан ни один —
+    # выдача манифестов агентам отключена (503).
     PACK_SIGNING_KEY: str | None = None
+    PACK_SIGNING_ED25519_KEY: str | None = None
     # Каталог YAML-паков; по умолчанию app/packs рядом с кодом.
     PACKS_DIR: str | None = None
 
