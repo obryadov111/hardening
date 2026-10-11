@@ -106,6 +106,24 @@ def ingest(
     фиксирует текущее состояние (hardening_checks), историю (scan_snapshots +
     scan_check_results) и пересчитывает compliance_score организации (hardening_reports).
     """
+    return ingest_payload(
+        db, registry, organization_id, payload,
+        collection=payload.collection.model_dump() if payload.collection else None,
+    )
+
+
+def ingest_payload(
+    db: Session,
+    registry: PackRegistry,
+    organization_id: str,
+    payload: IngestRequest,
+    collection: dict | None = None,
+    source: str = "agent",
+) -> IngestResponse:
+    """Запись прогона: снимок, текущее состояние актива, отчёт организации. Общая для агента
+    (POST /ingest) и для выгрузки, загруженной через интерфейс (source="offline-upload").
+    collection — источник данных снимка; задаётся вызывающим, а не берётся из payload: у загрузки
+    через интерфейс в нём есть поля (кто загрузил), которые агент присылать не может."""
     now = datetime.now(UTC)
 
     # Все паки разрешаются до записи в БД: неизвестный пак — 422 без побочных записей.
@@ -119,7 +137,7 @@ def ingest(
             )
         resolved.append((pack, run))
 
-    batch = IngestionBatch(organization_id=organization_id, received_at=now, source="agent", status="processing")
+    batch = IngestionBatch(organization_id=organization_id, received_at=now, source=source, status="processing")
     db.add(batch)
     db.flush()
 
@@ -220,7 +238,7 @@ def ingest(
         compliance_score=score,
         ingestion_batch_id=batch.id,
         snapshot_label=payload.scan_label,
-        collection=payload.collection.model_dump() if payload.collection else None,
+        collection=collection,
         status="completed",
         total_assets=1,
         total_software=len(payload.software),

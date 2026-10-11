@@ -11,8 +11,9 @@ export function collectionSource(collection) {
     const times = (collection.files || []).map((f) => f.modified).filter(Boolean).sort();
     return {
       short: "по выгрузке",
-      text: `По выгрузке конфигурации${times.length ? ` от ${formatDateTime(times[0])}` : ""}, не живое устройство`
-        + (collection.declared_pack ? "; пак задан оператором, платформа не подтверждена" : ""),
+      text: `По выгрузке конфигурации${times.length ? ` от ${formatDateTime(times[0])}` : " (дата выгрузки не указана)"}, не живое устройство`
+        + (collection.declared_pack ? "; пак задан оператором, платформа не подтверждена" : "")
+        + (collection.uploaded_by ? `; загружена через интерфейс: ${collection.uploaded_by}` : ""),
     };
   }
   return { short: collection.source, text: collection.source };

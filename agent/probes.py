@@ -621,7 +621,7 @@ def probe_cli_config(t, p: dict) -> dict:
 def _cli_value(m, line: str) -> str:
     """Значение для сервера — без секретов, как и свидетельство: значение сохраняется в снимке и попадает
     в интерфейс и отчёты. Строка целиком маскируется (`enable secret ***`); группа, захватившая текст
-    после слова-секрета (`snmp-server community (\S+)`), заменяется на «***»."""
+    после слова-секрета (`snmp-server community (\\S+)`), заменяется на «***»."""
     if not m.groups():
         return redact(line)
     secret = _SECRET_WORDS.search(line)

@@ -21,7 +21,8 @@ CONTAINER="hardening_backend"
 DB_NETWORK="diplom-hardening_default"
 
 echo "==> Собираю образ ${IMAGE}..."
-docker build -t "$IMAGE" ./src/backend
+# agent/probes.py — отдельным контекстом: бэкенд выполняет пробы агента по загруженной выгрузке.
+docker build --build-context agent=./agent -t "$IMAGE" ./src/backend
 
 if docker ps -a --format '{{.Names}}' | grep -qx "$CONTAINER"; then
   echo "==> Останавливаю и удаляю старый контейнер ${CONTAINER}..."

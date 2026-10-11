@@ -216,8 +216,11 @@ def source_label(collection: dict | None) -> str:
                 when = " от " + _local(datetime.fromisoformat(times[0].replace("Z", "+00:00")), "%Y-%m-%d %H:%M", "")
             except ValueError:
                 when = ""
+        if not times:
+            when = " (дата выгрузки не указана)"
         declared = "; пак задан оператором, платформа по выгрузке не подтверждена" if collection.get("declared_pack") else ""
-        return f"Выгрузка конфигурации{when} (не живое устройство){declared}"
+        uploaded = f"; загружена через интерфейс: {collection['uploaded_by']}" if collection.get("uploaded_by") else ""
+        return f"Выгрузка конфигурации{when}, не живое устройство{declared}{uploaded}"
     return str(collection.get("source"))
 
 

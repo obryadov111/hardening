@@ -12,6 +12,7 @@ import {
   GitCompareArrows,
   Bug,
   ClipboardCheck,
+  FileUp,
   X,
 } from "lucide-react";
 
@@ -25,6 +26,7 @@ const menuItems = [
   { to: "/policies", label: "Политики", icon: BookOpen },
   { to: "/report", label: "Отчёты", icon: FileText },
   { to: "/scans", label: "Сканирования", icon: History },
+  { to: "/offline-scan", label: "Проверка по выгрузке", icon: FileUp },
   { to: "/scan-compare", label: "Сравнение сканов", icon: GitCompareArrows },
   { to: "/project", label: "Инфраструктура", icon: FolderKanban },
 ];

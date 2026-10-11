@@ -14,6 +14,8 @@ services:
   backend:
     build:
       context: ./src/backend
+      additional_contexts:
+        agent: ./agent   # agent/probes.py — проверка выгрузки, загруженной через интерфейс
     container_name: hardening_backend
     env_file:
       - ./src/backend/.env

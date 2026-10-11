@@ -9,6 +9,7 @@ from app.api.routes.exports import router as exports_router
 from app.api.routes.fstec import router as fstec_router
 from app.api.routes.ingest import router as ingest_router
 from app.api.routes.members import router as members_router
+from app.api.routes.offline_scans import router as offline_scans_router
 from app.api.routes.policies import router as policies_router
 from app.api.routes.risk_exceptions import router as risk_exceptions_router
 from app.api.routes.snapshots import router as snapshots_router
@@ -39,6 +40,7 @@ app.include_router(members_router, prefix=settings.API_PREFIX)
 app.include_router(admin_users_router, prefix=settings.API_PREFIX)
 app.include_router(vulnerabilities_router, prefix=settings.API_PREFIX)
 app.include_router(fstec_router, prefix=settings.API_PREFIX)
+app.include_router(offline_scans_router, prefix=settings.API_PREFIX)
 
 
 @app.get("/health")

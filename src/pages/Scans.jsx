@@ -160,7 +160,9 @@ export default function Scans() {
         <h1 className="text-2xl font-semibold text-white">Сканирования</h1>
         <p className="mt-1 text-sm text-zinc-400">
           История snapshot-сканов по организации{" "}
-          <span className="text-white">{selectedOrganization?.name || "—"}</span>
+          <span className="text-white">{selectedOrganization?.name || "—"}</span>.{" "}
+          Устройство без агента и SSH-доступа можно проверить{" "}
+          <Link to="/offline-scan" className="text-blue-300 underline hover:text-blue-200">по выгрузке конфигурации</Link>.
         </p>
       </div>
 
