@@ -8,6 +8,8 @@
   * файловые пробы не читают секреты (DENIED_PATH_PATTERNS), символические ссылки
     разворачиваются до проверки; права файла проверяются через file_stat без чтения содержимого;
   * по SSH выполняются только команды на чтение (is_readonly_cli);
+  * по выгрузке конфигурации (OfflineConfigTransport) ничего не выполняется: читаются только
+    файлы выгрузки в заданном каталоге, имя файла строится из команды (без путей);
   * подпись манифеста (HMAC-SHA256) проверяется до выполнения чего-либо.
 
 Ограничение подписи: ключ симметричный, им же проверяет агент, поэтому компрометация
@@ -387,6 +389,90 @@ class SshTransport:
         raise ProbeError("политика аудита Windows недоступна на транспорте ssh")
 
 
+MAX_OFFLINE_BYTES = 5_000_000
+
+
+def offline_file_name(command: str) -> str:
+    """Имя файла выгрузки для команды: `show running-config` → `show_running-config.txt`,
+    `display current-configuration` → `display_current-configuration.txt`, `/export` → `export.txt`."""
+    return re.sub(r"[^A-Za-z0-9.-]+", "_", command).strip("_") + ".txt"
+
+
+class OfflineConfigTransport:
+    """Сбор по выгрузке конфигурации вместо живого устройства: вывод команд заранее сохранён в файлы
+    (бэкап Oxidized/RANCID, выгрузка администратором, образец от заказчика). Для устройств, к которым нет
+    SSH-доступа, и для вендоров, которых нет на стенде. Паки те же, что для ssh (pack_transport), и проба
+    cli_config та же — меняется только источник текста. Ничего не выполняется: файлы только читаются.
+
+    Выгрузка — не живое устройство: конфигурация могла измениться после неё. Поэтому transport.name
+    другой («offline-config»), а describe() отдаёт хэш и время каждого прочитанного файла для отчёта."""
+
+    name = "offline-config"
+    pack_transport = "ssh"
+    platform = "network"
+
+    def __init__(self, directory: str):
+        if not os.path.isdir(directory):
+            raise ValueError(f"нет каталога выгрузки {directory}")
+        self.directory = directory
+        self.used = {}      # команда → {file, sha256, modified}
+        self.missing = set()  # команды, выгрузки которых нет (для detect по --pack)
+
+    def run_cli(self, command: str) -> CmdOutput:
+        # Тот же белый список, что и по SSH: подписанный манифест не может «прочитать» команду на изменение.
+        if not is_readonly_cli(command):
+            raise ProbeError(f"допустимы только команды на чтение: {command!r}")
+        if "|" in command:
+            # Фильтры include/section/begin выполняет само устройство, и их смысл у вендоров разный —
+            # эмуляция по файлу дала бы другой ответ, чем устройство. Пак для выгрузки фильтров не использует.
+            raise ProbeError(f"фильтры вывода по выгрузке не поддерживаются: {command!r}")
+        name = offline_file_name(command)
+        path = os.path.join(self.directory, name)
+        if not os.path.isfile(path) or os.path.islink(path):
+            self.missing.add(command)
+            raise ProbeError(f"нет выгрузки команды {command!r} (ожидается файл {name})")
+        if os.path.getsize(path) > MAX_OFFLINE_BYTES:
+            raise ProbeError(f"выгрузка {name} больше {MAX_OFFLINE_BYTES} байт")
+        with open(path, "rb") as fh:
+            raw = fh.read()
+        if not raw.strip(b"\x00\r\n \t\xef\xbb\xbf"):
+            # Пустой файл — сбой выгрузки, а не «ничего не задано»: иначе проверки «параметра нет» прошли бы.
+            raise ProbeError(f"выгрузка {name} пустая")
+        for encoding in ("utf-8-sig", "cp1251"):
+            try:
+                text = raw.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        self.used[command] = {
+            "command": command, "file": name, "sha256": hashlib.sha256(raw).hexdigest(),
+            "modified": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(os.path.getmtime(path))),
+        }
+        return CmdOutput(text, "", 0)
+
+    def run(self, argv: "list[str]") -> CmdOutput:
+        return self.run_cli(" ".join(argv))
+
+    def describe(self) -> dict:
+        """Откуда взяты данные — для снимка и отчёта."""
+        return {"source": self.name, "files": [self.used[c] for c in sorted(self.used)]}
+
+    def read_file(self, path: str) -> str:
+        raise ProbeError("файловые пробы недоступны на выгрузке конфигурации")
+
+    def stat_file(self, path: str) -> os.stat_result:
+        raise ProbeError("file_stat недоступна на выгрузке конфигурации")
+
+    def read_registry(self, key: str, name: str):
+        raise ProbeError("реестр недоступен на выгрузке конфигурации")
+
+    def secpol(self) -> dict:
+        raise ProbeError("политика безопасности Windows недоступна на выгрузке конфигурации")
+
+    def auditpol(self) -> dict:
+        raise ProbeError("политика аудита Windows недоступна на выгрузке конфигурации")
+
+
 # --- пробы -----------------------------------------------------------------------
 
 def _ok(value, evidence: "str | None" = None) -> dict:
@@ -530,6 +616,7 @@ def probe_cli_config(t, p: dict) -> dict:
         if m:
             return _ok(m.group(1) if m.groups() else line.strip(), line)
     return _ok(None)
+
 
 
 # Состояния, которые печатает systemctl is-active / is-enabled (systemd 219+, RHEL 7 и новее).
@@ -690,8 +777,35 @@ def matches_detect(transport, detect_rules: "list[dict]") -> bool:
     return True
 
 
-def select_manifests(transport, manifests: "list[dict]") -> "list[dict]":
-    return [m for m in manifests if m.get("transport") == transport.name and matches_detect(transport, m["detect"])]
+def pack_transport(transport) -> str:
+    """Каким пакам подходит транспорт: выгрузка конфигурации читается теми же паками, что и SSH."""
+    return getattr(transport, "pack_transport", transport.name)
+
+
+def select_manifests(transport, manifests: "list[dict]", declared: "str | None" = None) -> "list[dict]":
+    """Паки, чей detect совпал. declared — пак, заданный оператором явно (--pack): для выгрузки
+    конфигурации он принимается и без detect, если выгрузки команды detect нет (обычно сохраняют только
+    running-config, без show version). Если выгрузка есть и detect не совпал — пак не применяется:
+    явное указание не перекрывает противоречащие ему данные."""
+    selected = []
+    for m in manifests:
+        if m.get("transport") != pack_transport(transport):
+            continue
+        if matches_detect(transport, m["detect"]) or (m["pack"] == declared and _detect_unavailable(transport, m["detect"])):
+            selected.append(m)
+    return selected
+
+
+def _detect_unavailable(transport, detect_rules: "list[dict]") -> bool:
+    """Ни для одного условия detect нет выгрузки — платформу по данным не проверить (ни подтвердить, ни опровергнуть)."""
+    missing = getattr(transport, "missing", None)
+    if missing is None or not detect_rules:
+        return False
+    for rule in detect_rules:
+        run_probe(transport, rule["probe"])
+        if rule["probe"].get("cmd") not in missing:
+            return False
+    return True
 
 
 def run_manifest(transport, manifest: dict, log=None) -> dict:

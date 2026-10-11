@@ -203,3 +203,105 @@ def test_network_device_over_ssh_end_to_end(client, db, agent_key, tmp_path, mon
     assert body["checks"] == {"total": 2, "passed": 0, "failed": 2, "errors": 0}
     evidence = db.execute(text("SELECT evidence FROM scan_check_results WHERE check_id = 'cisco_ios.vty_ssh_only'")).scalar()
     assert evidence == "transport input telnet"
+
+
+# ---------- выгрузка конфигурации вместо живого устройства ----------
+
+def _offline_cisco_pack():
+    return make_pack(
+        pack="cisco-test", transport="ssh", tags=["network-device", "cisco-ios"], asset_type="network-device",
+        detect=[{"probe": {"type": "cli_config", "cmd": "show version", "match": r"(Cisco IOS)"}, "equals": "Cisco IOS"}],
+        checks=[
+            {"id": "cisco_ios.http_server_disabled", "title": "HTTP выключен",
+             "probe": {"type": "cli_config", "cmd": "show running-config", "match": "^ip http server"},
+             "assert": {"op": "absent"}, "severity": "medium"},
+            {"id": "cisco_ios.snmp_no_public", "title": "Нет community public",
+             "probe": {"type": "cli_config", "cmd": "show running-config", "match": r"^(snmp-server community .*)"},
+             "assert": {"op": "absent"}, "severity": "high"},
+        ],
+    )
+
+
+@pytest.fixture
+def offline_dir(tmp_path):
+    export = tmp_path / "export-sw-core-01"
+    export.mkdir()
+    (export / "show_running-config.txt").write_text(
+        CISCO_RUNNING + "snmp-server community S3cr3tComm RO\n", encoding="utf-8")
+    return export
+
+
+def test_offline_config_end_to_end_is_marked_as_export_in_snapshot_and_report(
+        client, db, agent_key, offline_dir, tmp_path, monkeypatch):
+    (offline_dir / "show_version.txt").write_text("Cisco IOS Software, Version 15.2\n", encoding="utf-8")
+    serve(PackRegistry([Pack.model_validate(_offline_cisco_pack()), Pack.model_validate(BASE_PACK)]))
+    manifests = fetch_manifests_file(client, agent_key, tmp_path, "ssh")
+    monkeypatch.setattr(probes.subprocess, "run", lambda *a, **k: pytest.fail("по выгрузке ничего не выполняется"))
+    args = agent_args(manifests, "--offline-dir", str(offline_dir), "--hostname", "sw-core-01")
+
+    payload = collector.build_pack_payload(args, probes)
+
+    assert payload["asset"]["hostname"] == "sw-core-01" and payload["asset"]["asset_type"] == "network-device"
+    collection = payload["collection"]
+    assert collection["source"] == "offline-config" and collection["declared_pack"] is False
+    assert [f["file"] for f in collection["files"]] == ["show_running-config.txt", "show_version.txt"]
+    assert all(len(f["sha256"]) == 64 and f["modified"].endswith("Z") for f in collection["files"])
+
+    body = client.post("/api/ingest", json=payload, headers={"X-Agent-Api-Key": agent_key}).json()
+    assert body["checks"] == {"total": 2, "passed": 0, "failed": 2, "errors": 0}
+    evidence = db.execute(text("SELECT evidence FROM scan_check_results WHERE check_id = 'cisco_ios.snmp_no_public'")).scalar()
+    assert "S3cr3tComm" not in evidence  # секреты маскируются так же, как по SSH
+    stored = db.execute(text("SELECT collection FROM scan_snapshots WHERE id = :id"), {"id": body["snapshot_id"]}).scalar()
+    assert stored["source"] == "offline-config" and len(stored["files"]) == 2
+
+    from app.services.snapshot_export import load_snapshot_report, source_label
+    report = load_snapshot_report(db, body["snapshot_id"])
+    assert source_label(report.collection).startswith("Выгрузка конфигурации от ")
+    assert "не живое устройство" in source_label(report.collection)
+
+
+def test_offline_config_without_detect_output_needs_explicit_pack(client, agent_key, offline_dir, tmp_path):
+    serve(PackRegistry([Pack.model_validate(_offline_cisco_pack())]))
+    manifests = fetch_manifests_file(client, agent_key, tmp_path, "ssh")
+    args = agent_args(manifests, "--offline-dir", str(offline_dir), "--hostname", "sw-core-01")
+    with pytest.raises(SystemExit, match="--pack"):
+        collector.build_pack_payload(args, probes)
+
+
+def test_offline_config_with_declared_pack_is_marked_as_unconfirmed(client, agent_key, offline_dir, tmp_path):
+    serve(PackRegistry([Pack.model_validate(_offline_cisco_pack())]))
+    manifests = fetch_manifests_file(client, agent_key, tmp_path, "ssh")
+    args = agent_args(manifests, "--offline-dir", str(offline_dir), "--hostname", "sw-core-01", "--pack", "cisco-test")
+
+    payload = collector.build_pack_payload(args, probes)
+
+    assert payload["collection"]["declared_pack"] is True
+    resp = client.post("/api/ingest", json=payload, headers={"X-Agent-Api-Key": agent_key})
+    assert resp.status_code == 200, resp.text
+    from app.services.snapshot_export import source_label
+    assert "платформа по выгрузке не подтверждена" in source_label(payload["collection"])
+
+
+def test_declared_pack_does_not_override_contradicting_export(client, agent_key, offline_dir, tmp_path):
+    (offline_dir / "show_version.txt").write_text("Huawei Versatile Routing Platform\n", encoding="utf-8")
+    serve(PackRegistry([Pack.model_validate(_offline_cisco_pack())]))
+    manifests = fetch_manifests_file(client, agent_key, tmp_path, "ssh")
+    args = agent_args(manifests, "--offline-dir", str(offline_dir), "--hostname", "sw-core-01", "--pack", "cisco-test")
+    with pytest.raises(SystemExit, match="не распознана"):
+        collector.build_pack_payload(args, probes)
+
+
+def test_offline_config_needs_hostname_and_excludes_ssh(client, agent_key, offline_dir, tmp_path):
+    serve(PackRegistry([Pack.model_validate(_offline_cisco_pack())]))
+    manifests = fetch_manifests_file(client, agent_key, tmp_path, "ssh")
+    with pytest.raises(SystemExit, match="--hostname"):
+        collector.build_pack_payload(agent_args(manifests, "--offline-dir", str(offline_dir)), probes)
+    with pytest.raises(SystemExit, match="взаимоисключающие"):
+        collector.build_pack_payload(agent_args(manifests, "--offline-dir", str(offline_dir), "--hostname", "x",
+                                                "--ssh-host", "10.0.0.1"), probes)
+
+
+def test_ingest_rejects_unknown_collection_source(client, agent_key):
+    resp = client.post("/api/ingest", headers={"X-Agent-Api-Key": agent_key}, json={
+        "environment": "prod", "asset": {"hostname": "h"}, "collection": {"source": "rumors"}})
+    assert resp.status_code == 422

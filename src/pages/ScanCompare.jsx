@@ -5,6 +5,7 @@ import StatCard from "../components/ui/StatCard";
 import { compareSnapshots, getSnapshotsByOrganization } from "../api/snapshots";
 import { useOrganization } from "../context/OrganizationContext";
 import { formatDateTime } from "../utils/datetime";
+import { collectionSource } from "../utils/collection";
 
 function getChangeLabel(changeType) {
   switch (changeType) {
@@ -51,7 +52,9 @@ function getChangeClass(changeType) {
 function snapshotLabel(snapshot) {
   const date = formatDateTime(snapshot.created_at, "без даты");
   const score = snapshot.compliance_score != null ? ` · ${Math.round(snapshot.compliance_score)}%` : "";
-  return `#${snapshot.scan_number}${snapshot.snapshot_label ? ` «${snapshot.snapshot_label}»` : ""} · ${date}${score}`;
+  const source = collectionSource(snapshot.collection);
+  return `#${snapshot.scan_number}${snapshot.snapshot_label ? ` «${snapshot.snapshot_label}»` : ""} · ${date}${score}`
+    + (source ? ` · ${source.short}` : "");
 }
 
 const SELECT = "w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white outline-none";

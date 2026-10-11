@@ -12,6 +12,7 @@ import { useOrganization } from "../context/OrganizationContext";
 import { getSnapshotsByOrganization } from "../api/snapshots";
 import { downloadSnapshotExport } from "../api/exports";
 import { formatDateTime } from "../utils/datetime";
+import { collectionSource } from "../utils/collection";
 
 function getStatusBadgeClass(status) {
   switch (status) {
@@ -267,6 +268,14 @@ export default function Scans() {
                         <div className="font-medium text-white">
                           {item.snapshot_label || `Snapshot #${item.scan_number}`}
                         </div>
+                        {collectionSource(item.collection) ? (
+                          <div
+                            className="mt-1 inline-block rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300"
+                            title={collectionSource(item.collection).text}
+                          >
+                            {collectionSource(item.collection).short}
+                          </div>
+                        ) : null}
                         {item.notes ? (
                           <div className="mt-1 text-xs text-zinc-500">{item.notes}</div>
                         ) : null}

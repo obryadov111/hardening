@@ -220,6 +220,7 @@ def ingest(
         compliance_score=score,
         ingestion_batch_id=batch.id,
         snapshot_label=payload.scan_label,
+        collection=payload.collection.model_dump() if payload.collection else None,
         status="completed",
         total_assets=1,
         total_software=len(payload.software),

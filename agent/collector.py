@@ -376,7 +376,16 @@ def build_pack_payload(args: argparse.Namespace, probes_module) -> dict:
     if not args.pack_key:
         raise SystemExit("Ошибка: для --use-packs нужен --pack-key или переменная окружения HARDENING_PACK_KEY")
 
-    if args.ssh_host:
+    if args.offline_dir and args.ssh_host:
+        raise SystemExit("Ошибка: --offline-dir и --ssh-host взаимоисключающие — либо выгрузка, либо живое устройство")
+    if args.offline_dir:
+        if not args.hostname:
+            raise SystemExit("Ошибка: для --offline-dir нужен --hostname (имя устройства, чья это выгрузка)")
+        try:
+            transport = probes_module.OfflineConfigTransport(args.offline_dir)
+        except ValueError as exc:
+            raise SystemExit(f"Ошибка: {exc}")
+    elif args.ssh_host:
         transport = probes_module.SshTransport(args.ssh_host, args.ssh_user, args.ssh_port, args.ssh_key)
     else:
         transport = probes_module.LocalTransport()
@@ -387,7 +396,7 @@ def build_pack_payload(args: argparse.Namespace, probes_module) -> dict:
     else:
         if not args.api_key:
             raise SystemExit("Ошибка: нужен --api-key или переменная окружения HARDENING_AGENT_API_KEY")
-        response = fetch_manifests(args.api_url, args.api_key, transport.name)
+        response = fetch_manifests(args.api_url, args.api_key, probes_module.pack_transport(transport))
 
     try:
         manifests = probes_module.load_verified_manifests(response, args.pack_key)
@@ -396,8 +405,11 @@ def build_pack_payload(args: argparse.Namespace, probes_module) -> dict:
 
     if args.pack:
         manifests = [m for m in manifests if m["pack"] == args.pack]
-    matched = probes_module.select_manifests(transport, manifests)
+    matched = probes_module.select_manifests(transport, manifests, declared=args.pack if args.offline_dir else None)
     if not matched:
+        if args.offline_dir and not args.pack:
+            raise SystemExit("Платформа по выгрузке не распознана (нет выгрузки команды detect, например show_version.txt) — "
+                             "укажите пак явно: --pack <id>")
         raise SystemExit("Платформа не распознана ни одним паком — данные не отправлены (агент не гадает)")
 
     def log(entry: dict) -> None:
@@ -414,7 +426,7 @@ def build_pack_payload(args: argparse.Namespace, probes_module) -> dict:
         tags.extend(tag for tag in manifest["tags"] if tag not in tags)
         asset_type = asset_type or manifest.get("asset_type")
     local = transport.name == "local"
-    return {
+    payload = {
         "environment": args.environment,
         "asset": {
             "hostname": args.hostname or args.ssh_host or socket.gethostname(),
@@ -428,6 +440,11 @@ def build_pack_payload(args: argparse.Namespace, probes_module) -> dict:
         "packs": runs,
         "scan_label": args.scan_label,
     }
+    if hasattr(transport, "describe"):
+        # Источник данных — в снимок: проверка по выгрузке не равна проверке живого устройства.
+        payload["collection"] = transport.describe()
+        payload["collection"]["declared_pack"] = any(not probes_module.matches_detect(transport, m["detect"]) for m in matched)
+    return payload
 
 
 def parse_args(argv: "list[str]") -> argparse.Namespace:
@@ -450,6 +467,9 @@ def parse_args(argv: "list[str]") -> argparse.Namespace:
     packs.add_argument("--ssh-user", default=None, help="Пользователь SSH (учётка только на чтение)")
     packs.add_argument("--ssh-port", type=int, default=22)
     packs.add_argument("--ssh-key", default=None, help="Путь к приватному ключу SSH (сам ключ в пак не попадает)")
+    packs.add_argument("--offline-dir", default=None,
+                       help="Проверка по выгрузке конфигурации вместо живого устройства: каталог с выводом команд "
+                            "(show_running-config.txt, show_version.txt …); нужен --hostname, без show_version — и --pack")
     return parser.parse_args(argv)
 
 

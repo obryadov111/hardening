@@ -8,11 +8,14 @@ from probes import (
     CmdOutput,
     LocalTransport,
     ManifestError,
+    OfflineConfigTransport,
     ProbeError,
     SshTransport,
     is_readonly_cli,
     load_verified_manifests,
     matches_detect,
+    offline_file_name,
+    pack_transport,
     redact,
     run_manifest,
     run_probe,
@@ -670,3 +673,81 @@ def test_service_state_enabled_values():
     assert run_probe(Systemctl("disabled\n", "", 1), {"type": "service_state", "service": "x", "field": "enabled"})["value"] == "disabled"
     missing = Systemctl("", "Failed to get unit file state for x.timer: No such file or directory\n", 1)
     assert run_probe(missing, {"type": "service_state", "service": "x.timer", "field": "enabled"})["value"] == "not-found"
+
+
+# ---------- выгрузка конфигурации ----------
+
+@pytest.mark.parametrize("command, name", [
+    ("show running-config", "show_running-config.txt"),
+    ("show version", "show_version.txt"),
+    ("display current-configuration", "display_current-configuration.txt"),
+    ("/export", "export.txt"),
+    ("/ip service print", "ip_service_print.txt"),
+    ("show ../../etc/passwd", "show_.._.._etc_passwd.txt"),  # без разделителей пути: только файл в каталоге
+])
+def test_offline_file_name(command, name):
+    assert offline_file_name(command) == name
+
+
+def test_offline_reads_export_and_records_hash(tmp_path):
+    (tmp_path / "show_running-config.txt").write_bytes(CISCO_CONFIG.encode("utf-8"))
+    t = OfflineConfigTransport(str(tmp_path))
+    assert pack_transport(t) == "ssh" and t.name == "offline-config"
+    result = run_probe(t, {"type": "cli_config", "cmd": "show running-config", "match": "^ip http server"})
+    assert result["found"] is True
+    files = t.describe()["files"]
+    assert [f["file"] for f in files] == ["show_running-config.txt"] and len(files[0]["sha256"]) == 64
+
+
+def test_offline_refuses_modifying_commands_and_filters(tmp_path):
+    (tmp_path / "reload.txt").write_text("x", encoding="utf-8")
+    t = OfflineConfigTransport(str(tmp_path))
+    with pytest.raises(ProbeError, match="только команды на чтение"):
+        t.run_cli("reload")
+    with pytest.raises(ProbeError, match="фильтры"):
+        t.run_cli("show running-config | include http")
+
+
+def test_offline_missing_and_empty_exports_fail_the_probe(tmp_path):
+    (tmp_path / "show_running-config.txt").write_text("\r\n  \n", encoding="utf-8")
+    t = OfflineConfigTransport(str(tmp_path))
+    assert "пустая" in run_probe(t, {"type": "cli_config", "cmd": "show running-config", "match": "x"})["error"]
+    assert "нет выгрузки" in run_probe(t, {"type": "cli_config", "cmd": "show version", "match": "x"})["error"]
+    assert t.missing == {"show version"}
+
+
+def test_offline_does_not_follow_symlinks(tmp_path):
+    secret = tmp_path / "secret"
+    secret.write_text("enable secret 5 $1$abc\n", encoding="utf-8")
+    export = tmp_path / "export"
+    export.mkdir()
+    (export / "show_running-config.txt").symlink_to(secret)
+    t = OfflineConfigTransport(str(export))
+    assert run_probe(t, {"type": "cli_config", "cmd": "show running-config", "match": "x"})["found"] is False
+
+
+def test_offline_reads_cp1251_export(tmp_path):
+    (tmp_path / "show_running-config.txt").write_bytes("description Коммутатор ядра\n".encode("cp1251"))
+    t = OfflineConfigTransport(str(tmp_path))
+    assert run_probe(t, {"type": "cli_config", "cmd": "show running-config", "match": "description (.*)"})["value"] == "Коммутатор ядра"
+
+
+def test_offline_has_no_host_access(tmp_path):
+    t = OfflineConfigTransport(str(tmp_path))
+    assert run_probe(t, {"type": "file_kv", "path": "/etc/os-release", "key": "ID", "separator": "equals"})["found"] is False
+
+
+def test_offline_requires_existing_directory(tmp_path):
+    with pytest.raises(ValueError):
+        OfflineConfigTransport(str(tmp_path / "nope"))
+
+
+def test_declared_pack_is_accepted_only_when_detect_output_is_absent(tmp_path):
+    (tmp_path / "show_running-config.txt").write_text("hostname sw\n", encoding="utf-8")
+    manifest = {"pack": "cisco-ios", "transport": "ssh",
+                "detect": [{"probe": {"type": "cli_config", "cmd": "show version", "match": "(Cisco IOS)"}, "regex": "Cisco"}]}
+    t = OfflineConfigTransport(str(tmp_path))
+    assert select_manifests(t, [manifest]) == []
+    assert select_manifests(t, [manifest], declared="cisco-ios") == [manifest]
+    (tmp_path / "show_version.txt").write_text("Huawei VRP\n", encoding="utf-8")
+    assert select_manifests(OfflineConfigTransport(str(tmp_path)), [manifest], declared="cisco-ios") == []

@@ -65,6 +65,7 @@ class ScanSnapshotOut(BaseModel):
     compliance_score: Decimal | None = None
     snapshot_label: str | None = None
     status: str | None = None
+    collection: dict | None = None  # источник данных; None — живой хост/устройство
     total_assets: int
     total_software: int
     created_at: datetime | None = None

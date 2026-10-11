@@ -24,7 +24,7 @@ CHANGE_ORDER = {"regressed": 0, "new": 1, "still_failed": 2, "changed": 3, "acce
 
 _SNAPSHOT_HEAD = """
     SELECT id, organization_id, scan_number, snapshot_label, total_checks, passed, failed, accepted_risks,
-           compliance_score, status, total_assets, created_at
+           compliance_score, status, total_assets, created_at, collection
     FROM scan_snapshots WHERE id = :sid
 """
 

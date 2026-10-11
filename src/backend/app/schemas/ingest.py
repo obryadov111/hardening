@@ -1,4 +1,6 @@
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -40,6 +42,22 @@ class IngestPackRun(BaseModel):
     probe_results: dict[str, IngestProbeResult] = Field(default_factory=dict)
 
 
+class IngestCollectionFile(BaseModel):
+    command: str = Field(..., max_length=200)
+    file: str = Field(..., max_length=255)
+    sha256: str = Field(..., pattern="^[0-9a-f]{64}$")
+    modified: str | None = Field(default=None, max_length=32, description="Время изменения файла выгрузки, UTC ISO 8601")
+
+
+class IngestCollection(BaseModel):
+    """Источник данных прогона, если это не живой хост: выгрузка конфигурации проверяется теми же
+    паками, но конфигурация могла измениться после выгрузки — это должно быть видно в отчёте."""
+
+    source: Literal["offline-config"]
+    files: list[IngestCollectionFile] = Field(default_factory=list, max_length=50)
+    declared_pack: bool = Field(default=False, description="Пак задан оператором (--pack), платформа по выгрузке не подтверждена")
+
+
 class IngestRequest(BaseModel):
     environment: str = Field(..., description="Имя окружения (создаётся, если не существует)")
     asset: IngestAssetIn
@@ -58,6 +76,7 @@ class IngestRequest(BaseModel):
         default_factory=list, max_length=10,
         description="Несколько паков за один прогон актива: ОС + Docker + СУБД. Один прогон — один снимок и общая оценка",
     )
+    collection: IngestCollection | None = Field(default=None, description="Источник данных; нет — живой хост или устройство")
 
 
 class IngestChecksSummary(BaseModel):

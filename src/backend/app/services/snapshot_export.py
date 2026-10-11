@@ -96,6 +96,7 @@ class SnapshotReport:
     compliance_score: float | None
     total_assets: int
     accepted: int = 0
+    collection: dict | None = None  # источник данных; None — живой хост/устройство
     rows: list[ResultRow] = field(default_factory=list)
 
     @property
@@ -136,7 +137,7 @@ def load_snapshot_report(db: Session, snapshot_id: str) -> SnapshotReport | None
         text("""
             SELECT s.scan_number, s.snapshot_label, COALESCE(s.completed_at, s.created_at) AS created_at,
                    s.total_checks, s.passed, s.failed, s.accepted_risks, s.compliance_score, s.total_assets,
-                   o.name AS organization
+                   s.collection, o.name AS organization
             FROM scan_snapshots s
             LEFT JOIN client_organizations o ON o.id = s.organization_id
             WHERE s.id = :sid
@@ -177,6 +178,7 @@ def load_snapshot_report(db: Session, snapshot_id: str) -> SnapshotReport | None
         accepted=head["accepted_risks"] or 0,
         compliance_score=float(head["compliance_score"]) if head["compliance_score"] is not None else None,
         total_assets=head["total_assets"] or 0,
+        collection=head["collection"],
     )
     report.rows = sorted(
         (
@@ -201,6 +203,24 @@ def load_snapshot_report(db: Session, snapshot_id: str) -> SnapshotReport | None
     return report
 
 
+def source_label(collection: dict | None) -> str:
+    """Откуда данные снимка. Выгрузка конфигурации — с датой самого старого файла: проверено состояние
+    на момент выгрузки, а не на дату снимка."""
+    if not collection:
+        return "Живой хост или устройство (агент)"
+    if collection.get("source") == "offline-config":
+        times = sorted(f["modified"] for f in collection.get("files", []) if f.get("modified"))
+        when = ""
+        if times:
+            try:
+                when = " от " + _local(datetime.fromisoformat(times[0].replace("Z", "+00:00")), "%Y-%m-%d %H:%M", "")
+            except ValueError:
+                when = ""
+        declared = "; пак задан оператором, платформа по выгрузке не подтверждена" if collection.get("declared_pack") else ""
+        return f"Выгрузка конфигурации{when} (не живое устройство){declared}"
+    return str(collection.get("source"))
+
+
 def _summary_pairs(report: SnapshotReport) -> list[tuple[str, str]]:
     def fmt_pct(value):
         return "—" if value is None else f"{value:.2f}%".replace(".00%", "%")
@@ -209,6 +229,7 @@ def _summary_pairs(report: SnapshotReport) -> list[tuple[str, str]]:
         ("Организация", report.organization),
         ("Снимок", f"№ {report.scan_number}" + (f" — {report.label}" if report.label else "")),
         ("Дата", _local(report.created_at, "%Y-%m-%d %H:%M", "—")),
+        ("Источник данных", source_label(report.collection)),
         ("Активов", str(report.total_assets)),
         ("Проверок всего", str(report.total)),
         ("Соблюдено", str(report.passed)),
