@@ -21,11 +21,15 @@ def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 
+ACCESS_TOKEN_TYPE = "access"
+
+
 def create_access_token(subject: str) -> str:
     now = datetime.now(UTC)
     expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     # iat с долями секунды: токен, выданный до смены пароля в ту же секунду, тоже должен отзываться
-    payload = {"sub": subject, "exp": expire, "iat": now.timestamp()}
+    # type — токен доступа; промежуточный токен входа (pre_2fa, только пароль) им не принимается (deps.py)
+    payload = {"sub": subject, "type": ACCESS_TOKEN_TYPE, "exp": expire, "iat": now.timestamp()}
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 

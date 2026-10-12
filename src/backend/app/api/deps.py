@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.security import hash_agent_api_key
+from app.core.security import ACCESS_TOKEN_TYPE, hash_agent_api_key
 from app.db.session import SessionLocal
 from app.models.user import User
 from app.models.user_2fa import User2FA
@@ -50,6 +50,10 @@ def get_current_user_allow_password_change(
         subject = payload.get("sub")
         if not subject:
             raise ValueError("missing sub")
+        # Только токен доступа. Промежуточный токен входа (pre_2fa) выдаётся по одному паролю — принятый
+        # здесь, он открыл бы API без кода 2FA. Токены без type выданы до этой проверки и тоже отклоняются.
+        if payload.get("type") != ACCESS_TOKEN_TYPE:
+            raise ValueError("not an access token")
     except (JWTError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Недействительный токен") from exc
 

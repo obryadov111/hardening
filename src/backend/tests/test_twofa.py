@@ -61,6 +61,22 @@ def test_login_with_app_code(client, session):
     assert resp.status_code == 200 and resp.json()["access_token"]
 
 
+def test_password_step_token_is_not_an_access_token(client, session, make_user):
+    # Промежуточный токен выдаётся по одному паролю: как Bearer он не должен открывать API —
+    # иначе 2FA обходится. Пароль не менялся (password_changed_at пуст) — как у учёток, заведённых в базе.
+    enable(client, session)
+    temp = {"Authorization": f"Bearer {login(client).json()['temp_token']}"}
+    assert client.get("/api/auth/me", headers=temp).status_code == 401
+    assert client.get("/api/organizations", headers=temp).status_code == 401
+
+    make_user("root@example.com", password=PASSWORD, is_superadmin=True)
+    admin_login = client.post("/api/auth/login", json={"email": "root@example.com", "password": PASSWORD}).json()
+    admin = {"Authorization": f"Bearer {admin_login['access_token']}"}
+    enable(client, admin)
+    admin_temp = client.post("/api/auth/login", json={"email": "root@example.com", "password": PASSWORD}).json()["temp_token"]
+    assert client.get("/api/admin/users", headers={"Authorization": f"Bearer {admin_temp}"}).status_code == 401
+
+
 def test_backup_code_works_once_and_tolerates_format(client, session):
     _, codes = enable(client, session)
     code = codes[0]
