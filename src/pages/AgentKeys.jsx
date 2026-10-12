@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import AgentCoverage from "../components/AgentCoverage";
 import AppCard from "../components/ui/AppCard";
 import CopyButton from "../components/ui/CopyButton";
 import OrgGate from "../components/OrgGate";
@@ -89,7 +90,7 @@ function windowsSetup(key, publicKey, downloads) {
     // Register-ScheduledTask, а не schtasks /TR: путь с пробелом и аргументы — отдельно, без вложенных кавычек,
     // которые PowerShell передаёт schtasks неправильно.
     `$action = New-ScheduledTaskAction -Execute "${exe}" -Argument "--api-url ${serverUrl(downloads)} --environment prod --use-packs"`,
-    'Register-ScheduledTask -TaskName "Hardening agent" -Action $action -Trigger (New-ScheduledTaskTrigger -Daily -At 03:00) -User SYSTEM -RunLevel Highest -Force | Out-Null',
+    'Register-ScheduledTask -TaskName "Hardening agent" -Action $action -Trigger (New-ScheduledTaskTrigger -Daily -At 03:00 -RandomDelay (New-TimeSpan -Hours 1)) -User SYSTEM -RunLevel Highest -Force | Out-Null',
     'Start-ScheduledTask -TaskName "Hardening agent"',
   ].join("\n");
 }
@@ -110,6 +111,7 @@ function AgentDownloads({ downloads }) {
   const base = `${serverUrl(downloads)}/downloads`;
   const linux = downloads.files.find((f) => f.platform === "linux");
   const windows = downloads.files.find((f) => f.platform === "windows");
+  const gpo = downloads.files.find((f) => f.platform === "windows-gpo");
   return (
     <div className="space-y-5">
       <div className="grid gap-3 md:grid-cols-2">
@@ -153,6 +155,17 @@ function AgentDownloads({ downloads }) {
           />
         </div>
       ) : null}
+      <p className="text-xs text-zinc-400">
+        Сотни хостов: Windows — сценарий запуска компьютера в групповой политике
+        {gpo ? (
+          <>
+            {" "}(<a href={`/downloads/${gpo.name}`} download className="underline hover:text-white">{gpo.name}</a>, SHA-256{" "}
+            <span className="break-all font-mono">{gpo.sha256}</span>)
+          </>
+        ) : null}
+        : ставит агент из общей папки домена со сверкой суммы, регистрирует хост, создаёт задачу. Linux — плейбук Ansible{" "}
+        <code>deploy/ansible/hardening-agent.yml</code> в архиве агента. Пошагово — <code>INSTALL.md</code> в архиве.
+      </p>
       <p className="text-xs text-zinc-500">
         Новые ОС и проверки приходят агентам с сервера сами (паки) — переустанавливать агент не нужно. Новая версия агента
         нужна, только когда меняется он сам.
@@ -435,6 +448,10 @@ export default function AgentKeys() {
 
             <AppCard title="Хосты" subtitle="Зарегистрированы агентами по ключам площадок. Последняя связь — когда и откуда агент обращался к серверу">
               <AgentHosts hosts={data.hosts || []} onRevoke={revokeHost} onDelete={deleteHost} />
+            </AppCard>
+
+            <AppCard title="Охват" subtitle="Список компьютеров из AD или CSV против отчитавшихся: где агент не установлен, кто давно молчит">
+              <AgentCoverage organizationId={selectedOrganizationId} />
             </AppCard>
 
             <AppCard title="Ключи площадок" subtitle="Последнее использование — регистрация хостов (и отчёты агентов старых версий)">

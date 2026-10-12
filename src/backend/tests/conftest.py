@@ -35,6 +35,7 @@ TRUNCATE_TABLES = [
     "assets",
     "environments",
     "agent_hosts",
+    "expected_hosts",
     "agent_api_keys",
     "user_organizations",
     "user_2fa",

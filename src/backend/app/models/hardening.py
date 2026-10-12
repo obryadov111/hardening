@@ -157,3 +157,21 @@ class AgentHost(Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seen_ip: Mapped[str | None] = mapped_column(Text, nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ExpectedHost(Base):
+    """Хост, который должен отчитываться (выгрузка из AD или список): основа отчёта об охвате.
+    hostname_norm — короткое имя в нижнем регистре: в AD DNS-имя, агент на Windows присылает имя NetBIOS."""
+
+    __tablename__ = "expected_hosts"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.client_organizations.id"), nullable=False)
+    hostname: Mapped[str] = mapped_column(Text, nullable=False)
+    hostname_norm: Mapped[str] = mapped_column(Text, nullable=False)
+    os: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_logon: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str | None] = mapped_column(Text, nullable=True)
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    imported_by: Mapped[str | None] = mapped_column(Text, nullable=True)
