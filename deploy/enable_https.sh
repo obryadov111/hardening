@@ -55,8 +55,12 @@ chmod 0755 "$HOOK"
 RENEWED_LINEAGE="/etc/letsencrypt/live/$DOMAIN" "$HOOK"
 
 # 4) фронтенд в режиме HTTPS (80 → переадресация, 443 → сайт и агенты)
-printf 'HARDENING_DOMAIN=%s\n' "$DOMAIN" > "$REPO/deploy/frontend.env"
-chown "$OWNER" "$REPO/deploy/frontend.env"
+# Остальные настройки файла (HARDENING_ADMIN_NETWORKS) сохраняются, меняется только строка домена.
+ENV_FILE="$REPO/deploy/frontend.env"
+touch "$ENV_FILE"
+{ grep -v '^HARDENING_DOMAIN=' "$ENV_FILE" || true; printf 'HARDENING_DOMAIN=%s\n' "$DOMAIN"; } > "$ENV_FILE.new"
+mv "$ENV_FILE.new" "$ENV_FILE"
+chown "$OWNER" "$ENV_FILE"
 sudo -u "$OWNER" "$REPO/deploy/restart_frontend.sh"
 
 # 5) межсетевой экран: 443 для агентов и сайта (80 уже открыт)

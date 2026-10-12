@@ -47,6 +47,39 @@ if [[ -n "$DOMAIN" ]]; then
   echo "==> Режим HTTPS: ${DOMAIN}"
 fi
 
+# Сети компании, из которых открываются сайт и вход (пути агентов открыты всем): HARDENING_ADMIN_NETWORKS
+# в deploy/frontend.env — адреса и подсети через пробел, например
+#   HARDENING_ADMIN_NETWORKS="192.168.0.0/24 10.8.0.0/24 203.0.113.10"
+# (офисная сеть, VPN для удалённых сотрудников, внешний адрес NAT офиса — из офиса по доменному имени
+# запрос приходит с него). «all» — интерфейс открыт всем. Не задано — частные сети из образа
+# (deploy/nginx/admin-allow.conf).
+ADMIN_NETWORKS="${HARDENING_ADMIN_NETWORKS:-}"
+if [[ -n "$ADMIN_NETWORKS" ]]; then
+  mkdir -p deploy/generated
+  ALLOW_CONF=deploy/generated/admin-allow.conf
+  if [[ "$ADMIN_NETWORKS" == "all" ]]; then
+    echo "allow all;" > "$ALLOW_CONF"
+    echo "==> Интерфейс открыт из любых сетей (HARDENING_ADMIN_NETWORKS=all)"
+  else
+    # Шлюз Docker — запретом и первым: см. deploy/nginx/admin-allow.conf.
+    GATEWAY="$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}')"
+    {
+      echo "# Сгенерирован deploy/restart_frontend.sh из HARDENING_ADMIN_NETWORKS (deploy/frontend.env)."
+      echo "deny ${GATEWAY};"
+      for net in $ADMIN_NETWORKS; do
+        if ! [[ "$net" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?$ || "$net" =~ ^[0-9a-fA-F:]+(/[0-9]{1,3})?$ ]]; then
+          echo "HARDENING_ADMIN_NETWORKS: «${net}» — не адрес и не подсеть" >&2; exit 1
+        fi
+        echo "allow ${net};"
+      done
+      echo "deny all;"
+    } > "$ALLOW_CONF"
+    echo "==> Интерфейс открыт из: ${ADMIN_NETWORKS}"
+  fi
+  chmod 644 "$ALLOW_CONF"
+  MOUNTS+=(-v "$(pwd)/${ALLOW_CONF}:/etc/nginx/hardening-admin-allow.conf:ro")
+fi
+
 echo "==> Собираю образ ${IMAGE}..."
 docker build -t "$IMAGE" -f Dockerfile.frontend .
 
