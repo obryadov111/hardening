@@ -72,7 +72,9 @@ def test_manifests_reject_unknown_transport(client, pack_registry, agent_key):
 
 
 def test_manifests_unavailable_without_signing_key(client, pack_registry, agent_key, monkeypatch):
+    # без обоих ключей подписи: Ed25519 мог прийти из локального .env, и паки по-прежнему выдавались бы
     monkeypatch.setattr(settings, "PACK_SIGNING_KEY", None)
+    monkeypatch.setattr(settings, "PACK_SIGNING_ED25519_KEY", None)
     resp = client.get("/api/agent/manifests", headers={"X-Agent-Api-Key": agent_key})
     assert resp.status_code == 503
 
