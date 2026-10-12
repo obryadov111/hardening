@@ -9,6 +9,10 @@
 пароль здесь учитывается в том же лимите попыток, что и вход (services/login_guard.py).
 
 Сброс 2FA пользователю, потерявшему и телефон, и резервные коды, — у суперадмина (admin_users).
+
+Ручки доступны и без включённой 2FA (get_current_user_allow_2fa_setup): при обязательной 2FA
+(settings.REQUIRE_2FA) это единственное, что открыто пользователю после входа по паролю. Отключение
+при обязательной 2FA возвращает пользователя на подключение — так меняют телефон.
 """
 from datetime import UTC, datetime
 
@@ -17,7 +21,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_user_allow_2fa_setup, get_db
 from app.core.security import decrypt_totp_secret, encrypt_totp_secret, hash_backup_code
 from app.models.user import User
 from app.models.user_2fa import User2FA
@@ -97,14 +101,14 @@ def _twofa(db: Session, user: User) -> User2FA | None:
 
 
 @router.get("")
-def status_2fa(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def status_2fa(current_user: User = Depends(get_current_user_allow_2fa_setup), db: Session = Depends(get_db)):
     twofa = _twofa(db, current_user)
     enabled = bool(twofa and twofa.is_enabled)
     return {"enabled": enabled, "backup_codes_left": len(twofa.backup_codes_hashes or []) if enabled else 0}
 
 
 @router.post("/setup")
-def setup(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def setup(current_user: User = Depends(get_current_user_allow_2fa_setup), db: Session = Depends(get_db)):
     twofa = _twofa(db, current_user)
     if twofa and twofa.is_enabled:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="2FA уже включена — сначала отключите её")
@@ -122,7 +126,7 @@ def setup(current_user: User = Depends(get_current_user), db: Session = Depends(
 
 
 @router.post("/confirm")
-def confirm(body: CodeRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def confirm(body: CodeRequest, current_user: User = Depends(get_current_user_allow_2fa_setup), db: Session = Depends(get_db)):
     twofa = _twofa(db, current_user)
     if twofa is None or twofa.is_enabled:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Нет незавершённого подключения 2FA")
@@ -137,7 +141,7 @@ def confirm(body: CodeRequest, current_user: User = Depends(get_current_user), d
 
 
 @router.post("/disable")
-def disable(body: DisableRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def disable(body: DisableRequest, current_user: User = Depends(get_current_user_allow_2fa_setup), db: Session = Depends(get_db)):
     twofa = _twofa(db, current_user)
     if twofa is None or not twofa.is_enabled:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="2FA не включена")

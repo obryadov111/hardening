@@ -25,6 +25,7 @@ class MeResponse(BaseModel):
     is_superadmin: bool
     account_status: str
     must_change_password: bool = False
+    two_factor_setup_required: bool = False
 
 
 class ChangePasswordRequest(BaseModel):

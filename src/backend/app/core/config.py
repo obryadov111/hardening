@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     LOGIN_LOCKOUT_MINUTES: int = 15
     PRE_2FA_TOKEN_EXPIRE_MINUTES: int = 5
 
+    # Обязательная 2FA: сайт открыт из интернета, поэтому без второго фактора пользователь после входа
+    # попадает только на подключение 2FA (и смену временного пароля), остальной API отвечает 403.
+    # False — 2FA по желанию (стенд, закрытая сеть).
+    REQUIRE_2FA: bool = True
+
     TOTP_ISSUER: str = "Hardening"
     TOTP_SECRET_ENCRYPTION_KEY: str
 

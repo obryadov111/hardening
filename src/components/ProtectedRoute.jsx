@@ -1,8 +1,9 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { authApi } from "../api/auth";
-import { getStoredAccessToken } from "../api/client";
+import { getStoredAccessToken, setStoredAccessToken } from "../api/client";
 import ChangePassword from "../pages/ChangePassword";
+import TwoFactor from "../pages/TwoFactor";
 
 // Состояния проверки доступа:
 //  "checking" — ждём /auth/me;
@@ -15,6 +16,7 @@ export default function ProtectedRoute() {
   const [state, setState] = useState("checking");
   const [attempt, setAttempt] = useState(0);
   const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [mustSetUp2fa, setMustSetUp2fa] = useState(false);
   const location = useLocation();
 
   useEffect(() => {
@@ -30,6 +32,8 @@ export default function ProtectedRoute() {
         if (!mounted) return;
         // Временный пароль: сервер закрывает остальные разделы, пока пароль не сменён.
         setMustChangePassword(Boolean(profile?.must_change_password));
+        // Обязательная 2FA: без неё сервер открывает только её подключение.
+        setMustSetUp2fa(Boolean(profile?.two_factor_setup_required));
         setState("ok");
       } catch {
         if (mounted) setState(getStoredAccessToken() ? "unreachable" : "unauth");
@@ -93,6 +97,17 @@ export default function ProtectedRoute() {
 
   if (mustChangePassword) {
     return <ChangePassword forced />;
+  }
+
+  if (mustSetUp2fa) {
+    return (
+      <TwoFactor
+        forced
+        // Токен после подключения 2FA тот же, но сервер теперь открывает API: повторное «вход выполнен»
+        // перезапрашивает профиль здесь и организации в OrganizationContext (до этого они получили 403).
+        onComplete={() => setStoredAccessToken(getStoredAccessToken())}
+      />
+    );
   }
 
   return <Outlet />;

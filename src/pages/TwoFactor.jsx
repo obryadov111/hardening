@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import AppCard from "../components/ui/AppCard";
 import ErrorState from "../components/ui/ErrorState";
+import { authApi } from "../api/auth";
 import { confirmTwoFactor, disableTwoFactor, getTwoFactorStatus, setupTwoFactor } from "../api/twofa";
 
 const INPUT = "w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-white outline-none placeholder:text-zinc-500 focus:border-blue-500";
@@ -29,7 +30,11 @@ function BackupCodes({ codes, onDone }) {
   );
 }
 
-export default function TwoFactor() {
+/**
+ * Подключение и отключение 2FA. forced — 2FA обязательна, а у пользователя её нет: сервер закрывает
+ * остальные разделы, поэтому страница показывается без меню; onComplete — после сохранения резервных кодов.
+ */
+export default function TwoFactor({ forced = false, onComplete }) {
   const [status, setStatus] = useState(null);
   const [setup, setSetup] = useState(null);
   const [backupCodes, setBackupCodes] = useState(null);
@@ -85,11 +90,12 @@ export default function TwoFactor() {
     });
   };
 
-  return (
+  const content = (
     <div className="max-w-2xl space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-white">Двухфакторная защита</h1>
+        <h1 className="text-2xl font-semibold text-white">{forced ? "Подключите двухфакторную защиту" : "Двухфакторная защита"}</h1>
         <p className="mt-1 text-sm text-zinc-400">
+          {forced ? "Сайт доступен из интернета, поэтому вход только с 2FA. " : null}
           При входе кроме пароля понадобится код из приложения-аутентификатора (Google Authenticator,
           «Яндекс Ключ», FreeOTP и т. п.).
         </p>
@@ -99,7 +105,7 @@ export default function TwoFactor() {
 
       {backupCodes ? (
         <AppCard title="Резервные коды">
-          <BackupCodes codes={backupCodes} onDone={() => setBackupCodes(null)} />
+          <BackupCodes codes={backupCodes} onDone={() => (forced ? onComplete?.() : setBackupCodes(null))} />
         </AppCard>
       ) : status === null ? (
         <div className="text-zinc-400">Загрузка...</div>
@@ -129,10 +135,21 @@ export default function TwoFactor() {
           </form>
         </AppCard>
       ) : (
-        <AppCard title="2FA выключена" subtitle="Рекомендуется для всех, у кого есть доступ к результатам аудита">
+        <AppCard title="2FA выключена" subtitle={forced ? "Без неё остальные разделы недоступны" : "Рекомендуется для всех, у кого есть доступ к результатам аудита"}>
           <button type="button" disabled={busy} onClick={startSetup} className={BUTTON}>Подключить 2FA</button>
         </AppCard>
       )}
+      {forced ? (
+        <button type="button" onClick={() => authApi.logout()} className="text-sm text-zinc-400 hover:text-white">Выйти</button>
+      ) : null}
+    </div>
+  );
+
+  if (!forced) return content;
+
+  return (
+    <div className="flex min-h-screen items-start justify-center bg-zinc-950 px-4 py-12 text-white">
+      <div className="w-full max-w-2xl">{content}</div>
     </div>
   );
 }

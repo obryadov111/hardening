@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.core.security import hash_agent_api_key
 from app.db.session import SessionLocal
 from app.models.user import User
+from app.models.user_2fa import User2FA
 from app.services.packs.registry import PackRegistry, load_registry
 
 bearer_scheme = HTTPBearer()
@@ -68,13 +69,34 @@ def get_current_user_allow_password_change(
 
 
 PASSWORD_CHANGE_REQUIRED = "Нужно сменить временный пароль"
+TWO_FACTOR_SETUP_REQUIRED = "Нужно подключить двухфакторную защиту"
 
 
-def get_current_user(user: User = Depends(get_current_user_allow_password_change)) -> User:
-    """Пользователь по токену. С временным паролем (задан администратором) доступ закрыт на сервере,
-    пока пароль не сменён, — а не только скрыт в интерфейсе."""
+def get_current_user_allow_2fa_setup(user: User = Depends(get_current_user_allow_password_change)) -> User:
+    """Пользователь по токену, ещё без 2FA. Только для подключения 2FA (settings.REQUIRE_2FA);
+    остальные ручки — через get_current_user. С временным паролем доступ закрыт на сервере, пока
+    пароль не сменён, — а не только скрыт в интерфейсе."""
     if user.must_change_password:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=PASSWORD_CHANGE_REQUIRED)
+    return user
+
+
+def two_factor_setup_required(db: Session, user: User) -> bool:
+    """2FA обязательна (settings.REQUIRE_2FA), а у пользователя она не включена."""
+    if not settings.REQUIRE_2FA:
+        return False
+    enabled = db.query(User2FA.is_enabled).filter(User2FA.user_id == user.id).scalar()
+    return not enabled
+
+
+def get_current_user(
+    user: User = Depends(get_current_user_allow_2fa_setup),
+    db: Session = Depends(get_db),
+) -> User:
+    """Пользователь по токену. При обязательной 2FA без неё доступ закрыт на сервере: украденный
+    пароль без телефона даёт только экран подключения 2FA, а не данные аудита."""
+    if two_factor_setup_required(db, user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=TWO_FACTOR_SETUP_REQUIRED)
     return user
 
 

@@ -8,6 +8,9 @@
 # Усиление контейнера — под проверки пака docker (ФСТЭК СКО.1.x): не root (uid 101 из образа
 # nginx-unprivileged), лимиты памяти и CPU, файловая система только для чтения (запись — только
 # во временный /tmp), без capabilities и без повышения привилегий.
+#
+# Журнал nginx — в systemd-journal (--log-driver journald, поле CONTAINER_NAME): его читает fail2ban
+# (deploy/enable_fail2ban.sh). docker logs работает как раньше.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -95,6 +98,7 @@ docker run -d \
   --network bridge \
   "${PORTS[@]}" "${MOUNTS[@]}" \
   --restart unless-stopped \
+  --log-driver journald \
   --memory 128m --cpus 0.5 \
   --read-only --tmpfs /tmp \
   --cap-drop ALL --security-opt no-new-privileges \

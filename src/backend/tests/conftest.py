@@ -6,6 +6,8 @@ os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://postgres:postgres@lo
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key")
 os.environ.setdefault("TOTP_SECRET_ENCRYPTION_KEY", "test-totp-encryption-key")
 os.environ.setdefault("PACK_SIGNING_KEY", "test-pack-signing-key")
+# Обязательная 2FA проверяется отдельно (test_twofa_required.py); остальные тесты входят по паролю.
+os.environ.setdefault("REQUIRE_2FA", "false")
 
 import pytest
 from fastapi.testclient import TestClient

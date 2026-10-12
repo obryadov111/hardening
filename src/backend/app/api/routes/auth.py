@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from jose import jwt
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user_allow_password_change, get_db
+from app.api.deps import get_current_user_allow_password_change, get_db, two_factor_setup_required
 from app.api.routes.twofa import check_second_factor
 from app.core.config import settings
 from app.core.security import (
@@ -89,7 +89,7 @@ def verify_2fa(payload: Verify2FARequest, db: Session = Depends(get_db)):
 
 
 @router.get("/me", response_model=MeResponse)
-def me(current_user: User = Depends(get_current_user_allow_password_change)):
+def me(current_user: User = Depends(get_current_user_allow_password_change), db: Session = Depends(get_db)):
     return MeResponse(
         id=str(current_user.id),
         email=current_user.email,
@@ -97,6 +97,7 @@ def me(current_user: User = Depends(get_current_user_allow_password_change)):
         is_superadmin=current_user.is_superadmin,
         account_status=current_user.account_status,
         must_change_password=current_user.must_change_password,
+        two_factor_setup_required=two_factor_setup_required(db, current_user),
     )
 
 
