@@ -156,8 +156,9 @@ RHEL, Rocky Linux, AlmaLinux, Oracle Linux, CentOS Stream, **РЕД ОС 7.3 и 
 
 На Windows-хостах нет Python, поэтому агент собирается в один файл `hardening-agent.exe` (PyInstaller) —
 тот же `collector.py` + `probes.py`, только стандартная библиотека (реестр — модуль `winreg`). Готовый
-файл — артефакт `hardening-agent-exe` каждого прогона workflow **Windows packs** в GitHub Actions; собрать
-самому:
+файл собирает каждый прогон workflow **Windows packs** в GitHub Actions (артефакт `hardening-agent-exe`);
+заказчику он раздаётся с сервера — `https://audit.<домен>/downloads/hardening-agent.exe`, публикует
+`deploy/publish_agent.sh`, ссылка, SHA-256 и готовые команды — на странице «Агенты». Собрать самому:
 
 ```powershell
 pip install pyinstaller==6.11.1
@@ -175,11 +176,14 @@ $env:HARDENING_PACK_PUBLIC_KEY = '<открытый ключ подписи па
 ```
 
 По расписанию — задача планировщика от SYSTEM (ключи — в переменных среды системы, доступных только
-администраторам, а не в командной строке задачи):
+администраторам, а не в командной строке задачи). `Register-ScheduledTask`, а не `schtasks /TR`: путь с
+пробелом и аргументы передаются отдельно — вложенные кавычки PowerShell передаёт `schtasks` неправильно:
 
 ```powershell
-schtasks /Create /TN "Hardening agent" /RU SYSTEM /SC DAILY /ST 03:00 /RL HIGHEST `
-  /TR "C:\Program Files\Hardening\hardening-agent.exe --api-url https://hardening.example.com --environment prod --use-packs"
+$action = New-ScheduledTaskAction -Execute "C:\Program Files\Hardening\hardening-agent.exe" `
+  -Argument "--api-url https://hardening.example.com --environment prod --use-packs"
+Register-ScheduledTask -TaskName "Hardening agent" -Action $action -Trigger (New-ScheduledTaskTrigger -Daily -At 03:00) `
+  -User SYSTEM -RunLevel Highest -Force | Out-Null
 ```
 
 Что читает агент на Windows и почему не `net accounts` / `netsh` / `auditpol /get`: на русской Windows их

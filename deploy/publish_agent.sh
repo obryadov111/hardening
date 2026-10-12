@@ -51,7 +51,8 @@ WIN_VERSION="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); prin
 RUN_ID=""
 if command -v gh >/dev/null; then
   while read -r run sha_; do
-    if git cat-file -e "$sha_" 2>/dev/null && git diff --quiet "$sha_" "$AGENT_COMMIT" -- agent; then RUN_ID="$run"; break; fi
+    # .exe собран из collector.py и probes.py — правка README или установщика Linux новой сборки не требует
+    if git cat-file -e "$sha_" 2>/dev/null && git diff --quiet "$sha_" "$AGENT_COMMIT" -- agent/collector.py agent/probes.py; then RUN_ID="$run"; break; fi
   done < <(gh run list --workflow "$WORKFLOW" --branch main --status success -L 30 --json databaseId,headSha -q '.[] | "\(.databaseId) \(.headSha)"')
 fi
 if [[ -n "$RUN_ID" ]]; then
