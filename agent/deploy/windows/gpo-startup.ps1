@@ -84,8 +84,12 @@ try {
         if ($Proxy) { $enroll += @("--proxy", $Proxy) }
         if ($AllowHttp -and $Server.StartsWith("http://")) { $enroll += "--allow-http" }
         for ($attempt = 1; ; $attempt++) {
-            $output = & $exe @enroll 2>&1 | Out-String
+            # Агент пишет ход работы в stderr; Windows PowerShell 5.1 при Stop превращает каждую строку stderr
+            # внешней программы в исключение — на время вызова Continue, результат — по коду возврата.
+            $ErrorActionPreference = "Continue"
+            $output = (& $exe @enroll 2>&1 | ForEach-Object { "$_" }) -join " "
             $code = $LASTEXITCODE
+            $ErrorActionPreference = "Stop"
             Write-Log "регистрация (код $code): $($output.Trim())"
             if ($code -ne 75 -or $attempt -ge 3) { break }  # 75 — сервер недоступен, повторить
             Start-Sleep -Seconds 20
