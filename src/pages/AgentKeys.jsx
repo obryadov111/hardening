@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import AppCard from "../components/ui/AppCard";
+import CopyButton from "../components/ui/CopyButton";
 import OrgGate from "../components/OrgGate";
 import ErrorState from "../components/ui/ErrorState";
 import { Skeleton } from "../components/ui/Skeleton";
@@ -25,19 +26,16 @@ const EXPIRY = [
 ];
 
 function CopyBlock({ text }) {
-  const [copied, setCopied] = useState(false);
   return (
     <div className="relative">
       <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-xl border border-zinc-800 bg-zinc-950 p-3 pr-24 text-xs text-zinc-200">
         {text}
       </pre>
-      <button
-        type="button"
-        onClick={() => navigator.clipboard?.writeText(text).then(() => setCopied(true))}
+      <CopyButton
+        text={text}
+        label="копировать"
         className="absolute right-2 top-2 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 hover:text-white"
-      >
-        {copied ? "скопировано" : "копировать"}
-      </button>
+      />
     </div>
   );
 }

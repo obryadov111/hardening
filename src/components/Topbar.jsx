@@ -209,7 +209,7 @@ export default function Topbar({ onMenuClick }) {
                         className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800"
                       >
                         <Users size={16} />
-                        <span>Пользователи системы</span>
+                        <span>Пользователи и организации</span>
                       </button>
                     ) : null}
 

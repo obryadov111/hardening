@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import AppCard from "../components/ui/AppCard";
+import CopyButton from "../components/ui/CopyButton";
 import ErrorState from "../components/ui/ErrorState";
 import { authApi } from "../api/auth";
 import { confirmTwoFactor, disableTwoFactor, getTwoFactorStatus, setupTwoFactor } from "../api/twofa";
@@ -21,9 +22,7 @@ function BackupCodes({ codes, onDone }) {
         ))}
       </div>
       <div className="flex gap-3">
-        <button type="button" onClick={() => navigator.clipboard?.writeText(codes.join("\n"))} className="rounded-xl border border-zinc-700 px-4 py-2 text-sm text-white hover:bg-zinc-800">
-          Скопировать все
-        </button>
+        <CopyButton text={codes.join("\n")} label="Скопировать все" className="rounded-xl border border-zinc-700 px-4 py-2 text-sm text-white hover:bg-zinc-800" />
         <button type="button" onClick={onDone} className={BUTTON}>Я сохранил коды</button>
       </div>
     </div>

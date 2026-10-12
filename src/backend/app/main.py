@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routes.admin_organizations import router as admin_organizations_router
 from app.api.routes.admin_users import router as admin_users_router
 from app.api.routes.agent import router as agent_router
 from app.api.routes.agent_keys import router as agent_keys_router
@@ -39,6 +40,7 @@ app.include_router(policies_router, prefix=settings.API_PREFIX)
 app.include_router(risk_exceptions_router, prefix=settings.API_PREFIX)
 app.include_router(members_router, prefix=settings.API_PREFIX)
 app.include_router(admin_users_router, prefix=settings.API_PREFIX)
+app.include_router(admin_organizations_router, prefix=settings.API_PREFIX)
 app.include_router(vulnerabilities_router, prefix=settings.API_PREFIX)
 app.include_router(fstec_router, prefix=settings.API_PREFIX)
 app.include_router(offline_scans_router, prefix=settings.API_PREFIX)

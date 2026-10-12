@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import AppCard from "../components/ui/AppCard";
+import CopyButton from "../components/ui/CopyButton";
 import ErrorState from "../components/ui/ErrorState";
 import { useOrganization } from "../context/OrganizationContext";
 import {
+  adminCreateOrganization,
   adminCreateUser,
   adminListUsers,
   adminResetUserPassword,
@@ -20,6 +22,7 @@ const ROLES = [
 ];
 const INPUT = "w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-blue-500";
 const EMPTY_FORM = { email: "", full_name: "", password: "", organization_id: "", role: "viewer" };
+const EMPTY_ORG = { name: "", industry: "" };
 
 function StatusBadge({ user }) {
   if (user.account_status === "blocked" || !user.is_active) {
@@ -50,9 +53,7 @@ function IssuedPassword({ issued, onClose }) {
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <code className="rounded-lg bg-zinc-950 px-3 py-1.5 font-mono text-base text-white">{issued.password}</code>
-        <button type="button" onClick={() => navigator.clipboard?.writeText(issued.password)} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800">
-          Скопировать
-        </button>
+        <CopyButton text={issued.password} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800" />
         <button type="button" onClick={onClose} className="rounded-lg px-3 py-1.5 text-xs text-zinc-300 hover:text-white">
           Скрыть
         </button>
@@ -62,7 +63,7 @@ function IssuedPassword({ issued, onClose }) {
 }
 
 export default function AdminUsers() {
-  const { organizations } = useOrganization();
+  const { organizations, reloadOrganizations } = useOrganization();
   const [me, setMe] = useState(null);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -70,6 +71,8 @@ export default function AdminUsers() {
   const [error, setError] = useState("");
   const [issued, setIssued] = useState(null);
   const [busy, setBusy] = useState("");
+  const [orgForm, setOrgForm] = useState(EMPTY_ORG);
+  const [createdOrg, setCreatedOrg] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -116,6 +119,18 @@ export default function AdminUsers() {
     });
   }
 
+  function handleCreateOrganization(e) {
+    e.preventDefault();
+    setCreatedOrg("");
+    run("create-org", async () => {
+      const org = await adminCreateOrganization({ name: orgForm.name.trim(), industry: orgForm.industry.trim() || null });
+      // новая организация сразу появляется в переключателе и становится выбранной
+      reloadOrganizations(org.id);
+      setCreatedOrg(org.name);
+      setOrgForm(EMPTY_ORG);
+    });
+  }
+
   function handleReset(user) {
     if (!window.confirm(`Сбросить пароль ${user.email}? Все его текущие сессии будут завершены.`)) return;
     const password = generateTemporaryPassword();
@@ -126,7 +141,7 @@ export default function AdminUsers() {
   }
 
   function handleReset2FA(user) {
-    if (!window.confirm(`Сбросить 2FA ${user.email}? Делайте это, только убедившись, что обращается сам пользователь (он потерял телефон и резервные коды). После сброса вход — по одному паролю, пока 2FA не подключат заново.`)) return;
+    if (!window.confirm(`Сбросить 2FA ${user.email}? Делайте это, только убедившись, что обращается сам пользователь (он потерял телефон и резервные коды). При следующем входе пользователь подключит 2FA заново.`)) return;
     run(`2fa-${user.id}`, () => adminResetUserTwoFactor(user.id));
   }
 
@@ -145,14 +160,29 @@ export default function AdminUsers() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-white">Пользователи системы</h1>
+        <h1 className="text-2xl font-semibold text-white">Пользователи и организации</h1>
         <p className="mt-1 text-sm text-zinc-400">
-          Учётные записи. Доступ к данным организации выдаётся её администратором или здесь при создании.
+          Организации-заказчики и учётные записи. Доступ к данным организации выдаётся её администратором или здесь при создании пользователя.
         </p>
       </div>
 
       {error ? <ErrorState title="Ошибка действия" description={error} /> : null}
       <IssuedPassword issued={issued} onClose={() => setIssued(null)} />
+
+      <AppCard title="Новая организация" subtitle={`Заказчик аудита. Сейчас организаций: ${organizations.length}. Затем добавьте в неё пользователей и выдайте ключи агентов`}>
+        <form onSubmit={handleCreateOrganization} className="grid gap-3 md:grid-cols-[2fr_1fr_auto]">
+          <input className={INPUT} required maxLength={200} placeholder="Название *" value={orgForm.name} onChange={(e) => setOrgForm({ ...orgForm, name: e.target.value })} />
+          <input className={INPUT} maxLength={200} placeholder="Отрасль" value={orgForm.industry} onChange={(e) => setOrgForm({ ...orgForm, industry: e.target.value })} />
+          <button type="submit" disabled={busy === "create-org"} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-60">
+            {busy === "create-org" ? "Создаём..." : "Создать"}
+          </button>
+        </form>
+        {createdOrg ? (
+          <div className="mt-3 text-sm text-emerald-300">
+            Организация «{createdOrg}» создана и выбрана. Ключ агента для неё — на странице «Агенты».
+          </div>
+        ) : null}
+      </AppCard>
 
       <AppCard title="Новый пользователь" subtitle="Пароль временный: при первом входе пользователь задаст свой">
         <form onSubmit={handleCreate} className="grid gap-3 md:grid-cols-2">

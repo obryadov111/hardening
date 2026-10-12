@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { getOrganizations } from "../api/organizations";
 import { onClientAuthStateChange } from "../api/client";
 
@@ -12,6 +12,13 @@ export function OrganizationProvider({ children }) {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+
+  // После создания организации: список перезапрашивается, selectId (если задан) становится выбранной.
+  const reloadOrganizations = useCallback((selectId) => {
+    if (selectId) localStorage.setItem(STORAGE_KEY, selectId);
+    setReloadKey((n) => n + 1);
+  }, []);
 
   // Организации грузятся по состоянию входа, а не один раз при старте: провайдер
   // живёт выше /login, и раньше запрос до входа получал 403, ошибка запоминалась и
@@ -71,7 +78,7 @@ export function OrganizationProvider({ children }) {
       requestId++;
       subscription.data.subscription.unsubscribe();
     };
-  }, []);
+  }, [reloadKey]);
 
   useEffect(() => {
     if (!selectedOrganizationId) {
@@ -98,6 +105,7 @@ export function OrganizationProvider({ children }) {
       loading,
       error,
       hasOrganizations: organizations.length > 0,
+      reloadOrganizations,
     }),
     [
       organizations,
@@ -105,6 +113,7 @@ export function OrganizationProvider({ children }) {
       selectedOrganization,
       loading,
       error,
+      reloadOrganizations,
     ]
   );
 

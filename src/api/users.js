@@ -75,3 +75,11 @@ export function generateTemporaryPassword(length = 16) {
   const bytes = crypto.getRandomValues(new Uint32Array(length));
   return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
 }
+
+/** payload: { name, industry?, country? } — только суперадмин */
+export async function adminCreateOrganization(payload) {
+  return apiFetch("/admin/organizations", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
