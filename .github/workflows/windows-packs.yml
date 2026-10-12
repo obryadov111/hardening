@@ -17,6 +17,7 @@ on:
       - "src/backend/app/services/packs/**"
       - "src/backend/app/commands/pack.py"
       - ".github/workflows/windows-packs.yml"
+      - ".github/scripts/agent_fake_server.py"
   workflow_dispatch:
 
 env:
@@ -117,7 +118,39 @@ jobs:
           $env:HARDENING_PACK_KEY = 'wrong-key'
           .\dist\hardening-agent.exe --api-url http://localhost --environment ci --use-packs --dry-run --manifests-file manifests.json
           if ($LASTEXITCODE -eq 0) { Write-Output 'подделка не обнаружена'; exit 1 }
+          Copy-Item manifests-ed.json ci-manifests.json
+          Set-Content -NoNewline -Path ci-ed-public.txt -Value $edPublic
           exit 0
+
+      # Регистрация хоста настоящим .exe: ключ площадки -> ключ хоста в ProgramData (права только SYSTEM и
+      # «Администраторы»), отчёт — ключом хоста; второй прогон — без ключа площадки.
+      - name: Built agent enrolls the host and reports with the host key
+        shell: pwsh
+        run: |
+          $state = "C:\ProgramData\HardeningAgent"
+          $server = Start-Process python -ArgumentList ".github/scripts/agent_fake_server.py", "8799", "ci-manifests.json", "ci-requests.jsonl" -PassThru
+          Start-Sleep -Seconds 3
+          $edPublic = Get-Content ci-ed-public.txt -Raw
+          $common = @("--api-url", "http://127.0.0.1:8799", "--environment", "ci", "--use-packs", "--pack-public-key", $edPublic)
+          .\dist\hardening-agent.exe @common --api-key ci-site-key
+          if ($LASTEXITCODE -ne 0) { Write-Output "первый прогон: код $LASTEXITCODE"; exit 1 }
+          .\dist\hardening-agent.exe @common
+          if ($LASTEXITCODE -ne 0) { Write-Output "второй прогон без ключа площадки: код $LASTEXITCODE"; exit 1 }
+          Stop-Process -Id $server.Id
+          $requests = Get-Content ci-requests.jsonl | ForEach-Object { $_ | ConvertFrom-Json }
+          $enrolls = @($requests | Where-Object { $_.path -eq "/api/agent/enroll" })
+          $ingests = @($requests | Where-Object { $_.path -eq "/api/ingest" })
+          Write-Output "регистраций: $($enrolls.Count) (ключ $($enrolls[0].key), хост $($enrolls[0].body.hostname)); отчётов: $($ingests.Count), ключи: $($ingests.key -join ', ')"
+          if ($enrolls.Count -ne 1 -or $enrolls[0].key -ne "ci-site-key") { exit 1 }
+          if ($ingests.Count -ne 2 -or @($ingests | Where-Object { $_.key -ne "ci-host-key" }).Count) { exit 1 }
+          if ($ingests[0].body.asset.hostname -ne $enrolls[0].body.hostname) { Write-Output "имя в отчёте не совпало с зарегистрированным"; exit 1 }
+          # права: SYSTEM и Администраторы, без «Пользователей» и «Прошедших проверку» (SID — не зависят от языка)
+          foreach ($path in @($state, "$state\host.json")) {
+            $sids = (Get-Acl $path).Access | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }
+            Write-Output "$path : $($sids -join ', ')"
+            if ($sids -contains "S-1-5-32-545" -or $sids -contains "S-1-5-11" -or $sids -contains "S-1-1-0") { Write-Output "доступ у пользователей"; exit 1 }
+            if (-not ($sids -contains "S-1-5-18") -or -not ($sids -contains "S-1-5-32-544")) { Write-Output "нет SYSTEM или Администраторов"; exit 1 }
+          }
 
       - uses: actions/upload-artifact@v4
         with:
