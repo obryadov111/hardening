@@ -152,6 +152,48 @@ jobs:
             if (-not ($sids -contains "S-1-5-18") -or -not ($sids -contains "S-1-5-32-544")) { Write-Output "нет SYSTEM или Администраторов"; exit 1 }
           }
 
+      # Сценарий запуска компьютера для GPO (Windows PowerShell 5.1, как в GPO): .exe из общей папки со сверкой
+      # SHA-256, регистрация, задача от SYSTEM; повторный запуск ничего не меняет; подменённый файл не ставится;
+      # задача от SYSTEM читает ключ хоста и отправляет отчёт.
+      - name: GPO startup script
+        shell: pwsh
+        run: |
+          $state = "C:\ProgramData\HardeningAgentGPO"; $install = "C:\HardeningGPO"; $share = "C:\share"
+          New-Item -ItemType Directory -Force -Path $share | Out-Null
+          Copy-Item dist\hardening-agent.exe "$share\hardening-agent.exe"
+          Remove-Item ci-requests.jsonl -ErrorAction SilentlyContinue
+          $server = Start-Process python -ArgumentList ".github/scripts/agent_fake_server.py", "8799", "ci-manifests.json", "ci-requests.jsonl", "dist\hardening-agent.exe" -PassThru
+          Start-Sleep -Seconds 3
+          $edPublic = Get-Content ci-ed-public.txt -Raw
+          $gpo = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "agent\deploy\windows\gpo-startup.ps1", "-Server", "http://127.0.0.1:8799",
+                   "-SiteKey", "ci-site-key", "-PackPublicKey", $edPublic, "-Share", $share, "-InstallDir", $install, "-StateDir", $state, "-AllowHttp")
+          powershell.exe @gpo
+          if ($LASTEXITCODE -ne 0) { Get-Content "$state\gpo-startup.log"; exit 1 }
+          powershell.exe @gpo   # повторный запуск при следующей загрузке
+          if ($LASTEXITCODE -ne 0) { Get-Content "$state\gpo-startup.log"; exit 1 }
+          Get-Content "$state\gpo-startup.log"
+          $enrolls = @(Get-Content ci-requests.jsonl | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.path -eq "/api/agent/enroll" })
+          if ($enrolls.Count -ne 1) { Write-Output "регистраций: $($enrolls.Count), ожидалась одна"; exit 1 }
+          if (@(Select-String -Path "$state\gpo-startup.log" -Pattern "установлен агент").Count -ne 1) { Write-Output "агент ставился повторно"; exit 1 }
+          $task = Get-ScheduledTask -TaskName "Hardening agent"
+          Write-Output "задача: $($task.Principal.UserId) $($task.Actions[0].Execute) $($task.Actions[0].Arguments); разброс $($task.Triggers[0].RandomDelay)"
+          if ($task.Actions[0].Execute -ne "$install\hardening-agent.exe" -or $task.Triggers[0].RandomDelay -ne "PT1H") { exit 1 }
+          # задача от SYSTEM: читает ключ хоста из каталога с правами SYSTEM/Администраторы и отправляет отчёт
+          Start-ScheduledTask -TaskName "Hardening agent"
+          for ($i = 0; $i -lt 60 -and (Get-ScheduledTask -TaskName "Hardening agent").State -eq "Running"; $i++) { Start-Sleep -Seconds 2 }
+          $info = Get-ScheduledTaskInfo -TaskName "Hardening agent"
+          $ingests = @(Get-Content ci-requests.jsonl | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.path -eq "/api/ingest" })
+          Write-Output "задача завершилась с кодом $($info.LastTaskResult); отчётов: $($ingests.Count), ключ $($ingests[0].key)"
+          if ($info.LastTaskResult -ne 0 -or $ingests.Count -ne 1 -or $ingests[0].key -ne "ci-host-key") { exit 1 }
+          # подменённый файл в общей папке не ставится
+          Remove-Item "$install\hardening-agent.exe"
+          Set-Content -Path "$share\hardening-agent.exe" -Value "подделка"
+          powershell.exe @gpo
+          if ($LASTEXITCODE -eq 0 -or (Test-Path "$install\hardening-agent.exe")) { Write-Output "подменённый агент установлен"; exit 1 }
+          Select-String -Path "$state\gpo-startup.log" -Pattern "SHA-256" | Select-Object -Last 1
+          Stop-Process -Id $server.Id
+          exit 0
+
       - uses: actions/upload-artifact@v4
         with:
           name: hardening-agent-exe

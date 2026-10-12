@@ -45,6 +45,9 @@ tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$(git log -1 --for
 install -m 0644 "$WORK/hardening-agent-linux.tar.gz" "$OUT/.linux.tmp" && mv -f "$OUT/.linux.tmp" "$OUT/hardening-agent-linux.tar.gz"
 LINUX_VERSION="$VERSION"
 echo "==> Linux: hardening-agent-linux.tar.gz, версия ${LINUX_VERSION}"
+# сценарий GPO для массовой установки на Windows — отдельным файлом: его кладут в общую папку домена
+git show "${AGENT_COMMIT}:agent/deploy/windows/gpo-startup.ps1" > "$OUT/.gpo.tmp" && chmod 0644 "$OUT/.gpo.tmp" \
+  && mv -f "$OUT/.gpo.tmp" "$OUT/gpo-startup.ps1"
 
 # --- Windows: .exe из CI, собранный из того же кода агента ---
 WIN_VERSION="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next((f["version"] for f in d["files"] if f["platform"]=="windows"), ""))' "$OUT/version.json" 2>/dev/null || true)"
@@ -78,7 +81,8 @@ import hashlib, json, os, sys
 from datetime import datetime, timezone
 out, linux_version, win_version, pin, server_url = sys.argv[1:6]
 files = []
-for platform, name, version in (("linux", "hardening-agent-linux.tar.gz", linux_version), ("windows", "hardening-agent.exe", win_version)):
+for platform, name, version in (("linux", "hardening-agent-linux.tar.gz", linux_version), ("windows", "hardening-agent.exe", win_version),
+                                ("windows-gpo", "gpo-startup.ps1", linux_version)):
     path = os.path.join(out, name)
     if os.path.exists(path):
         data = open(path, "rb").read()

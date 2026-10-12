@@ -74,18 +74,75 @@ setx /M HARDENING_PIN_SHA256 "sha256//<отпечаток>"
 # Register-ScheduledTask, а не schtasks /TR: PowerShell неправильно передаёт schtasks вложенные кавычки пути с пробелом
 $action = New-ScheduledTaskAction -Execute "C:\Program Files\Hardening\hardening-agent.exe" `
   -Argument "--api-url https://audit.<домен> --environment prod --use-packs"
-Register-ScheduledTask -TaskName "Hardening agent" -Action $action -Trigger (New-ScheduledTaskTrigger -Daily -At 03:00) `
+Register-ScheduledTask -TaskName "Hardening agent" -Action $action -Trigger (New-ScheduledTaskTrigger -Daily -At 03:00 -RandomDelay (New-TimeSpan -Hours 1)) `
   -User SYSTEM -RunLevel Highest -Force | Out-Null
 Start-ScheduledTask -TaskName "Hardening agent"
 ```
+
+`-RandomDelay` — разброс запуска до часа: тысяча хостов не обращается к серверу в одну минуту (на Linux то же
+делает `RandomizedDelaySec=1h` таймера). Если сервер всё же занят (429, перезапуск), агент повторяет запрос
+через 15, 45, 120 и 240 секунд со случайной добавкой (всего до ~10 минут) и только потом откладывает прогон в
+очередь.
 
 Ключ хоста и очередь неотправленных прогонов — `C:\ProgramData\HardeningAgent\`. Ключ площадки не кладётся
 в переменные среды: переменные машины может прочитать любой пользователь ПК. Открытый ключ паков и отпечаток
 сервера не секретны.
 
-Для сотен ПК — те же команды сценарием запуска компьютера в групповой политике (GPO, выполняется от SYSTEM):
-`.exe` из общей папки домена, `--enroll`, задача планировщика. Готовый сценарий и пошаговая инструкция —
-после проверки на тестовом домене.
+## Массовая установка
+
+### Windows — групповая политика (GPO)
+
+Сценарий запуска компьютера `gpo-startup.ps1` (страница «Агенты» → «Скачать агент»; в архиве —
+`deploy/windows/`). Выполняется от SYSTEM при включении ПК, повторный запуск ничего не меняет:
+
+1. берёт `hardening-agent.exe` из общей папки (`-Share`: тысяча ПК не качает файл из интернета) или с сервера
+   и сверяет SHA-256 с `version.json` сервера — подменённый в общей папке файл не ставится;
+2. регистрирует хост ключом площадки, если он ещё не зарегистрирован;
+3. создаёт ежедневную задачу от SYSTEM: 03:00 с разбросом до часа, `StartWhenAvailable` — ПК, выключенный
+   ночью, выполнит прогон после включения утром.
+
+Шаги администратора домена:
+
+1. Общая папка, например `\\corp.local\NETLOGON\Hardening`: `hardening-agent.exe` и `gpo-startup.ps1`
+   (чтение — «Компьютеры домена»).
+2. Новый объект GPO, связать с OU компьютеров: «Конфигурация компьютера → Политики → Конфигурация Windows →
+   Сценарии → Автозагрузка → Сценарии PowerShell» → `\\corp.local\NETLOGON\Hardening\gpo-startup.ps1`,
+   параметры:
+   `-Server https://audit.<домен> -SiteKey <ключ площадки> -PackPublicKey <открытый ключ> -Share \\corp.local\NETLOGON\Hardening`
+3. Перезагрузить 2–3 ПК пробной OU и проверить: «Агенты» → «Хосты» и «Охват»; на ПК —
+   `C:\ProgramData\HardeningAgent\gpo-startup.log`.
+
+Параметры сценария GPO видны всем пользователям домена (SYSVOL): ключ площадки — с коротким сроком на время
+раскатки, зарегистрированные хосты работают и после него. Проверено в CI на Windows Server 2022 (Windows
+PowerShell 5.1, как в GPO): установка из «общей папки», одна регистрация на два запуска, задача от SYSTEM
+отправляет отчёт ключом хоста, подменённый файл не ставится. На реальном домене — проверить на тестовом.
+
+### Linux — Ansible
+
+Плейбук `deploy/ansible/hardening-agent.yml` (в архиве агента): архив с сервера со сверкой SHA-256,
+`install.sh`, файл настроек из шаблона, таймер, первый прогон — регистрация. Ключ площадки — в ansible-vault.
+
+```bash
+ansible-playbook -i inventory hardening-agent/deploy/ansible/hardening-agent.yml -e @hardening-vars.yml --ask-vault-pass
+```
+
+Переменные — в заголовке плейбука. Повторный запуск безопасен (обновляет агента до опубликованной версии).
+Проверено на Ubuntu 24.04 с systemd: установка, регистрация, отчёт; повторный запуск — без изменений.
+
+## Охват: кто не отчитывается
+
+«Агенты» → «Охват»: загрузить список компьютеров — выгрузку AD
+
+```powershell
+Get-ADComputer -Filter * -Properties OperatingSystem,LastLogonDate |
+  Select-Object Name,DNSHostName,OperatingSystem,LastLogonDate,Enabled |
+  Export-Csv computers.csv -NoTypeInformation -Encoding UTF8
+```
+
+или любую таблицу CSV с колонкой имени (Name, Hostname, «Имя»; разделитель `,` или `;`), или список имён по
+одному в строке. Имена сравниваются коротко и без регистра (`pc-001.corp.local` = `PC-001`), отключённые в AD
+не учитываются. Итог: отчитываются (за сутки, 7 или 30 дней), давно молчат, агент не установлен, отозваны,
+отчитываются, но в списке их нет; любой срез — в CSV.
 
 ## Проверка связи
 

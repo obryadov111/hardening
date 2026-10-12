@@ -1,0 +1,133 @@
+# Установка агента «Харденинг» на Linux-хосты площадки (systemd). Один ключ площадки на все хосты:
+# при первом запуске агент регистрирует хост и получает свой ключ (host.json), см. docs/agent-install.md.
+#
+#   ansible-playbook -i inventory hardening-agent.yml -e @hardening-vars.yml --ask-vault-pass
+#
+# hardening-vars.yml (ключ площадки — в ansible-vault, не открытым текстом):
+#   hardening_server: https://audit.example.ru
+#   hardening_site_key: !vault | ...            # «Агенты» → «Новый ключ площадки»
+#   hardening_pack_public_key: "..."            # «Агенты» → «Открытый ключ подписи паков»
+#   hardening_pin: "sha256//..."                # отпечаток ключа сервера (есть в version.json)
+#   hardening_environment: prod                 # необязательно; также hardening_criticality, hardening_proxy
+#
+# Повторный запуск безопасен: агент обновляется до опубликованной версии, файл настроек приводится к
+# переменным, зарегистрированный хост не регистрируется заново. Архив агента проверяется по SHA-256
+# из version.json сервера.
+- name: Агент «Харденинг»
+  hosts: all
+  become: true
+  vars:
+    hardening_environment: prod
+    hardening_criticality: medium
+    hardening_scan_label: плановый
+    hardening_proxy: ""
+    hardening_ca_file: ""
+    hardening_run_now: true
+    hardening_validate_certs: true
+    hardening_src: /opt/hardening-agent-src
+  tasks:
+    - name: Нужные переменные заданы
+      ansible.builtin.assert:
+        that:
+          - hardening_server is defined and hardening_server is match('https://')
+          - hardening_site_key is defined and hardening_site_key | length > 0
+          - hardening_pack_public_key is defined
+        fail_msg: "Задайте hardening_server (https://), hardening_site_key и hardening_pack_public_key"
+        quiet: true
+
+    - name: Опубликованная версия агента (version.json сервера)
+      ansible.builtin.uri:
+        url: "{{ hardening_server }}/downloads/version.json"
+        return_content: true
+        validate_certs: "{{ hardening_validate_certs }}"
+      register: hardening_published
+      run_once: true
+      delegate_to: localhost
+      become: false
+
+    - name: Архив агента для Linux — версия и сумма
+      ansible.builtin.set_fact:
+        hardening_archive: "{{ hardening_published.json.files | selectattr('platform', 'equalto', 'linux') | first }}"
+        hardening_pin_effective: "{{ hardening_pin | default(hardening_published.json.server_pin, true) }}"
+
+    - name: Python 3 на хосте (агенту нужна только стандартная библиотека)
+      ansible.builtin.command: python3 --version
+      changed_when: false
+
+    - name: Каталог для архива
+      ansible.builtin.file:
+        path: "{{ hardening_src }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Архив агента (проверка SHA-256)
+      ansible.builtin.get_url:
+        url: "{{ hardening_server }}/downloads/{{ hardening_archive.name }}"
+        dest: "{{ hardening_src }}/{{ hardening_archive.name }}"
+        checksum: "sha256:{{ hardening_archive.sha256 }}"
+        validate_certs: "{{ hardening_validate_certs }}"
+        mode: "0644"
+      register: hardening_download
+
+    - name: Распакован ли архив
+      ansible.builtin.stat:
+        path: "{{ hardening_src }}/hardening-agent/deploy/install.sh"
+      register: hardening_unpacked
+
+    - name: Распаковка
+      ansible.builtin.unarchive:
+        src: "{{ hardening_src }}/{{ hardening_archive.name }}"
+        dest: "{{ hardening_src }}"
+        remote_src: true
+      when: hardening_download.changed or not hardening_unpacked.stat.exists
+
+    - name: Установлен ли агент
+      ansible.builtin.stat:
+        path: /opt/hardening-agent/collector.py
+      register: hardening_installed
+
+    - name: Установка или обновление (install.sh — пользователь, код, unit-файлы)
+      ansible.builtin.command: "{{ hardening_src }}/hardening-agent/deploy/install.sh local"
+      when: hardening_download.changed or not hardening_unpacked.stat.exists or not hardening_installed.stat.exists
+
+    - name: Файл настроек /etc/hardening-agent/local.env
+      ansible.builtin.template:
+        src: templates/local.env.j2
+        dest: /etc/hardening-agent/local.env
+        owner: root
+        group: hardening-agent
+        mode: "0640"
+      no_log: true  # в файле ключ площадки
+
+    - name: Ежедневный прогон (таймер с разбросом до часа)
+      ansible.builtin.systemd_service:
+        name: hardening-agent@local.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Зарегистрирован ли хост
+      ansible.builtin.stat:
+        path: /var/lib/hardening-agent/local/host.json
+      register: hardening_host_file
+
+    - name: Первый прогон — регистрация хоста и отчёт
+      ansible.builtin.systemd_service:
+        name: hardening-agent@local.service
+        state: started
+      when: hardening_run_now and not hardening_host_file.stat.exists
+      register: hardening_first_run
+      failed_when: false  # сервер недоступен — прогон в очереди, таймер дошлёт
+
+    - name: Итог первого прогона
+      ansible.builtin.command: journalctl -u hardening-agent@local -n 5 --no-pager -o cat
+      when: hardening_first_run is changed
+      changed_when: false
+      register: hardening_journal
+
+    - name: Журнал агента
+      ansible.builtin.debug:
+        msg: "{{ hardening_journal.stdout_lines }}"
+      when: hardening_journal is not skipped

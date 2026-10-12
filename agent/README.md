@@ -185,7 +185,7 @@ $env:HARDENING_PACK_PUBLIC_KEY = '<открытый ключ подписи па
 ```powershell
 $action = New-ScheduledTaskAction -Execute "C:\Program Files\Hardening\hardening-agent.exe" `
   -Argument "--api-url https://hardening.example.com --environment prod --use-packs"
-Register-ScheduledTask -TaskName "Hardening agent" -Action $action -Trigger (New-ScheduledTaskTrigger -Daily -At 03:00) `
+Register-ScheduledTask -TaskName "Hardening agent" -Action $action -Trigger (New-ScheduledTaskTrigger -Daily -At 03:00 -RandomDelay (New-TimeSpan -Hours 1)) `
   -User SYSTEM -RunLevel Highest -Force | Out-Null
 ```
 
