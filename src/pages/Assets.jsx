@@ -7,6 +7,45 @@ import SortableHeader from "../components/ui/SortableHeader";
 import { SkeletonTable } from "../components/ui/Skeleton";
 import SeverityBadge from "../components/ui/SeverityBadge";
 
+const NO_ENVIRONMENT = "__none__";
+
+/**
+ * Среды (контуры) организации — карточки над таблицей: узлов, критичных, с непройденными проверками.
+ * Считаются по тем же активам, что и таблица, поэтому числа совпадают; клик — фильтр таблицы по среде.
+ */
+function summarizeEnvironments(assets) {
+  const groups = new Map();
+  for (const asset of assets) {
+    const key = asset.environment_id || NO_ENVIRONMENT;
+    const group = groups.get(key) || { key, name: asset.environment_name || "Без среды", total: 0, critical: 0, failing: 0 };
+    group.total += 1;
+    if (asset.criticality === "critical") group.critical += 1;
+    if ((asset.failed_checks_count ?? 0) > 0) group.failing += 1;
+    groups.set(key, group);
+  }
+  return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name, "ru"));
+}
+
+function EnvironmentCard({ name, total, critical, failing, active, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-2xl border p-4 text-left transition ${
+        active ? "border-blue-500 bg-blue-500/10" : "border-zinc-800 bg-zinc-900 hover:border-zinc-700"
+      }`}
+    >
+      <div className="truncate font-medium text-white">{name}</div>
+      <dl className="mt-3 space-y-1 text-sm">
+        <div className="flex justify-between gap-2"><dt className="text-zinc-400">Узлов</dt><dd className="font-semibold text-white">{total}</dd></div>
+        <div className="flex justify-between gap-2"><dt className="text-zinc-400">Критичных</dt><dd className={`font-semibold ${critical ? "text-rose-300" : "text-white"}`}>{critical}</dd></div>
+        <div className="flex justify-between gap-2"><dt className="text-zinc-400">С нарушениями</dt><dd className={`font-semibold ${failing ? "text-amber-300" : "text-white"}`}>{failing}</dd></div>
+      </dl>
+    </button>
+  );
+}
+
 export default function Assets() {
   const { selectedOrganization } = useOrganization();
 
@@ -15,6 +54,7 @@ export default function Assets() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [environment, setEnvironment] = useState(null);
 
   async function loadAssets(showRefreshState = false) {
     if (!selectedOrganization?.id) {
@@ -44,17 +84,23 @@ export default function Assets() {
   }
 
   useEffect(() => {
+    setEnvironment(null);
     loadAssets();
   }, [selectedOrganization?.id]);
 
+  const environments = useMemo(() => summarizeEnvironments(assets), [assets]);
+
   const filteredAssets = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const inEnvironment = environment
+      ? assets.filter((asset) => (asset.environment_id || NO_ENVIRONMENT) === environment)
+      : assets;
 
     if (!q) {
-      return assets;
+      return inEnvironment;
     }
 
-    return assets.filter((asset) => {
+    return inEnvironment.filter((asset) => {
       return [
         asset.hostname,
         asset.ip_address,
@@ -66,7 +112,7 @@ export default function Assets() {
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(q));
     });
-  }, [assets, search]);
+  }, [assets, search, environment]);
 
   const { sortedRows, activeKey, sortDir, toggleSort } = useSort(filteredAssets, {
     hostname: (row) => row.hostname || "",
@@ -82,7 +128,7 @@ export default function Assets() {
   if (!selectedOrganization?.id) {
     return (
       <div className="p-6 text-zinc-300">
-        <h1 className="text-2xl font-semibold mb-2">Assets</h1>
+        <h1 className="text-2xl font-semibold mb-2">Активы</h1>
         <p>Сначала выбери организацию.</p>
       </div>
     );
@@ -92,7 +138,7 @@ export default function Assets() {
     <div className="p-6 text-white">
       <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Assets</h1>
+          <h1 className="text-2xl font-semibold">Активы</h1>
           <p className="text-sm text-zinc-400 mt-1">
             Организация: {selectedOrganization.name || "Без названия"}
           </p>
@@ -124,13 +170,34 @@ export default function Assets() {
         </div>
       )}
 
+      {!loading && environments.length > 0 ? (
+        <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <EnvironmentCard
+            name="Все среды"
+            total={assets.length}
+            critical={environments.reduce((sum, env) => sum + env.critical, 0)}
+            failing={environments.reduce((sum, env) => sum + env.failing, 0)}
+            active={!environment}
+            onClick={() => setEnvironment(null)}
+          />
+          {environments.map((env) => (
+            <EnvironmentCard
+              key={env.key}
+              {...env}
+              active={environment === env.key}
+              onClick={() => setEnvironment(environment === env.key ? null : env.key)}
+            />
+          ))}
+        </div>
+      ) : null}
+
       {loading ? (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
           <SkeletonTable rows={6} cols={8} />
         </div>
       ) : filteredAssets.length === 0 ? (
         <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-6 text-zinc-300">
-          Для выбранной организации активы не найдены.
+          {assets.length ? "Под фильтр не попал ни один актив." : "Для выбранной организации активы не найдены."}
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">

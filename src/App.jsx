@@ -13,7 +13,6 @@ import AssetDetails from "./pages/AssetDetails";
 import Hardening from "./pages/Hardening";
 import Policies from "./pages/Policies";
 import Report from "./pages/Report";
-import Project from "./pages/Project";
 import SoftwareInventory from "./pages/SoftwareInventory";
 import Scans from "./pages/Scans";
 import OfflineScan from "./pages/OfflineScan";
@@ -40,7 +39,8 @@ export default function App() {
               <Route path="fstec" element={<FstecCoverage />} />
               <Route path="policies" element={<Policies />} />
               <Route path="report" element={<Report />} />
-              <Route path="project" element={<Project />} />
+              {/* «Инфраструктура» объединена с «Активами»: среды — карточки-фильтры над таблицей */}
+              <Route path="project" element={<Navigate to="/assets" replace />} />
               <Route path="software" element={<SoftwareInventory />} />
               <Route path="scans" element={<Scans />} />
               <Route path="offline-scan" element={<OfflineScan />} />

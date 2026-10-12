@@ -6,7 +6,6 @@ import {
   ShieldCheck,
   FileText,
   BookOpen,
-  FolderKanban,
   Boxes,
   History,
   GitCompareArrows,
@@ -30,7 +29,6 @@ const menuItems = [
   { to: "/offline-scan", label: "Проверка по выгрузке", icon: FileUp },
   { to: "/agents", label: "Агенты", icon: KeyRound },
   { to: "/scan-compare", label: "Сравнение сканов", icon: GitCompareArrows },
-  { to: "/project", label: "Инфраструктура", icon: FolderKanban },
 ];
 
 export default function Sidebar({ open = false, onClose }) {
