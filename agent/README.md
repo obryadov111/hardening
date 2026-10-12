@@ -31,7 +31,9 @@ subprocess.run — без capture_output/text: иначе агент не зап
 | `--pin-sha256` (`HARDENING_PIN_SHA256`) | закрепление ключа сервера `sha256//<base64>` (можно текущий и резервный); `--show-server-pin` печатает отпечаток |
 | `--proxy` (`HARDENING_PROXY`) | корпоративный прокси; без него — `HTTPS_PROXY` из окружения |
 | `--spool-dir` (`HARDENING_SPOOL_DIR`), `--no-spool` | очередь: сервер недоступен — прогон сохраняется (0600) и досылается при следующем запуске раньше нового, код выхода 75; до 50 прогонов и 30 дней |
-| `--out <файл>` | изолированный сегмент: прогон в файл, подписанный ключом агента, — загрузка через интерфейс |
+| `--out <файл>` | изолированный сегмент: прогон в файл, подписанный ключом хоста (или площадки), — загрузка через интерфейс |
+| `--enroll` | только зарегистрировать хост ключом площадки и выйти (установка через GPO, Ansible) |
+| `--state-dir <каталог>` | каталог состояния: ключ хоста `host.json` (по умолчанию `/var/lib/hardening-agent`, на Windows `C:\ProgramData\HardeningAgent`) |
 
 Неверный пин или непроверенный сертификат — остановка («Ошибка безопасности»), а не очередь: это не
 «сервер недоступен». У каждого прогона `run_id` и `collected_at`: повторная отправка из очереди не создаёт
@@ -98,7 +100,7 @@ python3 collector.py --api-url http://localhost:8000 --environment prod --dry-ru
    Сравнение с нормой (`assert`) делает сервер.
 
 ```bash
-export HARDENING_AGENT_API_KEY=<ключ агента>
+export HARDENING_AGENT_API_KEY=<ключ площадки — при первом запуске агент регистрирует хост и сохраняет свой ключ>
 export HARDENING_PACK_PUBLIC_KEY=<открытый ключ подписи паков — страница «Агенты»>
 python3 collector.py --api-url https://hardening.example.com --environment prod --use-packs
 ```
@@ -170,13 +172,14 @@ pyinstaller --onefile --name hardening-agent --paths agent --hidden-import probe
 «не проверено», а не «соблюдено».
 
 ```powershell
-$env:HARDENING_AGENT_API_KEY = '<ключ агента>'
 $env:HARDENING_PACK_PUBLIC_KEY = '<открытый ключ подписи паков>'
+.\hardening-agent.exe --api-url https://hardening.example.com --environment prod --api-key <ключ площадки> --enroll
 .\hardening-agent.exe --api-url https://hardening.example.com --environment prod --use-packs
 ```
 
-По расписанию — задача планировщика от SYSTEM (ключи — в переменных среды системы, доступных только
-администраторам, а не в командной строке задачи). `Register-ScheduledTask`, а не `schtasks /TR`: путь с
+По расписанию — задача планировщика от SYSTEM. Ключ хоста — в `C:\ProgramData\HardeningAgent\host.json`
+(доступ только SYSTEM и «Администраторы»); ключ площадки нужен только для регистрации и в переменные среды не
+кладётся — переменные машины может прочитать любой пользователь ПК. `Register-ScheduledTask`, а не `schtasks /TR`: путь с
 пробелом и аргументы передаются отдельно — вложенные кавычки PowerShell передаёт `schtasks` неправильно:
 
 ```powershell

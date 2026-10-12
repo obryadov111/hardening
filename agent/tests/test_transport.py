@@ -20,11 +20,14 @@ OTHER_PIN = "xuv5QZocJHeTQ8bvQUd9z81O1UyEtknQnVo+2lIQtYE="
 
 
 class Server:
-    """HTTPS-сервер: GET — {"status": "ok"}; POST /api/ingest — код из self.status, тела запросов — в self.received."""
+    """HTTPS-сервер: GET — {"status": "ok"}; POST /api/ingest — код из self.status, тела запросов — в self.received,
+    ключи — в self.keys; POST /api/agent/enroll — код из self.enroll_status, имена хостов — в self.enrolled,
+    ключ хоста — host-key-<n>; ingest с ключом из self.dead_keys — 401."""
 
     def __init__(self):
         outer = self
-        self.status, self.received = 200, []
+        self.status, self.received, self.keys = 200, [], []
+        self.enroll_status, self.enrolled, self.dead_keys = 201, [], set()
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args):
@@ -43,7 +46,18 @@ class Server:
 
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                key = self.headers.get("X-Agent-Api-Key")
+                if self.path == "/api/agent/enroll":
+                    outer.enrolled.append((body["hostname"], key))
+                    host_key = f"host-key-{len(outer.enrolled)}"
+                    self._reply(outer.enroll_status, {"host_id": "h", "hostname": body["hostname"], "key": host_key}
+                                if outer.enroll_status == 201 else {"detail": "имя занято"})
+                    return
+                if key in outer.dead_keys:
+                    self._reply(401, {"detail": "Недействительный ключ агента"})
+                    return
                 outer.received.append(body)
+                outer.keys.append(key)
                 self._reply(outer.status, {"ok": outer.status == 200})
 
         self.httpd = HTTPServer(("127.0.0.1", 0), Handler)
@@ -193,7 +207,7 @@ def test_main_spools_on_outage_and_flushes_next_time(server, tmp_path, monkeypat
     """Полный цикл агента: сервер упал — код 75 и прогон в очереди; сервер поднялся — сначала досылка, потом новый."""
     monkeypatch.setattr(collector, "build_payload", lambda args: {"environment": args.environment, "asset": {}})
     spool = str(tmp_path / "spool")
-    args = ["--environment", "prod", "--api-key", "k", "--ca-file", CERT, "--spool-dir", spool]
+    args = ["--environment", "prod", "--api-key", "k", "--ca-file", CERT, "--spool-dir", spool, "--state-dir", str(tmp_path)]
     assert collector.main(["--api-url", "https://127.0.0.1:9", *args]) == 75
     assert len(collector.spool_files(spool)) == 1
     assert collector.main(["--api-url", server.url, *args]) == 0
@@ -207,7 +221,8 @@ def test_main_spools_on_outage_and_flushes_next_time(server, tmp_path, monkeypat
 def test_signed_report_is_verifiable_with_the_stored_key_hash_only(tmp_path, monkeypatch):
     monkeypatch.setattr(collector, "build_payload", lambda args: {"environment": args.environment, "asset": {"hostname": "h"}})
     out = tmp_path / "report.json"
-    assert collector.main(["--api-url", "https://audit.example.ru", "--environment", "prod", "--api-key", "yak_secret", "--out", str(out)]) == 0
+    assert collector.main(["--api-url", "https://audit.example.ru", "--environment", "prod", "--api-key", "yak_secret", "--out", str(out),
+                           "--state-dir", str(tmp_path / "state")]) == 0
     report = json.loads(out.read_text(encoding="utf-8"))
     assert report["format"] == "hardening-agent-report" and report["payload"]["run_id"]
     stored_hash = hashlib.sha256(b"yak_secret").hexdigest()  # так ключ хранит сервер
@@ -216,3 +231,84 @@ def test_signed_report_is_verifiable_with_the_stored_key_hash_only(tmp_path, mon
     report["payload"]["asset"]["hostname"] = "подменён"
     assert not hmac.compare_digest(report["signature"],
                                    hmac.new(stored_hash.encode(), collector.canonical(report["payload"]), hashlib.sha256).hexdigest())
+
+
+# ---------- регистрация хоста ----------
+
+def _run(server, tmp_path, *extra, key="site-key"):
+    args = ["--api-url", server.url, "--environment", "prod", "--ca-file", CERT,
+            "--spool-dir", str(tmp_path / "spool"), "--state-dir", str(tmp_path / "state"), *extra]
+    return collector.main(args + (["--api-key", key] if key else []))
+
+
+@pytest.fixture
+def host_payload(monkeypatch):
+    monkeypatch.setattr(collector, "build_payload", lambda args: {"environment": args.environment, "asset": {"hostname": "PC-001", "os": "Ubuntu"}})
+
+
+def test_first_run_enrolls_with_site_key_then_uses_host_key(server, tmp_path, host_payload):
+    assert _run(server, tmp_path) == 0
+    assert server.enrolled == [("PC-001", "site-key")] and server.keys == ["host-key-1"]
+    host_file = tmp_path / "state" / "host.json"
+    assert json.loads(host_file.read_text(encoding="utf-8"))["key"] == "host-key-1"
+    if os.name != "nt":
+        assert host_file.stat().st_mode & 0o777 == 0o600 and (tmp_path / "state").stat().st_mode & 0o777 == 0o700
+    # следующие прогоны — ключом хоста, без регистрации; ключ площадки больше не нужен
+    assert _run(server, tmp_path, key=None) == 0
+    assert len(server.enrolled) == 1 and server.keys == ["host-key-1", "host-key-1"]
+
+
+def test_enroll_only_registers_and_exits(server, tmp_path):
+    assert _run(server, tmp_path, "--enroll", "--hostname", "WS-42") == 0
+    assert server.enrolled == [("WS-42", "site-key")] and server.received == []
+    assert _run(server, tmp_path, "--enroll", "--hostname", "WS-42") == 0  # повторно — уже зарегистрирован
+    assert len(server.enrolled) == 1
+
+
+def test_enrollment_conflict_is_reported_and_nothing_is_sent(server, tmp_path, host_payload, capsys):
+    server.enroll_status = 409
+    assert _run(server, tmp_path) == 1
+    assert "имя занято" in capsys.readouterr().err
+    assert server.received == [] and not (tmp_path / "state" / "host.json").exists()
+
+
+def test_server_without_enrollment_gets_site_key_as_before(server, tmp_path, host_payload):
+    server.enroll_status = 404
+    assert _run(server, tmp_path) == 0
+    assert server.keys == ["site-key"] and not (tmp_path / "state" / "host.json").exists()
+
+
+def test_deleted_registration_is_renewed_with_site_key(server, tmp_path, host_payload):
+    assert _run(server, tmp_path) == 0
+    server.dead_keys.add("host-key-1")  # администратор удалил регистрацию на сервере
+    assert _run(server, tmp_path) == 0
+    assert [k for k, _ in server.enrolled] == ["PC-001", "PC-001"] and server.keys == ["host-key-1", "host-key-2"]
+
+
+def test_without_site_key_a_dead_host_key_is_explained(server, tmp_path, host_payload, capsys):
+    assert _run(server, tmp_path) == 0
+    server.dead_keys.add("host-key-1")
+    assert _run(server, tmp_path, key=None) == 1
+    assert "ключ площадки" in capsys.readouterr().err
+
+
+def test_no_key_and_no_registration_is_an_error(server, tmp_path, host_payload, capsys):
+    assert _run(server, tmp_path, key=None) == 1
+    assert "host.json" in capsys.readouterr().err
+
+
+
+def test_pack_mode_fetches_manifests_with_host_key_alone(tmp_path, monkeypatch):
+    """Режим паков после регистрации: манифесты забираются ключом хоста, ключ площадки не нужен."""
+    collector.save_host_registration(str(tmp_path / "state"), {"key": "host-key-1"})
+    used = []
+
+    def fake_fetch(conn, transport):
+        used.append(conn.api_key)
+        raise SystemExit("стоп")
+    monkeypatch.setattr(collector, "fetch_manifests", fake_fetch)
+    monkeypatch.delenv("HARDENING_AGENT_API_KEY", raising=False)
+    with pytest.raises(SystemExit):
+        collector.main(["--api-url", "https://audit.example.ru", "--environment", "prod", "--use-packs", "--pack-key", "k",
+                        "--state-dir", str(tmp_path / "state")])
+    assert used == ["host-key-1"]

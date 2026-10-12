@@ -5,7 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_agent_organization_id, get_db, get_pack_registry
+from app.api.deps import AgentIdentity, get_agent_identity, get_db, get_pack_registry, normalize_hostname
 from app.models.asset import Asset
 from app.models.environment import Environment
 from app.models.hardening import (
@@ -113,10 +113,28 @@ def _pack_runs(payload: IngestRequest) -> list[IngestPackRun]:
     return runs
 
 
+def check_agent_may_report(identity: AgentIdentity, hostname: str) -> None:
+    """Ключ хоста — отчёт только со своим именем; ключ площадки — только у ключей до регистрации хостов
+    (direct_use). 403, а не 401: ключ верный, но на этот отчёт прав нет (агент хранит прогон в очереди)."""
+    if identity.host is not None:
+        if normalize_hostname(hostname) != identity.host.hostname_norm:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Хост {identity.host.hostname} зарегистрирован под своим именем и не может прислать отчёт хоста {hostname}",
+            )
+        return
+    if not identity.direct_use:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Это ключ площадки: отчёт принимается от зарегистрированного хоста — агент регистрируется "
+                   "сам при запуске (нужна версия агента с регистрацией хостов)",
+        )
+
+
 @router.post("/ingest", response_model=IngestResponse)
 def ingest(
     payload: IngestRequest,
-    organization_id: str = Depends(get_agent_organization_id),
+    identity: AgentIdentity = Depends(get_agent_identity),
     db: Session = Depends(get_db),
     registry: PackRegistry = Depends(get_pack_registry),
 ):
@@ -125,8 +143,9 @@ def ingest(
     фиксирует текущее состояние (hardening_checks), историю (scan_snapshots +
     scan_check_results) и пересчитывает compliance_score организации (hardening_reports).
     """
+    check_agent_may_report(identity, payload.asset.hostname)
     return ingest_payload(
-        db, registry, organization_id, payload,
+        db, registry, identity.organization_id, payload,
         collection=payload.collection.model_dump() if payload.collection else None,
     )
 

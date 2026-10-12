@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.security import ACCESS_TOKEN_TYPE, hash_agent_api_key
 from app.db.session import SessionLocal
+from app.models.hardening import AgentHost
 from app.models.user import User
 from app.models.user_2fa import User2FA
 from app.services.packs.registry import PackRegistry, load_registry
@@ -159,32 +161,66 @@ def client_ip(request: Request) -> str | None:
     return request.headers.get("x-real-ip") or (request.client.host if request.client else None)
 
 
-def get_agent_organization_id(
+@dataclass
+class AgentIdentity:
+    """Кто прислал запрос агента. host — хост, зарегистрированный по ключу площадки (свой ключ, отчёт
+    только со своим именем); host=None — ключ площадки (key_id): для регистрации и манифестов, а на
+    /api/ingest — только если direct_use (агенты до регистрации хостов)."""
+
+    organization_id: str
+    key_id: str | None = None
+    direct_use: bool = False
+    host: "AgentHost | None" = None
+
+
+INVALID_AGENT_KEY = "Недействительный ключ агента"
+
+
+def normalize_hostname(hostname: str) -> str:
+    """Имя хоста для сравнения: регистр не важен (Windows отдаёт имя заглавными, DNS — строчными)."""
+    return hostname.strip().lower()
+
+
+def get_agent_identity(
     request: Request,
     x_agent_api_key: str | None = Header(default=None, alias="X-Agent-Api-Key"),
     db: Session = Depends(get_db),
-) -> str:
-    """Аутентификация агента-сборщика по ключу (выдаётся в интерфейсе: «Ключи агентов»).
-    Organization_id берётся из самого ключа, а не из тела запроса — агент не может
-    выдать себя за другую организацию, даже подделав payload. Отозванный и просроченный ключ — 401
-    с одинаковым ответом: перебором нельзя узнать, существует ли ключ."""
+) -> AgentIdentity:
+    """Аутентификация агента: ключ хоста (agent_hosts) или ключ площадки (agent_api_keys, выдаётся в
+    интерфейсе «Агенты»). Организация берётся из ключа, а не из тела запроса — агент не может выдать себя
+    за другую организацию. Отозванный, просроченный и несуществующий ключ — одинаковый 401: перебором
+    нельзя узнать, существует ли ключ. Отзыв и срок ключа площадки не затрагивают уже зарегистрированные
+    по нему хосты: утёкший ключ площадки меняют, не переустанавливая агентов."""
     if not x_agent_api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Отсутствует X-Agent-Api-Key")
 
     key_hash = hash_agent_api_key(x_agent_api_key)
+    now = datetime.now(UTC)
+    ip = client_ip(request)
+
+    host = db.query(AgentHost).filter(AgentHost.key_hash == key_hash).first()
+    if host is not None:
+        if host.status != "active":
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=INVALID_AGENT_KEY)
+        host.last_seen_at, host.last_seen_ip = now, ip
+        db.commit()
+        return AgentIdentity(organization_id=str(host.organization_id), host=host)
+
     row = db.execute(
-        text("SELECT id, organization_id, is_active, expires_at FROM agent_api_keys WHERE key_hash = :key_hash"),
+        text("SELECT id, organization_id, is_active, expires_at, direct_use FROM agent_api_keys WHERE key_hash = :key_hash"),
         {"key_hash": key_hash},
     ).mappings().first()
-
-    now = datetime.now(UTC)
     if not row or not row["is_active"] or (row["expires_at"] is not None and row["expires_at"] <= now):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Недействительный ключ агента")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=INVALID_AGENT_KEY)
 
     db.execute(
         text("UPDATE agent_api_keys SET last_used_at = :now, last_used_ip = :ip WHERE id = :id"),
-        {"now": now, "ip": client_ip(request), "id": row["id"]},
+        {"now": now, "ip": ip, "id": row["id"]},
     )
     db.commit()
+    return AgentIdentity(organization_id=str(row["organization_id"]), key_id=str(row["id"]), direct_use=row["direct_use"])
 
-    return str(row["organization_id"])
+
+def get_agent_organization_id(identity: AgentIdentity = Depends(get_agent_identity)) -> str:
+    """Организация агента — для запросов, доступных и ключу площадки, и ключу хоста (манифесты паков)."""
+    return identity.organization_id

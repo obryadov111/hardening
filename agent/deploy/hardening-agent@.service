@@ -51,7 +51,8 @@ SystemCallArchitectures=native
 # AF_UNIX — для сокета Docker (если агент добавлен в группу docker, см. README)
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 UMask=0077
-# Очередь неотправленных прогонов (сервер недоступен): /var/lib/hardening-agent/<экземпляр>/spool — свой
-# у каждого экземпляра (у каждого свой ключ). Единственный каталог, куда агенту можно писать.
+# Каталог состояния /var/lib/hardening-agent/<экземпляр>: ключ хоста (host.json, регистрация по ключу площадки)
+# и очередь неотправленных прогонов (spool) — свои у каждого экземпляра: у сетевого устройства своя
+# регистрация на его имя. Единственный каталог, куда агенту можно писать.
 StateDirectory=hardening-agent/%i
 StateDirectoryMode=0700

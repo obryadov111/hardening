@@ -6,7 +6,15 @@ import OrgGate from "../components/OrgGate";
 import ErrorState from "../components/ui/ErrorState";
 import { Skeleton } from "../components/ui/Skeleton";
 import { useOrganization } from "../context/OrganizationContext";
-import { createAgentKey, getAgentDownloads, getAgentKeys, revokeAgentKey, uploadAgentReport } from "../api/agentKeys";
+import {
+  createAgentKey,
+  deleteAgentHost,
+  getAgentDownloads,
+  getAgentKeys,
+  revokeAgentHost,
+  revokeAgentKey,
+  uploadAgentReport,
+} from "../api/agentKeys";
 import { getCurrentUserRoleInOrganization } from "../api/users";
 import { formatDate, formatDateTime } from "../utils/datetime";
 
@@ -51,6 +59,7 @@ const PIN_HINT = "# закрепление ключа сервера (агент
 function agentConfig(key, publicKey, downloads) {
   return [
     `HARDENING_API_URL=${serverUrl(downloads)}`,
+    "# ключ площадки: при первом запуске агент регистрирует хост и дальше работает со своим ключом хоста",
     `HARDENING_AGENT_API_KEY=${key}`,
     publicKey ? `HARDENING_PACK_PUBLIC_KEY=${publicKey}` : "# HARDENING_PACK_PUBLIC_KEY — ключ подписи Ed25519 на сервере не настроен",
     downloads?.server_pin ? `HARDENING_PIN_SHA256=${downloads.server_pin}` : PIN_HINT,
@@ -63,11 +72,17 @@ function agentConfig(key, publicKey, downloads) {
   ].join("\n");
 }
 
-/** Те же настройки для Windows: переменные среды SYSTEM и ежедневная задача планировщика (PowerShell от администратора). */
+/**
+ * Windows (PowerShell от администратора): регистрация хоста ключом площадки — один раз, ключ нигде не
+ * сохраняется (в переменных среды его прочитал бы любой пользователь ПК); у хоста свой ключ в
+ * C:\ProgramData\HardeningAgent (доступ — SYSTEM и администраторы). Затем — ежедневная задача от SYSTEM.
+ * Открытый ключ паков и отпечаток сервера не секретны — в переменных среды машины.
+ */
 function windowsSetup(key, publicKey, downloads) {
   const exe = "C:\\Program Files\\Hardening\\hardening-agent.exe";
+  const pin = downloads?.server_pin ? ` --pin-sha256 ${downloads.server_pin}` : "";
   return [
-    `setx /M HARDENING_AGENT_API_KEY "${key}"`,
+    `& "${exe}" --api-url ${serverUrl(downloads)} --environment prod --api-key ${key}${pin} --enroll`,
     publicKey ? `setx /M HARDENING_PACK_PUBLIC_KEY "${publicKey}"` : "# HARDENING_PACK_PUBLIC_KEY — ключ подписи Ed25519 на сервере не настроен",
     downloads?.server_pin ? `setx /M HARDENING_PIN_SHA256 "${downloads.server_pin}"` : PIN_HINT,
     '# прокси: setx /M HARDENING_PROXY "http://proxy.corp:3128"',
@@ -119,7 +134,7 @@ function AgentDownloads({ downloads }) {
               `curl -fsSLO ${base}/${linux.name}`,
               `echo "${linux.sha256}  ${linux.name}" | sha256sum -c`,
               `tar xzf ${linux.name} && cd hardening-agent && sudo deploy/install.sh`,
-              "sudo nano /etc/hardening-agent/local.env   # настройки из «Новый ключ агента»",
+              "sudo nano /etc/hardening-agent/local.env   # настройки из «Новый ключ площадки»",
               "sudo systemctl start hardening-agent@local.service && journalctl -u hardening-agent@local -n 30",
               "sudo systemctl enable --now hardening-agent@local.timer   # ежедневно",
             ].join("\n")}
@@ -146,6 +161,90 @@ function AgentDownloads({ downloads }) {
   );
 }
 
+const HOST_STATE = {
+  active: ["активен", "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"],
+  revoked: ["отозван", "border-rose-500/30 bg-rose-500/10 text-rose-300"],
+};
+const SILENT_DAYS = 2;
+
+/** Хост давно не присылал данных (агент остановлен, ПК выключен или выведен) — повод проверить. */
+function isSilent(host) {
+  return host.status === "active" && Date.now() - new Date(host.last_seen_at).getTime() > SILENT_DAYS * 86400 * 1000;
+}
+
+/** Зарегистрированные хосты: у каждого свой ключ, отозвать можно один хост. */
+function AgentHosts({ hosts, onRevoke, onDelete }) {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const shown = q ? hosts.filter((h) => [h.hostname, h.os, h.last_seen_ip, h.enrollment_key].some((v) => v?.toLowerCase().includes(q))) : hosts;
+  const silent = hosts.filter(isSilent).length;
+
+  if (hosts.length === 0) {
+    return (
+      <p className="text-sm text-zinc-400">
+        Хостов пока нет. Агент регистрирует хост сам при первом запуске с ключом площадки.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <input className={`${INPUT} max-w-xs`} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск: имя, ОС, адрес, площадка" />
+        <span className="text-zinc-400">
+          всего {hosts.length}
+          {silent ? <span className="text-amber-300"> · молчат больше {SILENT_DAYS} суток: {silent}</span> : null}
+        </span>
+      </div>
+      <div className="max-h-[32rem] overflow-auto">
+        <table className="w-full text-left text-sm">
+          <thead className="sticky top-0 bg-zinc-900 text-xs text-zinc-500">
+            <tr>
+              <th className="py-2 pr-4 font-normal">Хост</th>
+              <th className="py-2 pr-4 font-normal">Площадка</th>
+              <th className="py-2 pr-4 font-normal">Состояние</th>
+              <th className="py-2 pr-4 font-normal">Зарегистрирован</th>
+              <th className="py-2 pr-4 font-normal">Последняя связь</th>
+              <th className="py-2 font-normal" />
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((host) => {
+              const [label, cls] = HOST_STATE[host.status] || [host.status, ""];
+              return (
+                <tr key={host.id} className="border-t border-zinc-800 text-zinc-300">
+                  <td className="py-2 pr-4">
+                    <div className="text-white">{host.hostname}</div>
+                    <div className="text-xs text-zinc-500">{host.os || "ОС не указана"}</div>
+                  </td>
+                  <td className="py-2 pr-4">{host.enrollment_key || "—"}</td>
+                  <td className="py-2 pr-4">
+                    <span className={`rounded-lg border px-2 py-0.5 text-xs ${cls}`}>{label}</span>
+                  </td>
+                  <td className="py-2 pr-4">{formatDate(host.enrolled_at)}</td>
+                  <td className={`py-2 pr-4 ${isSilent(host) ? "text-amber-300" : ""}`}>
+                    {host.last_seen_at ? `${formatDateTime(host.last_seen_at)} · ${host.last_seen_ip || "адрес неизвестен"}` : "—"}
+                  </td>
+                  <td className="space-x-3 whitespace-nowrap py-2 text-right">
+                    {host.status === "active" ? (
+                      <button type="button" onClick={() => onRevoke(host)} className="text-xs text-rose-300 hover:text-rose-200">
+                        Отозвать
+                      </button>
+                    ) : null}
+                    <button type="button" onClick={() => onDelete(host)} className="text-xs text-zinc-400 hover:text-white">
+                      Удалить регистрацию
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {shown.length === 0 ? <p className="py-3 text-sm text-zinc-400">Под поиск не попал ни один хост.</p> : null}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Агенты организации: ключи на объекты заказчика (со сроком действия, отзывом и последним
  * использованием), открытый ключ подписи паков и загрузка отчёта агента, перенесённого файлом.
@@ -154,7 +253,7 @@ export default function AgentKeys() {
   const { selectedOrganization, selectedOrganizationId, loading: orgLoading, hasOrganizations, error: orgError } =
     useOrganization();
 
-  const [data, setData] = useState({ keys: [], pack_public_key: null });
+  const [data, setData] = useState({ keys: [], hosts: [], pack_public_key: null });
   const [downloads, setDownloads] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -211,9 +310,32 @@ export default function AgentKeys() {
   }
 
   async function revoke(key) {
-    if (!window.confirm(`Отозвать ключ «${key.name}»? Агенты с этим ключом перестанут отправлять данные.`)) return;
+    const message = key.direct_use
+      ? `Отозвать ключ «${key.name}»? Агенты старых версий с этим ключом перестанут отправлять данные, новые хосты по нему не зарегистрируются.`
+      : `Отозвать ключ «${key.name}»? Новые хосты по нему не зарегистрируются. Уже зарегистрированные продолжат работать со своими ключами.`;
+    if (!window.confirm(message)) return;
     try {
       await revokeAgentKey(selectedOrganizationId, key.id);
+      await load();
+    } catch (error) {
+      setLoadError(error.message);
+    }
+  }
+
+  async function revokeHost(host) {
+    if (!window.confirm(`Отозвать хост ${host.hostname}? Его отчёты перестанут приниматься, а заново зарегистрировать его по ключу площадки будет нельзя, пока не удалите регистрацию.`)) return;
+    try {
+      await revokeAgentHost(selectedOrganizationId, host.id);
+      await load();
+    } catch (error) {
+      setLoadError(error.message);
+    }
+  }
+
+  async function deleteHost(host) {
+    if (!window.confirm(`Удалить регистрацию ${host.hostname}? Ключ хоста перестанет действовать, а имя освободится: агент (например, после переустановки) зарегистрирует хост заново по ключу площадки. Актив и история проверок останутся.`)) return;
+    try {
+      await deleteAgentHost(selectedOrganizationId, host.id);
       await load();
     } catch (error) {
       setLoadError(error.message);
@@ -242,8 +364,9 @@ export default function AgentKeys() {
           <h1 className="text-2xl font-semibold text-white">Агенты</h1>
           <p className="mt-1 max-w-3xl text-sm text-zinc-400">
             Агент сам обращается к серверу по HTTPS — от объекта заказчика нужен только исходящий доступ к{" "}
-            <code className="text-zinc-200">{window.location.host}:443</code>. Выдавайте отдельный ключ на каждый объект
-            (площадку, сегмент): его можно отозвать, не затрагивая остальные. Организация:{" "}
+            <code className="text-zinc-200">{window.location.host}:443</code>. Ключ площадки (офис, ЦОД, сегмент) ставится
+            на все её хосты сразу — через GPO, Ansible или образ ОС. При первом запуске агент регистрирует хост и получает
+            свой ключ: отчёт по нему принимается только с именем этого хоста, отозвать можно один хост. Организация:{" "}
             <span className="text-white">{selectedOrganization?.name || "—"}</span>
           </p>
         </div>
@@ -264,10 +387,13 @@ export default function AgentKeys() {
               <AgentDownloads downloads={downloads} />
             </AppCard>
 
-            <AppCard title="Новый ключ агента" subtitle="Ключ показывается один раз — сервер хранит только его хэш">
+            <AppCard
+              title="Новый ключ площадки"
+              subtitle="Один ключ на площадку для всех её хостов. Показывается один раз — сервер хранит только хэш. На время массовой установки разумен короткий срок: зарегистрированные хосты работают и после него"
+            >
               <form onSubmit={create} className="grid gap-4 md:grid-cols-[1fr_200px_auto] md:items-end">
                 <label>
-                  <span className={LABEL}>Объект *</span>
+                  <span className={LABEL}>Площадка *</span>
                   <input className={INPUT} value={name} onChange={(e) => setName(e.target.value)} placeholder="Казань, ЦОД, сегмент АСУ" maxLength={100} />
                 </label>
                 <label>
@@ -291,11 +417,14 @@ export default function AgentKeys() {
                   </p>
                   <CopyBlock text={created.key} />
                   <p className="text-xs text-zinc-400">
-                    Настройки агента на объекте (Linux — файл <code>/etc/hardening-agent/&lt;имя&gt;.env</code> для службы{" "}
-                    <code>hardening-agent@&lt;имя&gt;</code>; Windows — те же переменные для задачи планировщика):
+                    Linux — файл <code>/etc/hardening-agent/local.env</code> для службы <code>hardening-agent@local</code>
+                    (одинаковый на всех хостах площадки — раздаётся Ansible или образом ОС):
                   </p>
                   <CopyBlock text={agentConfig(created.key, data.pack_public_key, downloads)} />
-                  <p className="text-xs text-zinc-400">Windows — PowerShell от администратора, после скачивания агента:</p>
+                  <p className="text-xs text-zinc-400">
+                    Windows — PowerShell от администратора, после скачивания агента. Первая строка регистрирует хост; ключ
+                    площадки на хосте не сохраняется. Для сотен ПК те же команды — сценарием запуска в групповой политике (GPO):
+                  </p>
                   <CopyBlock text={windowsSetup(created.key, data.pack_public_key, downloads)} />
                   <button type="button" onClick={() => setCreated(null)} className="text-xs text-zinc-400 underline hover:text-white">
                     Скрыть ключ
@@ -304,7 +433,11 @@ export default function AgentKeys() {
               ) : null}
             </AppCard>
 
-            <AppCard title="Ключи агентов" subtitle="Последнее использование — время и адрес, с которого агент обращался к серверу">
+            <AppCard title="Хосты" subtitle="Зарегистрированы агентами по ключам площадок. Последняя связь — когда и откуда агент обращался к серверу">
+              <AgentHosts hosts={data.hosts || []} onRevoke={revokeHost} onDelete={deleteHost} />
+            </AppCard>
+
+            <AppCard title="Ключи площадок" subtitle="Последнее использование — регистрация хостов (и отчёты агентов старых версий)">
               {data.keys.length === 0 ? (
                 <p className="text-sm text-zinc-400">Ключей пока нет.</p>
               ) : (
@@ -312,7 +445,7 @@ export default function AgentKeys() {
                   <table className="w-full text-left text-sm">
                     <thead className="text-xs text-zinc-500">
                       <tr>
-                        <th className="py-2 pr-4 font-normal">Объект</th>
+                        <th className="py-2 pr-4 font-normal">Площадка</th>
                         <th className="py-2 pr-4 font-normal">Состояние</th>
                         <th className="py-2 pr-4 font-normal">Создан</th>
                         <th className="py-2 pr-4 font-normal">Действует до</th>
@@ -325,7 +458,14 @@ export default function AgentKeys() {
                         const [label, cls] = STATE[key.state] || [key.state, ""];
                         return (
                           <tr key={key.id} className="border-t border-zinc-800 text-zinc-300">
-                            <td className="py-2 pr-4 text-white">{key.name}</td>
+                            <td className="py-2 pr-4 text-white">
+                              {key.name}
+                              {key.direct_use ? (
+                                <div className="text-xs text-amber-300" title="Ключ выдан до регистрации хостов: отчёт по нему принимается напрямую, без привязки к имени хоста">
+                                  старый: принимается без регистрации хоста
+                                </div>
+                              ) : null}
+                            </td>
                             <td className="py-2 pr-4">
                               <span className={`rounded-lg border px-2 py-0.5 text-xs ${cls}`}>{label}</span>
                             </td>
@@ -365,7 +505,7 @@ export default function AgentKeys() {
 
             <AppCard
               title="Отчёт агента из файла"
-              subtitle="Для изолированных сегментов без связи с сервером: агент с --out сохраняет прогон в файл, подписанный ключом агента"
+              subtitle="Для изолированных сегментов без связи с сервером: агент с --out сохраняет прогон в файл, подписанный ключом хоста или площадки"
             >
               <form onSubmit={upload} className="space-y-3">
                 <input
@@ -379,7 +519,7 @@ export default function AgentKeys() {
                   className="text-sm text-zinc-300 file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-800 file:px-3 file:py-1.5 file:text-zinc-200"
                 />
                 <p className="text-xs text-zinc-500">
-                  Сервер проверяет подпись ключом агента этой организации: изменённый при переносе файл не будет принят.
+                  Сервер проверяет подпись ключами этой организации: изменённый при переносе файл не будет принят.
                 </p>
                 {uploadError ? <p className="text-sm text-rose-300">{uploadError}</p> : null}
                 {uploadResult ? (

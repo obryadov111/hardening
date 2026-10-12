@@ -78,17 +78,23 @@ def test_agent_key_lifecycle(client, org_admin, ed25519):
     created = client.post(f"/api/organizations/{org_id}/agent-keys", json={"name": "Казань, ЦОД", "expires_in_days": 90}, headers=headers)
     assert created.status_code == 201
     key = created.json()
-    assert key["key"].startswith("yak_") and key["state"] == "active"
+    assert key["key"].startswith("yak_") and key["state"] == "active" and key["direct_use"] is False
     assert datetime.fromisoformat(key["expires_at"]) - datetime.now(UTC) > timedelta(days=89)
 
-    assert _ingest(client, key["key"]).status_code == 200
+    # новый ключ — ключ площадки: отчёт напрямую не принимается, только от зарегистрированного по нему хоста
+    assert _ingest(client, key["key"]).status_code == 403
+    enrolled = client.post("/api/agent/enroll", json={"hostname": "h1"}, headers={"X-Agent-Api-Key": key["key"], "X-Real-IP": "203.0.113.7"})
+    assert enrolled.status_code == 201
+    assert _ingest(client, enrolled.json()["key"]).status_code == 200
     listing = client.get(f"/api/organizations/{org_id}/agent-keys", headers=headers).json()
     assert listing["pack_public_key"] == ed25519_public_key(ED_KEY)
     row = next(k for k in listing["keys"] if k["id"] == key["id"])
     assert row["last_used_ip"] == "203.0.113.7" and row["last_used_at"] and "key" not in row and "key_hash" not in row
 
     assert client.post(f"/api/organizations/{org_id}/agent-keys/{key['id']}/revoke", headers=headers).json()["state"] == "revoked"
-    assert _ingest(client, key["key"]).status_code == 401
+    assert client.post("/api/agent/enroll", json={"hostname": "h2"}, headers={"X-Agent-Api-Key": key["key"]}).status_code == 401
+    # отзыв ключа площадки не отключает уже зарегистрированные хосты
+    assert _ingest(client, enrolled.json()["key"]).status_code == 200
 
 
 def test_expired_agent_key_is_refused(client, org_admin, db):

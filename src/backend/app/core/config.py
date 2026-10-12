@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     # False — 2FA по желанию (стенд, закрытая сеть).
     REQUIRE_2FA: bool = True
 
+    # Регистрация хостов агентами: имя хоста, который молчит дольше этого срока, может занять новая
+    # установка (переустановка ОС, замена ПК с тем же именем). Хост на связи так не перехватить.
+    AGENT_REENROLL_AFTER_DAYS: int = 7
+
     TOTP_ISSUER: str = "Hardening"
     TOTP_SECRET_ENCRYPTION_KEY: str
 

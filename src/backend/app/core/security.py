@@ -79,5 +79,10 @@ def generate_agent_api_key() -> str:
     return "yak_" + secrets.token_urlsafe(32)
 
 
+def generate_agent_host_key() -> str:
+    """Ключ зарегистрированного хоста: выдаётся агенту один раз при регистрации — хранится только hash."""
+    return "yah_" + secrets.token_urlsafe(32)
+
+
 def hash_agent_api_key(key: str) -> str:
     return sha256(key.encode("utf-8")).hexdigest()

@@ -132,3 +132,28 @@ class AgentApiKey(Base):
     last_used_ip: Mapped[str | None] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Ключ принимается на /api/ingest напрямую (агенты до регистрации хостов); новые — только регистрация хостов.
+    direct_use: Mapped[bool] = mapped_column(default=False, nullable=False)
+
+
+class AgentHost(Base):
+    """Хост, зарегистрированный агентом по ключу площадки (AgentApiKey): у хоста свой ключ, отчёт по нему
+    принимается только с его именем. status: active; revoked — отозван администратором, имя занято, пока
+    запись не удалят; replaced — имя перерегистрировано другой установкой (хост долго молчал)."""
+
+    __tablename__ = "agent_hosts"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.client_organizations.id"), nullable=False)
+    enrollment_key_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("public.agent_api_keys.id"), nullable=True)
+    hostname: Mapped[str] = mapped_column(Text, nullable=False)
+    hostname_norm: Mapped[str] = mapped_column(Text, nullable=False)
+    key_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    os: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, default="active", nullable=False)
+    enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    enrolled_ip: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_ip: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

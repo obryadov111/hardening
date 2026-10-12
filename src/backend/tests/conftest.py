@@ -34,6 +34,7 @@ TRUNCATE_TABLES = [
     "software",
     "assets",
     "environments",
+    "agent_hosts",
     "agent_api_keys",
     "user_organizations",
     "user_2fa",
@@ -146,13 +147,16 @@ def auth_header(client):
 def make_agent_key(db):
     from app.core.security import generate_agent_api_key, hash_agent_api_key
 
-    def _make(organization_id, name="agent-test"):
+    # direct_use=True — ключ принимается на /api/ingest напрямую, как у агентов до регистрации хостов:
+    # так проверяется приём данных; регистрация хостов — test_agent_hosts.py.
+    def _make(organization_id, name="agent-test", direct_use=True):
         raw_key = generate_agent_api_key()
         db.execute(
             text(
-                "INSERT INTO agent_api_keys (organization_id, name, key_hash) VALUES (:oid, :name, :key_hash)"
+                "INSERT INTO agent_api_keys (organization_id, name, key_hash, direct_use)"
+                " VALUES (:oid, :name, :key_hash, :direct_use)"
             ),
-            {"oid": organization_id, "name": name, "key_hash": hash_agent_api_key(raw_key)},
+            {"oid": organization_id, "name": name, "key_hash": hash_agent_api_key(raw_key), "direct_use": direct_use},
         )
         db.commit()
         return raw_key

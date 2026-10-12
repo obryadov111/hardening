@@ -359,7 +359,7 @@ class RejectedError(Exception):
 
     def __init__(self, code: int, detail: str):
         super().__init__(f"HTTP {code} — {detail}")
-        self.code = code
+        self.code, self.detail = code, detail
 
 
 def check_api_url(api_url: str, allow_http: bool) -> None:
@@ -461,7 +461,14 @@ class ServerConnection:
             with self.opener.open(req, timeout=self.timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:500]
+            detail = exc.read().decode("utf-8", errors="replace")[:2000]
+            try:  # FastAPI: {"detail": "причина"} — человеку нужна причина, а не JSON
+                parsed = json.loads(detail).get("detail")
+                if parsed:
+                    detail = parsed if isinstance(parsed, str) else json.dumps(parsed, ensure_ascii=False)
+            except (ValueError, AttributeError):
+                pass
+            detail = detail[:500]
             # 408/429/5xx — сервер перегружен или перезапускается; прочее (401 ключ, 422 формат) — отказ по существу
             if exc.code in (408, 429) or exc.code >= 500:
                 raise TransientError(f"HTTP {exc.code} — {detail}") from None
@@ -495,15 +502,20 @@ SPOOL_MAX_FILES = 50
 SPOOL_MAX_AGE_DAYS = 30
 
 
-def default_spool_dir() -> str:
+def default_state_dir() -> str:
+    """Каталог состояния агента: ключ хоста и очередь прогонов."""
     if os.name == "nt":
-        return os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "HardeningAgent", "spool")
-    # systemd: StateDirectory=hardening-agent (agent/deploy/hardening-agent@.service)
-    return os.path.join(os.environ.get("STATE_DIRECTORY", "/var/lib/hardening-agent").split(":")[0], "spool")
+        return os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "HardeningAgent")
+    # systemd: StateDirectory=hardening-agent/<экземпляр> (agent/deploy/hardening-agent@.service)
+    return os.environ.get("STATE_DIRECTORY", "/var/lib/hardening-agent").split(":")[0]
+
+
+def default_spool_dir() -> str:
+    return os.path.join(default_state_dir(), "spool")
 
 
 def spool_save(spool_dir: str, payload: dict) -> str:
-    os.makedirs(spool_dir, mode=0o700, exist_ok=True)
+    make_private_dir(spool_dir)
     name = f"{payload['collected_at'].replace(':', '').replace('-', '')[:15]}-{payload['run_id']}.json"
     path = os.path.join(spool_dir, name)
     # 0600: в прогоне конфигурация хоста — читать её должен только агент
@@ -558,6 +570,88 @@ def spool_flush(conn: ServerConnection, spool_dir: str, log) -> int:
     return sent
 
 
+# --- регистрация хоста --------------------------------------------------------------
+#
+# Ключ площадки (из интерфейса «Агенты») ставится на все хосты сразу — GPO, Ansible, образ ОС. При первом
+# запуске агент обменивает его на собственный ключ хоста (POST /api/agent/enroll) и дальше работает с ним:
+# сервер принимает по ключу хоста отчёт только с именем этого хоста, поэтому ключ, вынутый с одного хоста,
+# не позволит подделать отчёты остальных, а отозвать можно один хост. Ключ хоста — в файле host.json
+# каталога состояния, читать его могут только SYSTEM и администраторы (Windows) или сам агент (Linux, 0600).
+# Для хоста с несколькими экземплярами агента (сетевые устройства по SSH) у каждого экземпляра свой
+# каталог состояния и своя регистрация — на имя устройства.
+
+HOST_FILE = "host.json"
+# Windows: SYSTEM и «Администраторы» — по SID, а не по имени (на русской Windows группа называется иначе)
+WINDOWS_PRIVATE_ACL = ["/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F"]
+
+
+def make_private_dir(path: str) -> None:
+    """Каталог, который читают только агент и администраторы: в нём ключ хоста и собранная конфигурация."""
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    if os.name == "nt":
+        # ProgramData наследует чтение для «Пользователей» — наследование снимается
+        result = subprocess.run(["icacls", path, *WINDOWS_PRIVATE_ACL], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                universal_newlines=True)
+        if result.returncode != 0:
+            raise OSError(f"не удалось ограничить доступ к {path}: {result.stdout.strip()}")
+
+
+def load_host_key(state_dir: str) -> "str | None":
+    try:
+        with open(os.path.join(state_dir, HOST_FILE), encoding="utf-8") as fh:
+            return json.load(fh).get("key") or None
+    except (OSError, ValueError):
+        return None
+
+
+def save_host_registration(state_dir: str, registration: dict) -> str:
+    make_private_dir(state_dir)
+    path = os.path.join(state_dir, HOST_FILE)
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(registration, fh, ensure_ascii=False)
+    os.replace(tmp, path)
+    return path
+
+
+def forget_host_registration(state_dir: str) -> None:
+    try:
+        os.remove(os.path.join(state_dir, HOST_FILE))
+    except FileNotFoundError:
+        pass
+
+
+class EnrollmentConflict(Exception):
+    """Сервер отказал в регистрации по существу (имя занято, регистрация отозвана) — повтор не поможет."""
+
+
+def enroll_host(conn: ServerConnection, site_key: str, state_dir: str, hostname: str, os_name: "str | None", log) -> bool:
+    """Регистрирует хост ключом площадки и переключает соединение на ключ хоста. False — сервер без
+    регистрации хостов (старая версия): агент работает с ключом площадки, как раньше."""
+    # Каталог проверяется до регистрации: ключ, выданный сервером и не сохранённый, занял бы имя хоста.
+    make_private_dir(state_dir)
+    if not os.access(state_dir, os.W_OK):
+        raise OSError(f"нет прав на запись в {state_dir}")
+    conn.api_key = site_key
+    try:
+        response = conn.request("POST", "/api/agent/enroll", {"hostname": hostname, "os": os_name})
+    except RejectedError as exc:
+        if exc.code in (404, 405):
+            log("сервер не поддерживает регистрацию хостов — отчёт отправляется ключом площадки")
+            return False
+        if exc.code == 409:
+            raise EnrollmentConflict(exc.detail) from None
+        raise
+    path = save_host_registration(state_dir, {
+        "host_id": response["host_id"], "hostname": response["hostname"], "key": response["key"],
+        "server": conn.api_url, "enrolled_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+    })
+    conn.api_key = response["key"]
+    log(f"хост {response['hostname']} зарегистрирован на сервере, ключ хоста сохранён в {path}")
+    return True
+
+
 # --- подписанный отчёт для переноса файлом (изолированный сегмент) --------------
 #
 # Подпись — HMAC-SHA256 ключом SHA-256(ключ агента): сервер хранит именно этот хэш (сам ключ — нет) и
@@ -587,6 +681,8 @@ def fetch_manifests(conn: ServerConnection, transport_name: str) -> dict:
     try:
         return conn.request("GET", f"/api/agent/manifests?transport={transport_name}")
     except RejectedError as exc:
+        if exc.code == 401:
+            raise  # ключ хоста отвергнут — main решает, регистрироваться ли заново
         raise SystemExit(f"Бэкенд не выдал манифесты: {exc}") from None
     except TransientError as exc:
         # Без паков прогон собрать нечем; отправленное раньше осталось в очереди до следующего запуска.
@@ -618,7 +714,7 @@ def build_pack_payload(args: argparse.Namespace, probes_module, conn: "ServerCon
         with open(args.manifests_file, encoding="utf-8") as fh:
             response = json.load(fh)
     else:
-        if not args.api_key or conn is None:
+        if conn is None or not conn.api_key:  # ключ хоста (host.json) или ключ площадки
             raise SystemExit("Ошибка: нужен --api-key или переменная окружения HARDENING_AGENT_API_KEY")
         response = fetch_manifests(conn, probes_module.pack_transport(transport))
 
@@ -675,7 +771,13 @@ def build_pack_payload(args: argparse.Namespace, probes_module, conn: "ServerCon
 def parse_args(argv: "list[str]") -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--api-url", required=True, help="Базовый URL бэкенда, например https://hardening.example.com")
-    parser.add_argument("--api-key", default=os.environ.get("HARDENING_AGENT_API_KEY"), help="Ключ агента (или переменная окружения HARDENING_AGENT_API_KEY)")
+    parser.add_argument("--api-key", default=os.environ.get("HARDENING_AGENT_API_KEY"),
+                        help="Ключ площадки из интерфейса «Агенты» (или HARDENING_AGENT_API_KEY): при первом запуске агент "
+                             "регистрирует по нему хост и дальше работает с ключом хоста, после регистрации он не нужен")
+    parser.add_argument("--enroll", action="store_true",
+                        help="Только зарегистрировать хост (установка через GPO, Ansible, образ ОС) и выйти")
+    parser.add_argument("--state-dir", default=os.environ.get("HARDENING_STATE_DIR") or default_state_dir(),
+                        help="Каталог состояния: ключ хоста (host.json) — доступ только у агента и администраторов")
     parser.add_argument("--environment", required=True, help="Имя окружения (prod/staging/…), создаётся автоматически при первом прогоне")
     parser.add_argument("--hostname", default=None, help="По умолчанию — hostname хоста")
     parser.add_argument("--ip-address", default=None, help="По умолчанию — определяется автоматически")
@@ -751,24 +853,65 @@ def main(argv: "list[str] | None" = None) -> int:
         print(f"sha256//{conn.seen_pins[-1]}")
         return 0
 
-    if not args.dry_run and not args.api_key:
-        print("Ошибка: нужен --api-key или переменная окружения HARDENING_AGENT_API_KEY", file=sys.stderr)
+    host_key = None if args.dry_run else load_host_key(args.state_dir)
+    if host_key and conn is not None:
+        conn.api_key = host_key
+    if not args.dry_run and not args.api_key and not host_key:
+        print("Ошибка: нужен ключ площадки --api-key или переменная окружения HARDENING_AGENT_API_KEY "
+              f"(хост ещё не зарегистрирован: нет {os.path.join(args.state_dir, HOST_FILE)})", file=sys.stderr)
         return 1
+
+    if args.enroll:
+        if host_key:
+            print(f"Хост уже зарегистрирован: {os.path.join(args.state_dir, HOST_FILE)}")
+            return 0
+        hostname = args.hostname or args.ssh_host or socket.gethostname()  # то же имя, что в отчёте
+        try:
+            enroll_host(conn, args.api_key, args.state_dir, hostname, get_os_pretty_name(), log)
+        except (EnrollmentConflict, RejectedError, TransientError, OSError) as exc:
+            print(f"Хост {hostname} не зарегистрирован: {exc}", file=sys.stderr)
+            return 75 if isinstance(exc, TransientError) else 1
+        return 0
 
     if os.name == "nt" and not args.use_packs:
         # Встроенные проверки старого режима написаны для Linux; на Windows — только паки.
         print("Ошибка: на Windows агент работает только с паками — добавьте --use-packs", file=sys.stderr)
         return 1
 
+    probes_module = None
     if args.use_packs:
         try:
-            import probes
+            import probes as probes_module
         except ImportError:
             print("Ошибка: для --use-packs нужен файл probes.py рядом с collector.py", file=sys.stderr)
             return 1
-        payload = build_pack_payload(args, probes, conn)
-    else:
-        payload = build_payload(args)
+
+    def collect() -> dict:
+        return build_pack_payload(args, probes_module, conn) if args.use_packs else build_payload(args)
+
+    def reenroll(hostname: str, os_name: "str | None") -> None:
+        # Регистрацию хоста удалили на сервере (переустановка, освобождение имени) — регистрируемся заново.
+        # Отозванный администратором хост сервер заново не зарегистрирует (409).
+        log("ключ хоста больше не действует — повторная регистрация")
+        forget_host_registration(args.state_dir)
+        enroll_host(conn, args.api_key, args.state_dir, hostname, os_name, log)
+
+    try:
+        try:
+            payload = collect()
+        except RejectedError:  # 401 на манифесты: ключ хоста отозван или регистрация удалена
+            if not (host_key and args.api_key):
+                raise
+            reenroll(args.hostname or args.ssh_host or socket.gethostname(), get_os_pretty_name())
+            host_key = conn.api_key
+            payload = collect()
+    except EnrollmentConflict as exc:
+        print(f"Хост не зарегистрирован: {exc}", file=sys.stderr)
+        return 1
+    except (RejectedError, OSError) as exc:
+        hint = " — ключ хоста отозван или регистрация удалена; для повторной регистрации нужен ключ площадки (--api-key)"
+        print(f"Бэкенд не выдал манифесты: {exc}{hint if host_key and not args.api_key else ''}", file=sys.stderr)
+        return 1
     payload["run_id"] = str(uuid.uuid4())
     payload["collected_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
 
@@ -778,17 +921,40 @@ def main(argv: "list[str] | None" = None) -> int:
     if args.out:
         fd = os.open(args.out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(sign_report(payload, args.api_key), fh, ensure_ascii=False)
+            # изолированный сегмент: хост мог и не регистрироваться — тогда подпись ключом площадки
+            json.dump(sign_report(payload, host_key or args.api_key), fh, ensure_ascii=False)
         print(f"Отчёт сохранён в {args.out}: загрузите его на сервер в интерфейсе («Отчёт агента из файла»)")
         return 0
 
-    try:
+    def deliver() -> dict:
         sent = spool_flush(conn, args.spool_dir, log) if not args.no_spool else 0
         if sent:
             log(f"дослано из очереди: {sent}")
-        result = send_ingest(conn, payload)
+        return send_ingest(conn, payload)
+
+    asset = payload.get("asset") or {}
+    try:
+        if not host_key:
+            enroll_host(conn, args.api_key, args.state_dir, asset.get("hostname") or socket.gethostname(), asset.get("os"), log)
+        try:
+            result = deliver()
+        except RejectedError as exc:
+            if not (exc.code == 401 and host_key and args.api_key):
+                raise
+            reenroll(asset.get("hostname") or socket.gethostname(), asset.get("os"))
+            result = deliver()
+    except EnrollmentConflict as exc:
+        print(f"Хост не зарегистрирован: {exc}", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"Ключ хоста не сохранён в {args.state_dir}: {exc}", file=sys.stderr)
+        return 1
     except RejectedError as exc:
-        print(f"Бэкенд отклонил данные: {exc}", file=sys.stderr)
+        hint = ""
+        if exc.code == 401 and host_key and not args.api_key:
+            hint = (" — ключ хоста отозван или регистрация удалена; для повторной регистрации нужен ключ площадки"
+                    " (--api-key)")
+        print(f"Бэкенд отклонил данные: {exc}{hint}", file=sys.stderr)
         return 1
     except TransientError as exc:
         if args.no_spool:

@@ -4,6 +4,7 @@ from app.models.environment import Environment
 from app.models.hardening import (
     AgentApiKey,
     AgentCollection,
+    AgentHost,
     HardeningCheck,
     HardeningReport,
     HardeningRule,
@@ -21,6 +22,7 @@ from app.models.user_role import UserRole
 __all__ = [
     "AgentApiKey",
     "AgentCollection",
+    "AgentHost",
     "Asset",
     "AuditorOrganization",
     "ClientOrganization",

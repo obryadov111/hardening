@@ -31,3 +31,13 @@ export async function getAgentDownloads() {
   if (!response.ok) return null;
   return response.json().catch(() => null);
 }
+
+/** Отзыв хоста: его ключ перестаёт действовать, по ключу площадки его заново не зарегистрировать. */
+export async function revokeAgentHost(organizationId, hostId) {
+  return apiFetch(`/organizations/${organizationId}/agent-hosts/${hostId}/revoke`, { method: "POST" });
+}
+
+/** Удаление регистрации хоста: имя освобождается, агент (переустановленный) регистрируется заново. */
+export async function deleteAgentHost(organizationId, hostId) {
+  return apiFetch(`/organizations/${organizationId}/agent-hosts/${hostId}`, { method: "DELETE" });
+}
