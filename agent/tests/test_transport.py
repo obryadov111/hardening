@@ -28,6 +28,7 @@ class Server:
         outer = self
         self.status, self.received, self.keys = 200, [], []
         self.enroll_status, self.enrolled, self.dead_keys = 201, [], set()
+        self.next_statuses = []  # коды для очередных POST /api/ingest до self.status (перегрузка)
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args):
@@ -56,9 +57,16 @@ class Server:
                 if key in outer.dead_keys:
                     self._reply(401, {"detail": "Недействительный ключ агента"})
                     return
+                status = outer.next_statuses.pop(0) if outer.next_statuses else outer.status
+                if status == 429:
+                    self.send_response(429)
+                    self.send_header("Retry-After", "7")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
                 outer.received.append(body)
                 outer.keys.append(key)
-                self._reply(outer.status, {"ok": outer.status == 200})
+                self._reply(status, {"ok": status == 200})
 
         self.httpd = HTTPServer(("127.0.0.1", 0), Handler)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -312,3 +320,42 @@ def test_pack_mode_fetches_manifests_with_host_key_alone(tmp_path, monkeypatch):
         collector.main(["--api-url", "https://audit.example.ru", "--environment", "prod", "--use-packs", "--pack-key", "k",
                         "--state-dir", str(tmp_path / "state")])
     assert used == ["host-key-1"]
+
+
+# ---------- перегрузка сервера ----------
+
+def test_overloaded_server_is_retried_with_a_pause(server, monkeypatch, capsys):
+    pauses = []
+    monkeypatch.setattr(collector.time, "sleep", pauses.append)
+    server.next_statuses = [429, 503]
+    conn = ServerConnection(server.url, "k", ca_file=CERT)
+    assert collector.send_ingest(conn, {"n": 1}) == {"ok": True}
+    assert len(server.received) == 2  # 429 — без записи, 503 и успешный — записаны тестовым сервером
+    # Retry-After: 7 меньше первой паузы агента — берётся пауза агента; разброс до +50 %
+    first, second = collector.RETRY_DELAYS[:2]
+    assert first <= pauses[0] <= first * 1.5 and second <= pauses[1] <= second * 1.5
+    assert "сервер занят (HTTP 429)" in capsys.readouterr().err
+
+
+def test_overload_that_does_not_pass_goes_to_the_queue(server, monkeypatch):
+    server.status = 503
+    with pytest.raises(TransientError) as exc:
+        collector.send_ingest(ServerConnection(server.url, "k", ca_file=CERT), {"n": 1})
+    assert exc.value.code == 503
+
+
+def test_rejection_is_not_retried(server, monkeypatch):
+    pauses = []
+    monkeypatch.setattr(collector.time, "sleep", pauses.append)
+    server.status = 422
+    with pytest.raises(RejectedError):
+        collector.send_ingest(ServerConnection(server.url, "k", ca_file=CERT), {"n": 1})
+    assert pauses == []
+
+
+def test_run_already_accepted_is_success(server, tmp_path, host_payload, capsys):
+    """Ответ на отчёт потерялся (504 под нагрузкой), повтор получил 409 «уже принят» — это успех, не ошибка."""
+    assert _run(server, tmp_path) == 0
+    server.status = 409
+    assert _run(server, tmp_path) == 0
+    assert "уже принят" in capsys.readouterr().err

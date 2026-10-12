@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import text
+from sqlalchemy import insert, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -196,17 +196,14 @@ def ingest_payload(
     asset = _get_or_create_asset(db, str(environment.id), payload.asset, payload.platform_tags)
 
     db.query(Software).filter(Software.asset_id == asset.id).delete()
-    for item in payload.software:
-        db.add(
-            Software(
-                asset_id=asset.id,
-                name=item.name,
-                version=item.version,
-                vendor=item.vendor,
-                category=item.category,
-                type=item.type,
-            )
-        )
+    if payload.software:
+        # Одним пакетным INSERT, а не объектами ORM: у сервера бывает полторы тысячи программ, и поштучный
+        # учёт объектов был основной ценой отчёта (нагрузочный тест: 1000 хостов за одним NAT).
+        db.execute(insert(Software), [
+            {"asset_id": asset.id, "name": item.name, "version": item.version, "vendor": item.vendor,
+             "category": item.category, "type": item.type}
+            for item in payload.software
+        ])
 
     collected_data = payload.facts
     if resolved:
@@ -269,6 +266,10 @@ def ingest_payload(
             )
         )
 
+    # Номер скана — по порядку в организации. Параллельные отчёты разных хостов одной организации берут его
+    # по очереди: блокировка до конца транзакции, иначе MAX + 1 выдавал одинаковые номера (нагрузочный тест —
+    # 772 скана, 110 разных номеров). Блокировка — как можно позже: тяжёлая часть отчёта уже сделана.
+    db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": f"scan_number:{organization_id}"})
     next_scan_number = (
         db.execute(
             text("SELECT COALESCE(MAX(scan_number), 0) + 1 FROM scan_snapshots WHERE organization_id = :org_id"),

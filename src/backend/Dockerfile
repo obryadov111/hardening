@@ -20,4 +20,9 @@ COPY alembic.ini .
 COPY --from=agent probes.py /app/agent/probes.py
 ENV HARDENING_AGENT_DIR=/app/agent
 
+# Два процесса uvicorn — по числу CPU контейнера (deploy/restart_backend.sh: --cpus 2): разбор отчёта агента
+# занимает процессор, и один процесс Python упирался в одно ядро (нагрузочный тест: 1000 хостов).
+# uvicorn берёт число процессов из WEB_CONCURRENCY; переопределяется при запуске контейнера.
+ENV WEB_CONCURRENCY=2
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

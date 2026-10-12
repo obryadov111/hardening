@@ -26,6 +26,7 @@ import hmac
 import http.client
 import json
 import os
+import random
 import re
 import socket
 import ssl
@@ -351,7 +352,25 @@ LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 class TransientError(Exception):
-    """Сервер недоступен или временно не принял данные — прогон стоит отложить в очередь."""
+    """Сервер недоступен или временно не принял данные — прогон стоит отложить в очередь.
+    code — HTTP-код (None — нет связи), retry_after — пауза, которую просит сервер (Retry-After), в секундах."""
+
+    def __init__(self, message: str, code: "int | None" = None, retry_after: "float | None" = None):
+        super().__init__(message)
+        self.code, self.retry_after = code, retry_after
+
+
+# Повторы при перегрузке сервера: паузы (с), к каждой — случайная добавка до 50 % — всего до ~10 мин (худший
+# случай нагрузочного теста — 1000 хостов разом за одним NAT — очередь сервера рассасывается за ~9 мин); потом — очередь.
+RETRY_CODES = (429, 502, 503, 504)
+RETRY_DELAYS = (15, 45, 120, 240)
+
+
+def _retry_after(headers) -> "float | None":
+    try:
+        return min(float(headers.get("Retry-After")), 300.0)
+    except (TypeError, ValueError, AttributeError):
+        return None
 
 
 class RejectedError(Exception):
@@ -451,6 +470,21 @@ class ServerConnection:
         self.opener = urllib.request.build_opener(*handlers)
 
     def request(self, method: str, path: str, payload: "dict | None" = None) -> dict:
+        """Запрос к серверу. Перегрузка (429, 502–504: лимит запросов, перезапуск сервера) — несколько
+        повторов с паузой и случайным разбросом: тысяча хостов, получивших отказ одновременно, не должна
+        повторить запрос одновременно. Не помогло — TransientError, прогон уходит в очередь."""
+        for attempt, delay in enumerate((*RETRY_DELAYS, None)):
+            try:
+                return self._request_once(method, path, payload)
+            except TransientError as exc:
+                if delay is None or exc.code not in RETRY_CODES:
+                    raise
+                pause = max(exc.retry_after or 0, delay) * random.uniform(1.0, 1.5)
+                print(f"сервер занят (HTTP {exc.code}) — повтор через {pause:.0f} с ({attempt + 1}/{len(RETRY_DELAYS)})",
+                      file=sys.stderr)
+                time.sleep(pause)
+
+    def _request_once(self, method: str, path: str, payload: "dict | None" = None) -> dict:
         headers = {"X-Agent-Api-Key": self.api_key or ""}
         data = None
         if payload is not None:
@@ -471,7 +505,7 @@ class ServerConnection:
             detail = detail[:500]
             # 408/429/5xx — сервер перегружен или перезапускается; прочее (401 ключ, 422 формат) — отказ по существу
             if exc.code in (408, 429) or exc.code >= 500:
-                raise TransientError(f"HTTP {exc.code} — {detail}") from None
+                raise TransientError(f"HTTP {exc.code} — {detail}", exc.code, _retry_after(exc.headers)) from None
             raise RejectedError(exc.code, detail) from None
         except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
             reason = getattr(exc, "reason", exc)
@@ -930,7 +964,14 @@ def main(argv: "list[str] | None" = None) -> int:
         sent = spool_flush(conn, args.spool_dir, log) if not args.no_spool else 0
         if sent:
             log(f"дослано из очереди: {sent}")
-        return send_ingest(conn, payload)
+        try:
+            return send_ingest(conn, payload)
+        except RejectedError as exc:
+            if exc.code != 409:
+                raise
+            # Сервер принял прогон, но ответ не дошёл (504 под нагрузкой), а повтор получил «уже принят»
+            log(f"прогон {payload['run_id']} уже принят сервером")
+            return {"run_id": payload["run_id"], "status": "already-accepted"}
 
     asset = payload.get("asset") or {}
     try:
