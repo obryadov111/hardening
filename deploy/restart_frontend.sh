@@ -31,6 +31,10 @@ PUBLISH="${FRONTEND_PUBLISH:-80}"
 
 MOUNTS=()
 PORTS=(-p "${PUBLISH}:8080")
+# Агент для скачивания (deploy/publish_agent.sh): каталог монтируется всегда, пустой — пока агент не опубликован.
+DOWNLOADS="deploy/generated/downloads"
+mkdir -p "$DOWNLOADS"
+MOUNTS+=(-v "$(pwd)/${DOWNLOADS}:/usr/share/nginx/downloads:ro")
 if [[ -d "$ACME_WEBROOT" ]]; then
   MOUNTS+=(-v "${ACME_WEBROOT}:/var/www/acme:ro")
 fi

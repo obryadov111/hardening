@@ -6,7 +6,7 @@ import OrgGate from "../components/OrgGate";
 import ErrorState from "../components/ui/ErrorState";
 import { Skeleton } from "../components/ui/Skeleton";
 import { useOrganization } from "../context/OrganizationContext";
-import { createAgentKey, getAgentKeys, revokeAgentKey, uploadAgentReport } from "../api/agentKeys";
+import { createAgentKey, getAgentDownloads, getAgentKeys, revokeAgentKey, uploadAgentReport } from "../api/agentKeys";
 import { getCurrentUserRoleInOrganization } from "../api/users";
 import { formatDate, formatDateTime } from "../utils/datetime";
 
@@ -40,20 +40,110 @@ function CopyBlock({ text }) {
   );
 }
 
+/** Адрес сервера для агента: из опубликованного агента (домен HTTPS), иначе — адрес, с которого открыт интерфейс. */
+function serverUrl(downloads) {
+  return downloads?.server_url || window.location.origin;
+}
+
+const PIN_HINT = "# закрепление ключа сервера (агент: --show-server-pin): HARDENING_PIN_SHA256=sha256//...";
+
 /** Настройки агента для объекта: файл окружения службы systemd (/etc/hardening-agent/<имя>.env). */
-function agentConfig(key, publicKey) {
+function agentConfig(key, publicKey, downloads) {
   return [
-    `HARDENING_API_URL=${window.location.origin}`,
+    `HARDENING_API_URL=${serverUrl(downloads)}`,
     `HARDENING_AGENT_API_KEY=${key}`,
     publicKey ? `HARDENING_PACK_PUBLIC_KEY=${publicKey}` : "# HARDENING_PACK_PUBLIC_KEY — ключ подписи Ed25519 на сервере не настроен",
+    downloads?.server_pin ? `HARDENING_PIN_SHA256=${downloads.server_pin}` : PIN_HINT,
     "HARDENING_ENVIRONMENT=prod",
     "HARDENING_CRITICALITY=medium",
     "HARDENING_SCAN_LABEL=плановый",
     "# при TLS-инспекции или своём корневом сертификате: HARDENING_CA_FILE=/etc/hardening-agent/ca.pem",
-    "# закрепление ключа сервера (агент: --show-server-pin): HARDENING_PIN_SHA256=sha256//...",
     "# прокси: HARDENING_PROXY=http://proxy.corp:3128",
     "HARDENING_EXTRA_ARGS=",
   ].join("\n");
+}
+
+/** Те же настройки для Windows: переменные среды SYSTEM и ежедневная задача планировщика (PowerShell от администратора). */
+function windowsSetup(key, publicKey, downloads) {
+  const exe = "C:\\Program Files\\Hardening\\hardening-agent.exe";
+  return [
+    `setx /M HARDENING_AGENT_API_KEY "${key}"`,
+    publicKey ? `setx /M HARDENING_PACK_PUBLIC_KEY "${publicKey}"` : "# HARDENING_PACK_PUBLIC_KEY — ключ подписи Ed25519 на сервере не настроен",
+    downloads?.server_pin ? `setx /M HARDENING_PIN_SHA256 "${downloads.server_pin}"` : PIN_HINT,
+    '# прокси: setx /M HARDENING_PROXY "http://proxy.corp:3128"',
+    // Register-ScheduledTask, а не schtasks /TR: путь с пробелом и аргументы — отдельно, без вложенных кавычек,
+    // которые PowerShell передаёт schtasks неправильно.
+    `$action = New-ScheduledTaskAction -Execute "${exe}" -Argument "--api-url ${serverUrl(downloads)} --environment prod --use-packs"`,
+    'Register-ScheduledTask -TaskName "Hardening agent" -Action $action -Trigger (New-ScheduledTaskTrigger -Daily -At 03:00) -User SYSTEM -RunLevel Highest -Force | Out-Null',
+    'Start-ScheduledTask -TaskName "Hardening agent"',
+  ].join("\n");
+}
+
+function formatSize(bytes) {
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} МБ` : `${Math.max(1, Math.round(bytes / 1024))} КБ`;
+}
+
+/** Скачивание агента и установка на объекте: команды проверяют SHA-256 скачанного файла. */
+function AgentDownloads({ downloads }) {
+  if (!downloads?.files?.length) {
+    return (
+      <p className="text-sm text-amber-300">
+        Агент на сервере не опубликован — на сервере: <code>deploy/publish_agent.sh</code>.
+      </p>
+    );
+  }
+  const base = `${serverUrl(downloads)}/downloads`;
+  const linux = downloads.files.find((f) => f.platform === "linux");
+  const windows = downloads.files.find((f) => f.platform === "windows");
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-3 md:grid-cols-2">
+        {[linux, windows].filter(Boolean).map((file) => (
+          <div key={file.name} className="rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="font-medium text-white">{file.platform === "linux" ? "Linux (systemd, Python 3.6+)" : "Windows (Python не нужен)"}</div>
+                <div className="text-xs text-zinc-500">версия {file.version || "—"} · {formatSize(file.size)}</div>
+              </div>
+              <a href={`/downloads/${file.name}`} download className={BUTTON}>Скачать</a>
+            </div>
+            <div className="mt-3 break-all font-mono text-[11px] text-zinc-400">SHA-256: {file.sha256}</div>
+          </div>
+        ))}
+      </div>
+      {linux ? (
+        <div>
+          <p className="mb-2 text-xs text-zinc-400">Linux — на хосте заказчика, от root. Затем вставьте настройки из нового ключа агента:</p>
+          <CopyBlock
+            text={[
+              `curl -fsSLO ${base}/${linux.name}`,
+              `echo "${linux.sha256}  ${linux.name}" | sha256sum -c`,
+              `tar xzf ${linux.name} && cd hardening-agent && sudo deploy/install.sh`,
+              "sudo nano /etc/hardening-agent/local.env   # настройки из «Новый ключ агента»",
+              "sudo systemctl start hardening-agent@local.service && journalctl -u hardening-agent@local -n 30",
+              "sudo systemctl enable --now hardening-agent@local.timer   # ежедневно",
+            ].join("\n")}
+          />
+        </div>
+      ) : null}
+      {windows ? (
+        <div>
+          <p className="mb-2 text-xs text-zinc-400">Windows — PowerShell от администратора. Затем команды из нового ключа агента:</p>
+          <CopyBlock
+            text={[
+              'mkdir -Force "C:\\Program Files\\Hardening" | Out-Null; cd "C:\\Program Files\\Hardening"',
+              `Invoke-WebRequest ${base}/${windows.name} -OutFile ${windows.name}`,
+              `if ((Get-FileHash ${windows.name} -Algorithm SHA256).Hash -ne "${windows.sha256.toUpperCase()}") { Remove-Item ${windows.name}; throw "SHA-256 не совпал" }`,
+            ].join("\n")}
+          />
+        </div>
+      ) : null}
+      <p className="text-xs text-zinc-500">
+        Новые ОС и проверки приходят агентам с сервера сами (паки) — переустанавливать агент не нужно. Новая версия агента
+        нужна, только когда меняется он сам.
+      </p>
+    </div>
+  );
 }
 
 /**
@@ -65,6 +155,7 @@ export default function AgentKeys() {
     useOrganization();
 
   const [data, setData] = useState({ keys: [], pack_public_key: null });
+  const [downloads, setDownloads] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -88,7 +179,9 @@ export default function AgentKeys() {
       const role = await getCurrentUserRoleInOrganization(selectedOrganizationId).catch(() => null);
       setIsAdmin(role === "admin");
       if (role !== "admin") return;
-      setData(await getAgentKeys(selectedOrganizationId));
+      const [keys, published] = await Promise.all([getAgentKeys(selectedOrganizationId), getAgentDownloads().catch(() => null)]);
+      setData(keys);
+      setDownloads(published);
     } catch (error) {
       setLoadError(error.message);
     } finally {
@@ -167,6 +260,10 @@ export default function AgentKeys() {
 
         {isAdmin && !loading ? (
           <>
+            <AppCard title="Скачать агент" subtitle="Один агент на хост: он сам забирает подписанные проверки с сервера и отправляет результаты">
+              <AgentDownloads downloads={downloads} />
+            </AppCard>
+
             <AppCard title="Новый ключ агента" subtitle="Ключ показывается один раз — сервер хранит только его хэш">
               <form onSubmit={create} className="grid gap-4 md:grid-cols-[1fr_200px_auto] md:items-end">
                 <label>
@@ -197,7 +294,9 @@ export default function AgentKeys() {
                     Настройки агента на объекте (Linux — файл <code>/etc/hardening-agent/&lt;имя&gt;.env</code> для службы{" "}
                     <code>hardening-agent@&lt;имя&gt;</code>; Windows — те же переменные для задачи планировщика):
                   </p>
-                  <CopyBlock text={agentConfig(created.key, data.pack_public_key)} />
+                  <CopyBlock text={agentConfig(created.key, data.pack_public_key, downloads)} />
+                  <p className="text-xs text-zinc-400">Windows — PowerShell от администратора, после скачивания агента:</p>
+                  <CopyBlock text={windowsSetup(created.key, data.pack_public_key, downloads)} />
                   <button type="button" onClick={() => setCreated(null)} className="text-xs text-zinc-400 underline hover:text-white">
                     Скрыть ключ
                   </button>

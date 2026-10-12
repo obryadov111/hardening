@@ -23,3 +23,11 @@ export async function uploadAgentReport(organizationId, file) {
   body.append("file", file);
   return apiFetch(`/organizations/${organizationId}/agent-reports`, { method: "POST", body });
 }
+
+/** Опубликованный агент (deploy/publish_agent.sh): версии, SHA-256, адрес и отпечаток ключа сервера.
+ *  Статический файл nginx, не API; null — агент на сервере ещё не опубликован. */
+export async function getAgentDownloads() {
+  const response = await fetch("/downloads/version.json", { cache: "no-store" });
+  if (!response.ok) return null;
+  return response.json().catch(() => null);
+}

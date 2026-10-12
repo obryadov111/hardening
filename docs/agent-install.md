@@ -18,10 +18,17 @@
 3. Отпечаток ключа сервера (`HARDENING_PIN_SHA256`) — его печатает `deploy/enable_https.sh` на сервере
    или агент: `python3 collector.py --api-url https://audit.<домен> --environment x --show-server-pin`.
 
+Агент скачивается с сервера: `https://audit.<домен>/downloads/` (публикует аудитор командой
+`deploy/publish_agent.sh`). Готовые команды с адресом, контрольной суммой и настройками — в интерфейсе,
+страница «Агенты»: «Скачать агент» и «Новый ключ агента». Новые ОС и проверки агент получает с сервера сам —
+переустанавливать его нужно, только когда выходит новая версия самого агента.
+
 ## Linux (systemd)
 
 ```bash
-git clone … && cd hardening/agent        # или скопировать каталог agent/
+curl -fsSLO https://audit.<домен>/downloads/hardening-agent-linux.tar.gz
+echo "<SHA-256 из интерфейса>  hardening-agent-linux.tar.gz" | sha256sum -c
+tar xzf hardening-agent-linux.tar.gz && cd hardening-agent
 sudo deploy/install.sh                   # экземпляр local — этот хост
 sudo nano /etc/hardening-agent/local.env # вставить файл настроек из интерфейса
 sudo systemctl start hardening-agent@local.service && journalctl -u hardening-agent@local -n 30
@@ -32,17 +39,23 @@ sudo systemctl enable --now hardening-agent@local.timer   # ежедневно
 
 ## Windows
 
-`hardening-agent.exe` — артефакт `hardening-agent-exe` workflow **Windows packs** (Python на хосте не нужен).
+`hardening-agent.exe` — Python на хосте не нужен (собирается в CI, workflow **Windows packs**). PowerShell от
+администратора:
 
 ```powershell
-mkdir "C:\Program Files\Hardening"; copy hardening-agent.exe "C:\Program Files\Hardening\"
+mkdir -Force "C:\Program Files\Hardening" | Out-Null; cd "C:\Program Files\Hardening"
+Invoke-WebRequest https://audit.<домен>/downloads/hardening-agent.exe -OutFile hardening-agent.exe
+(Get-FileHash hardening-agent.exe -Algorithm SHA256).Hash   # сверить с SHA-256 из интерфейса
 setx /M HARDENING_AGENT_API_KEY "<ключ агента>"
 setx /M HARDENING_PACK_PUBLIC_KEY "<открытый ключ>"
 setx /M HARDENING_PIN_SHA256 "sha256//<отпечаток>"
 # при прокси: setx /M HARDENING_PROXY "http://proxy.corp:3128"
-schtasks /Create /TN "Hardening agent" /RU SYSTEM /SC DAILY /ST 03:00 /RL HIGHEST `
-  /TR "\"C:\Program Files\Hardening\hardening-agent.exe\" --api-url https://audit.<домен> --environment prod --use-packs"
-schtasks /Run /TN "Hardening agent"
+# Register-ScheduledTask, а не schtasks /TR: PowerShell неправильно передаёт schtasks вложенные кавычки пути с пробелом
+$action = New-ScheduledTaskAction -Execute "C:\Program Files\Hardening\hardening-agent.exe" `
+  -Argument "--api-url https://audit.<домен> --environment prod --use-packs"
+Register-ScheduledTask -TaskName "Hardening agent" -Action $action -Trigger (New-ScheduledTaskTrigger -Daily -At 03:00) `
+  -User SYSTEM -RunLevel Highest -Force | Out-Null
+Start-ScheduledTask -TaskName "Hardening agent"
 ```
 
 Очередь неотправленных прогонов — `C:\ProgramData\HardeningAgent\spool`.
