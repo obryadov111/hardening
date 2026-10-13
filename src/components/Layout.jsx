@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { useOrganization } from "../context/OrganizationContext";
 import Sidebar from "./Sidebar";
@@ -24,7 +24,9 @@ export default function Layout() {
           <Topbar onMenuClick={() => setMobileNavOpen(true)} />
 
           <main className="flex-1 overflow-y-auto p-6">
-            <Outlet key={pageKey} />
+            <Suspense fallback={<div className="text-zinc-400">Загрузка...</div>}>
+              <Outlet key={pageKey} />
+            </Suspense>
           </main>
         </div>
       </div>

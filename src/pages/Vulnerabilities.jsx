@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import AppCard from "../components/ui/AppCard";
 import StatCard from "../components/ui/StatCard";
 import EmptyState from "../components/ui/EmptyState";
@@ -18,6 +18,7 @@ const LEVELS = [
 const LEVEL_LABEL = Object.fromEntries(LEVELS.map((l) => [l.key, l.label.toLowerCase()]));
 const INPUT = "rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500";
 const PAGE = 100;
+const PAGER = "rounded-xl border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40";
 
 // Статус находки по данным дистрибутива (OVAL Canonical); null — не Ubuntu или данные не загружены.
 const DISTRO = {
@@ -60,47 +61,38 @@ function bduLink(bduId) {
 export default function Vulnerabilities() {
   const { selectedOrganization, selectedOrganizationId, loading: orgLoading, hasOrganizations, error: orgError } = useOrganization();
 
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  // Находок на тысяче хостов — сотни тысяч: фильтры, поиск и страницы — на сервере.
+  const [result, setResult] = useState({ key: null, data: null, error: "" });
   const [level, setLevel] = useState("");
   // По умолчанию исправленное в дистрибутиве скрыто: уязвимости на активе уже нет.
   const [distroFilter, setDistroFilter] = useState("open");
   const [search, setSearch] = useState("");
-  const [shown, setShown] = useState(PAGE);
+  const [query, setQuery] = useState("");
+  const [offset, setOffset] = useState(0);
 
   useEffect(() => {
-    async function loadData() {
-      if (!selectedOrganizationId) {
-        setData(null);
-        return;
-      }
-      try {
-        setLoading(true);
-        setError("");
-        setData(await getVulnerabilitiesByOrganization(selectedOrganizationId));
-      } catch (err) {
-        setError(err.message);
-        setData(null);
-      } finally {
-        setLoading(false);
-      }
-    }
-    if (!orgLoading) loadData();
-  }, [selectedOrganizationId, orgLoading]);
+    const timer = setTimeout(() => {
+      setQuery(search);
+      setOffset(0);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
 
-  const items = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return (data?.items || []).filter((item) => {
-      if (level && item.level !== level) return false;
-      const status = item.distro?.status || "not_checked";
-      if (distroFilter === "open" && status === "fixed") return false;
-      if (distroFilter !== "open" && distroFilter !== "all" && status !== distroFilter) return false;
-      if (!query) return true;
-      return [item.bdu_id, item.name, item.package, item.product, item.asset?.hostname, ...(item.cves || [])]
-        .some((value) => (value || "").toLowerCase().includes(query));
-    });
-  }, [data, level, search, distroFilter]);
+  const requestKey = JSON.stringify([selectedOrganizationId, level, distroFilter, query, offset]);
+  const loading = result.key !== requestKey;
+
+  useEffect(() => {
+    if (orgLoading || !selectedOrganizationId) return undefined;
+    let cancelled = false;
+    getVulnerabilitiesByOrganization(selectedOrganizationId, { level, distro: distroFilter, q: query, limit: PAGE, offset })
+      .then((data) => { if (!cancelled) setResult({ key: requestKey, data, error: "" }); })
+      .catch((err) => { if (!cancelled) setResult((prev) => ({ ...prev, key: requestKey, error: err.message })); });
+    return () => { cancelled = true; };
+  }, [selectedOrganizationId, orgLoading, level, distroFilter, query, offset, requestKey]);
+
+  const { data, error } = result;
+  const items = data?.items || [];
+  const found = data?.found ?? 0;
 
   return (
     <OrgGate title="Уязвимости ПО" orgLoading={orgLoading} orgError={orgError} hasOrganizations={hasOrganizations}>
@@ -126,7 +118,7 @@ export default function Vulnerabilities() {
 
         <div className="grid gap-4 md:grid-cols-4">
           {LEVELS.map((l) => (
-            <StatCard key={l.key} label={l.label} value={data?.summary?.[l.key] ?? 0} hint={l.hint} tone={l.tone} loading={loading} />
+            <StatCard key={l.key} label={l.label} value={data?.summary?.[l.key] ?? 0} hint={l.hint} tone={l.tone} loading={loading && !data} />
           ))}
         </div>
 
@@ -165,11 +157,11 @@ export default function Vulnerabilities() {
 
         <AppCard title="Находки" subtitle="Сначала самые критичные; номер БДУ ведёт на страницу уязвимости на сайте ФСТЭК, USN — на бюллетень Ubuntu">
           <div className="mb-4 flex flex-wrap gap-3">
-            <select aria-label="Уровень" className={INPUT} value={level} onChange={(e) => { setLevel(e.target.value); setShown(PAGE); }}>
+            <select aria-label="Уровень" className={INPUT} value={level} onChange={(e) => { setLevel(e.target.value); setOffset(0); }}>
               <option value="">Все уровни</option>
               {LEVELS.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
             </select>
-            <select aria-label="Статус в Ubuntu" className={INPUT} value={distroFilter} onChange={(e) => { setDistroFilter(e.target.value); setShown(PAGE); }}>
+            <select aria-label="Статус в Ubuntu" className={INPUT} value={distroFilter} onChange={(e) => { setDistroFilter(e.target.value); setOffset(0); }}>
               <option value="open">Без исправленных в Ubuntu</option>
               <option value="vulnerable">Уязвимо: исправление не установлено</option>
               <option value="unfixed">Исправления нет</option>
@@ -183,12 +175,12 @@ export default function Vulnerabilities() {
               className={`${INPUT} min-w-[18rem]`}
               placeholder="Поиск: пакет, BDU, CVE, актив…"
               value={search}
-              onChange={(e) => { setSearch(e.target.value); setShown(PAGE); }}
+              onChange={(e) => setSearch(e.target.value)}
             />
-            <span className="self-center text-sm text-zinc-500">Найдено: {items.length}</span>
+            <span className="self-center text-sm text-zinc-500" aria-live="polite">Найдено: {found}</span>
           </div>
 
-          {loading ? (
+          {loading && !data ? (
             <SkeletonTable rows={8} cols={8} />
           ) : items.length === 0 ? (
             <EmptyState
@@ -196,7 +188,7 @@ export default function Vulnerabilities() {
               description={data?.import ? "По выбранным условиям ничего не найдено." : "Сначала загрузите копию БДУ."}
             />
           ) : (
-            <div className="overflow-x-auto">
+            <div className={`overflow-x-auto ${loading ? "opacity-60" : ""}`}>
               <table className="min-w-full text-sm">
                 <thead className="border-b border-zinc-800 text-left text-zinc-400">
                   <tr>
@@ -210,7 +202,7 @@ export default function Vulnerabilities() {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.slice(0, shown).map((item) => {
+                  {items.map((item) => {
                     const crit = item.criticality;
                     return (
                       <tr key={`${item.asset.id}:${item.bdu_id}`} className="border-b border-zinc-800/60 align-top text-zinc-200">
@@ -246,10 +238,14 @@ export default function Vulnerabilities() {
                   })}
                 </tbody>
               </table>
-              {items.length > shown ? (
-                <div className="mt-4 text-center">
-                  <button type="button" onClick={() => setShown((n) => n + PAGE)} className="rounded-xl border border-zinc-700 px-4 py-2 text-sm text-white hover:bg-zinc-800">
-                    Показать ещё ({items.length - shown})
+              {found > PAGE ? (
+                <div className="mt-4 flex items-center gap-3 text-sm text-zinc-400">
+                  <button type="button" className={PAGER} disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - PAGE))}>
+                    Назад
+                  </button>
+                  <span>{offset + 1}–{Math.min(offset + PAGE, found)} из {found}</span>
+                  <button type="button" className={PAGER} disabled={offset + PAGE >= found || loading} onClick={() => setOffset(offset + PAGE)}>
+                    Вперёд
                   </button>
                 </div>
               ) : null}

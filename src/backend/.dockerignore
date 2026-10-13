@@ -1,0 +1,12 @@
+# Контекст сборки образа бэкенда: секреты, окружение и тесты в него не попадают
+.env
+.env.*
+!.env.example
+.venv
+tests
+pack_tests
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+**/__pycache__

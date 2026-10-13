@@ -1,5 +1,6 @@
 """Потенциальные уязвимости ПО по БДУ ФСТЭК: смотрят участники организации.
 Как сопоставляется и считается — app/services/bdu/."""
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -16,7 +17,16 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 def list_vulnerabilities(
     organization_id: str,
     asset_id: UUID | None = Query(None, description="Только этот актив"),
+    level: Literal["", "critical", "high", "medium", "low", "unscored"] = "",
+    distro: Literal["all", "open", "vulnerable", "unfixed", "fixed", "unknown", "not_checked"] = Query(
+        "all", description="Статус по данным Ubuntu; open — всё, кроме исправленного в дистрибутиве"),
+    q: str = Query("", max_length=200, description="Номер БДУ, CVE, пакет, продукт, имя хоста"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     _: User = Depends(require_org_access),
     db: Session = Depends(get_db),
 ):
-    return organization_vulnerabilities(db, organization_id, str(asset_id) if asset_id else None)
+    return organization_vulnerabilities(
+        db, organization_id, str(asset_id) if asset_id else None,
+        level=level or None, distro=distro, q=q, limit=limit, offset=offset,
+    )

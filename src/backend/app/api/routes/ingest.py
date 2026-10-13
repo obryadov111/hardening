@@ -196,6 +196,8 @@ def ingest_payload(
     asset = _get_or_create_asset(db, str(environment.id), payload.asset, payload.platform_tags)
 
     db.query(Software).filter(Software.asset_id == asset.id).delete()
+    # Находки БДУ актива посчитаны по прежнему списку ПО — пересчитаются при следующем открытии (bdu/matching.py)
+    db.execute(text("DELETE FROM asset_vulnerability_state WHERE asset_id = :a"), {"a": asset.id})
     if payload.software:
         # Одним пакетным INSERT, а не объектами ORM: у сервера бывает полторы тысячи программ, и поштучный
         # учёт объектов был основной ценой отчёта (нагрузочный тест: 1000 хостов за одним NAT).

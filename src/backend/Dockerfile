@@ -25,4 +25,9 @@ ENV HARDENING_AGENT_DIR=/app/agent
 # uvicorn берёт число процессов из WEB_CONCURRENCY; переопределяется при запуске контейнера.
 ENV WEB_CONCURRENCY=2
 
+# Не root: процесс веб-сервера не может изменить свой код и образ (проверка docker.no_root_user_explicit
+# нашего же пака docker). Записывать ему некуда, кроме /tmp (импорт БДУ — deploy/update_bdu.sh).
+RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin app
+USER 10001
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

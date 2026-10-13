@@ -16,6 +16,7 @@ V = Icvss × Iinfr × (Iat + Iimp)
 """
 import re
 from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
 
 # K — тип компонента ИС.
 COMPONENT_K = {
@@ -77,6 +78,15 @@ def share_l(affected: int, total: int) -> float:
     return 0.5
 
 
+def _d(value) -> Decimal:
+    return Decimal(str(value))
+
+
+def round_half_up(value, digits: int) -> float:
+    """Округление половины вверх, как round(numeric) в PostgreSQL."""
+    return float(_d(value).quantize(Decimal(1).scaleb(-digits), rounding=ROUND_HALF_UP))
+
+
 def level_of(v: float) -> str:
     if v > 8.0:
         return "critical"
@@ -111,9 +121,11 @@ def criticality(
         icvss, cvss_version = cvss2, "2"
     else:
         return None
+    # Точная десятичная арифметика, как numeric в PostgreSQL, где V считается для страницы «Уязвимости ПО»
+    # (matching.py): в двоичной плавающей точке 7,5 × 0,98 × 0,9 = 6,6149999… и округлялось бы до 6,61, а не 6,62.
     k = COMPONENT_K.get((asset_type or "").lower(), COMPONENT_K_DEFAULT)
-    iinfr = 0.5 * k + 0.2 * share_l(affected_assets, total_assets) + 0.3 * (1.1 if internet_facing else 0.6)
+    iinfr = _d(0.5) * _d(k) + _d(0.2) * _d(share_l(affected_assets, total_assets)) + _d(0.3) * _d(1.1 if internet_facing else 0.6)
     exploitation, iat = exploitation_of(exploit_status, incident)
     impact, iimp = impact_of(name)
-    v = round(icvss * iinfr * (iat + iimp), 2)
-    return Criticality(v, level_of(v), icvss, cvss_version, round(iinfr, 3), iat, iimp, impact, exploitation)
+    v = round_half_up(_d(icvss) * iinfr * (_d(iat) + _d(iimp)), 2)
+    return Criticality(v, level_of(v), icvss, cvss_version, round_half_up(iinfr, 3), iat, iimp, impact, exploitation)

@@ -137,11 +137,18 @@ python3 agent/collector.py --api-url https://… --environment net --use-packs \
 cd src/backend && DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5433/app_test_db .venv/bin/pytest tests
 pytest agent/tests                                                    # агент
 cd src/backend && python -m app.commands.pack validate && python -m app.commands.pack test   # паки
-npm run lint && npm run build                                         # интерфейс
+npm run lint && npm run test:unit && npm run build                    # интерфейс: линтер, утилиты, сборка
+
+# сквозные тесты интерфейса (Playwright): бэкенд и Vite поднимаются сами, БД — своя одноразовая,
+# не та, что у pytest (засев стирает её): каждая страница, кнопка и роль, ~125 тестов
+E2E_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5433/app_e2e_db npm run test:e2e
 ```
 
-CI на каждый push: тесты сервера и агента, сборка интерфейса, агент внутри 16 Linux-систем и на
-настоящих Windows Server 2022 / 2025.
+Нагрузка: `tools/loadtest/ui_load.py` — засев N хостов (ПО как на хосте, настоящие пробы агента) и замер
+API каждой страницы; приём отчётов от 1000 хостов — заметка «Агент на 1000+ хостов» в репозитории диплома.
+
+CI на каждый push: тесты сервера (ruff, pytest) и агента, линтер, юнит-тесты и сборка интерфейса, сквозные
+тесты в Chromium, shellcheck скриптов, агент внутри 16 Linux-систем и на настоящих Windows Server 2022 / 2025.
 
 ## Развёртывание
 

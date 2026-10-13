@@ -47,11 +47,13 @@ function Details({ item }) {
     );
   }
   if (!item.checks.length) return item.note ? <div className="text-xs text-zinc-500">{item.note}</div> : null;
+  // Сервер присылает счётчики по всем проверкам и первые из них (сначала нарушения): на тысяче хостов их тысячи.
+  const counts = item.check_counts || { total: item.checks.length, fail: item.checks.filter((c) => c.status === "fail").length };
   return (
     <details className="text-xs">
       <summary className="cursor-pointer text-zinc-400 hover:text-white">
-        Проверок: {item.checks.length}
-        {item.checks.some((c) => c.status === "fail") ? `, нарушено: ${item.checks.filter((c) => c.status === "fail").length}` : ""}
+        Проверок: {counts.total}
+        {counts.fail ? `, нарушено: ${counts.fail}` : ""}
       </summary>
       <ul className="mt-2 space-y-1">
         {item.checks.map((c) => (
@@ -62,6 +64,12 @@ function Details({ item }) {
           </li>
         ))}
       </ul>
+      {counts.total > item.checks.length ? (
+        <div className="mt-2 text-zinc-500">
+          Показаны первые {item.checks.length} из {counts.total}, сначала нарушения; все —{" "}
+          <Link to="/hardening" className="text-blue-300 hover:underline">на странице «Харденинг»</Link>.
+        </div>
+      ) : null}
     </details>
   );
 }

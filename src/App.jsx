@@ -1,25 +1,44 @@
+import { lazy } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Login from "./pages/Login";
 import { OrganizationProvider } from "./context/OrganizationContext";
-import OrganizationUsers from "./pages/OrganizationUsers";
-import AdminUsers from "./pages/AdminUsers";
 import ChangePassword from "./pages/ChangePassword";
 import TwoFactor from "./pages/TwoFactor";
-import Dashboard from "./pages/Dashboard";
-import Assets from "./pages/Assets";
-import AssetDetails from "./pages/AssetDetails";
-import Hardening from "./pages/Hardening";
-import Policies from "./pages/Policies";
-import Report from "./pages/Report";
-import SoftwareInventory from "./pages/SoftwareInventory";
-import Scans from "./pages/Scans";
-import OfflineScan from "./pages/OfflineScan";
-import AgentKeys from "./pages/AgentKeys";
-import ScanCompare from "./pages/ScanCompare";
-import Vulnerabilities from "./pages/Vulnerabilities";
-import FstecCoverage from "./pages/FstecCoverage";
+
+// Страницы — отдельными файлами сборки: при входе грузится только нужная (графики Recharts — на «Обзоре»).
+// После выкатки новой версии открытая вкладка просит файл страницы прежней сборки, которого на сервере уже
+// нет, — тогда страница один раз перезагружается и берёт новую сборку (повтор — только через 10 с: не по кругу).
+function page(load) {
+  return lazy(() =>
+    load().catch((error) => {
+      const last = Number(sessionStorage.getItem("chunk_reload_at") || 0);
+      if (Date.now() - last > 10_000) {
+        sessionStorage.setItem("chunk_reload_at", String(Date.now()));
+        window.location.reload();
+        return new Promise(() => {});
+      }
+      throw error;
+    }),
+  );
+}
+
+const OrganizationUsers = page(() => import("./pages/OrganizationUsers"));
+const AdminUsers = page(() => import("./pages/AdminUsers"));
+const Dashboard = page(() => import("./pages/Dashboard"));
+const Assets = page(() => import("./pages/Assets"));
+const AssetDetails = page(() => import("./pages/AssetDetails"));
+const Hardening = page(() => import("./pages/Hardening"));
+const Policies = page(() => import("./pages/Policies"));
+const Report = page(() => import("./pages/Report"));
+const SoftwareInventory = page(() => import("./pages/SoftwareInventory"));
+const Scans = page(() => import("./pages/Scans"));
+const OfflineScan = page(() => import("./pages/OfflineScan"));
+const AgentKeys = page(() => import("./pages/AgentKeys"));
+const ScanCompare = page(() => import("./pages/ScanCompare"));
+const Vulnerabilities = page(() => import("./pages/Vulnerabilities"));
+const FstecCoverage = page(() => import("./pages/FstecCoverage"));
 
 export default function App() {
   return (
@@ -52,7 +71,7 @@ export default function App() {
               <Route path="two-factor" element={<TwoFactor />} />
             </Route>
           </Route>
-          
+
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </OrganizationProvider>

@@ -199,6 +199,21 @@ test('навигация: каждый пункт бокового меню от
   await expect(page).toHaveURL(/\/dashboard$/)
 })
 
+test('файл страницы прежней сборки не найден — одна перезагрузка, и страница открывается', async ({ page }) => {
+  await loginAs(page, 'viewer')
+  await page.goto('/dashboard')
+  let failed = 0
+  // как после выкатки: открытая вкладка просит файл страницы, которого на сервере уже нет
+  await page.route(/\/src\/pages\/Hardening\.jsx/, (route) => {
+    if (failed++ === 0) return route.fulfill({ status: 404, body: 'Not Found' })
+    return route.fallback()
+  })
+  await page.getByRole('navigation', { name: 'Разделы' }).getByRole('link', { name: 'Харденинг' }).click()
+  await expect(page.getByRole('heading', { name: 'Харденинг', level: 1 })).toBeVisible()
+  expect(failed).toBe(2)  // первый запрос — 404, после перезагрузки — настоящий файл
+  errors.length = 0  // ошибка загрузки модуля в консоли — ожидаемая
+})
+
 test.describe('телефон', () => {
   test.use({ viewport: { width: 390, height: 844 } })
   test('меню открывается кнопкой, закрывается крестиком, фоном и переходом', async ({ page }) => {

@@ -9,3 +9,16 @@ src/backend/.venv
 src/backend/__pycache__
 src/backend/**/__pycache__
 src/backend/.pytest_cache
+
+# Сборке фронтенда (COPY . .) бэкенд, агент, тесты и секреты не нужны: раньше src/backend/.env
+# попадал в слой стадии сборки в кеше Docker.
+src/backend
+agent
+e2e
+tools
+docs
+.github
+deploy/generated
+deploy/certs
+**/.env
+**/.coverage

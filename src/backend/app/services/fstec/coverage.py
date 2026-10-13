@@ -15,10 +15,11 @@
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.services.bdu.matching import organization_vulnerabilities
+from app.services.bdu.matching import open_findings_by_product
 from app.services.fstec.catalog import CATALOG, SOURCE
 from app.services.packs.registry import PackRegistry
 
+CHECKS_SHOWN = 50
 STATUS_ORDER = ["violated", "accepted", "not_checked", "passed", "not_applied", "no_checks", "out"]
 
 
@@ -59,9 +60,8 @@ def organization_coverage(db: Session, organization_id: str, registry: PackRegis
             for item in _item_ids(check):
                 available.setdefault(item, set()).add(pack.pack)
 
-    vulnerabilities = organization_vulnerabilities(db, organization_id)
-    open_findings = [i for i in vulnerabilities["items"] if not (i["distro"] and i["distro"]["status"] == "fixed")]
-    installed = set(vulnerabilities["installed_products"])
+    vulnerabilities = open_findings_by_product(db, organization_id)
+    installed = vulnerabilities["installed_products"]
 
     sections, summary = [], {s: 0 for s in STATUS_ORDER}
     for section in CATALOG:
@@ -74,9 +74,9 @@ def organization_coverage(db: Session, organization_id: str, registry: PackRegis
                 entry["status"] = "not_applied"
                 entry["note"] = "на активах нет этого ПО (" + ", ".join(item.products) + ")"
             elif item.kind == "bdu":
-                related = [f for f in open_findings if not item.products or f["product"] in item.products]
-                levels = {lvl: sum(1 for f in related if f["level"] == lvl) for lvl in ("critical", "high", "medium", "low")}
-                entry["findings"] = {"total": len(related), **levels}
+                related = [(lvl, n) for product, lvl, n in vulnerabilities["open"] if not item.products or product in item.products]
+                levels = {lvl: sum(n for found, n in related if found == lvl) for lvl in ("critical", "high", "medium", "low")}
+                entry["findings"] = {"total": sum(n for _, n in related), **levels}
                 if vulnerabilities["import"] is None:
                     entry["status"] = "not_checked"
                     entry["note"] = "копия БДУ не загружена"
@@ -84,7 +84,12 @@ def organization_coverage(db: Session, organization_id: str, registry: PackRegis
                     entry["status"] = "violated" if related else "passed"
             else:
                 checks = results.get(item.code, [])
-                entry["checks"] = sorted(checks, key=lambda c: (c["status"] != "fail", c["check_id"], c["asset"]))
+                ordered = sorted(checks, key=lambda c: (c["status"] != "fail", c["status"] != "error", c["check_id"], c["asset"]))
+                # На тысяче хостов по пункту — тысячи проверок (6,6 МБ ответа): счётчики по всем, примеры — первые,
+                # сначала нарушения; полный список — на странице «Харденинг».
+                entry["checks"] = ordered[:CHECKS_SHOWN]
+                entry["check_counts"] = {s: sum(1 for c in checks if c["status"] == s) for s in ("fail", "accepted", "pass", "error")}
+                entry["check_counts"]["total"] = len(checks)
                 statuses = {c["status"] for c in checks}
                 if "fail" in statuses:
                     entry["status"] = "violated"

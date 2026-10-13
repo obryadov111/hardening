@@ -149,7 +149,10 @@ def measure(args) -> None:
             ("Сканирования: хост", f"/api/organizations/{org}/snapshots?host=host-0500"),
             ("Сравнение: список для выбора", f"/api/organizations/{org}/snapshots?limit=200"),
             ("Сравнение сканов", f"/api/snapshots/compare?before_snapshot_id={snapshot['previous_snapshot_id']}&after_snapshot_id={snapshot['id']}"),
-            ("Уязвимости ПО", f"/api/organizations/{org}/vulnerabilities"),
+            ("Уязвимости ПО", f"/api/organizations/{org}/vulnerabilities?distro=open"),
+            ("Уязвимости ПО: высокий уровень", f"/api/organizations/{org}/vulnerabilities?distro=open&level=high"),
+            ("Уязвимости ПО: поиск", f"/api/organizations/{org}/vulnerabilities?distro=all&q=openssl"),
+            ("Уязвимости ПО: дальняя страница", f"/api/organizations/{org}/vulnerabilities?distro=open&offset=50000"),
             ("Методика ФСТЭК", f"/api/organizations/{org}/fstec-coverage"),
             ("Агенты: ключи и хосты", f"/api/organizations/{org}/agent-keys"),
             ("Агенты: охват", f"/api/organizations/{org}/coverage"),
@@ -162,9 +165,14 @@ def measure(args) -> None:
             times, size, status = [], 0, None
             for _ in range(args.repeat):
                 started = time.perf_counter()
-                resp = client.get(path)
+                try:
+                    resp = client.get(path)
+                    size, status = len(resp.content), resp.status_code
+                except httpx.HTTPError as exc:  # процесс сервера упал или не уложился в таймаут
+                    size, status = 0, type(exc).__name__
                 times.append(time.perf_counter() - started)
-                size, status = len(resp.content), resp.status_code
+                if status != 200:
+                    break
             median = statistics.median(times)
             mark = "" if status == 200 else f"  HTTP {status}"
             print(f"{title:38} {median:10.2f} {max(times):8.2f} {size / 1024:8.0f} КБ{mark}")

@@ -1,4 +1,5 @@
 """БДУ ФСТЭК: версии, сопоставление пакетов, уровень критичности по методике, загрузка выгрузки, API."""
+import json
 import uuid
 import zipfile
 
@@ -7,6 +8,7 @@ from sqlalchemy import text
 
 from app.services.bdu.criticality import criticality, impact_of, level_of
 from app.services.bdu.importer import import_bdu
+from app.services.bdu.matching import LEVEL_ORDER, organization_vulnerabilities
 from app.services.bdu.products import not_compared_reason, product_for_package
 from app.services.bdu.ubuntu_oval import distro_status, import_oval, parse_oval, ubuntu_release
 from app.services.bdu.versions import compare, compare_deb, parse_bdu_version, upstream_version
@@ -330,3 +332,213 @@ def test_api_applies_ubuntu_status(client, db, bdu_loaded, org_with_host, oval_f
 def test_api_without_oval_leaves_findings_potential(client, bdu_loaded, org_with_host):
     body = client.get(f"/api/organizations/{org_with_host['id']}/vulnerabilities", headers=org_with_host["headers"]).json()
     assert body["items"][0]["distro"] is None and body["distro_summary"]["not_checked"] == 1
+
+
+# ---------- хранимые находки: формула V в SQL, пересчёт, страницы ----------
+
+PARITY_XML_TEMPLATE = """ <vul><identifier>BDU:2030-{n:05d}</identifier>
+  <name>{name}</name>
+  <vulnerable_software><soft><name>OpenSSH</name><vendor>OpenBSD</vendor><version>от 1.0 до 99.0</version></soft></vulnerable_software>
+  {cvss}<exploit_status>{exploit}</exploit_status><vul_incident>{incident}</vul_incident>
+ </vul>
+"""
+
+
+def _org_with_assets(db, make_org, specs):
+    """specs: [(hostname, asset_type, platform_tags, os)] — у каждого актива openssh 9.6p1."""
+    org_id = make_org(f"Parity {uuid.uuid4().hex[:6]}")
+    env_id = str(uuid.uuid4())
+    db.execute(text("INSERT INTO environments (id, organization_id, name) VALUES (:e, :o, 'prod')"), {"e": env_id, "o": org_id})
+    ids = []
+    for hostname, asset_type, tags, os_name in specs:
+        aid = str(uuid.uuid4())
+        db.execute(text("INSERT INTO assets (id, environment_id, hostname, asset_type, platform_tags, os) "
+                        "VALUES (:a, :e, :h, :t, CAST(:p AS jsonb), :os)"),
+                   {"a": aid, "e": env_id, "h": hostname, "t": asset_type, "p": json.dumps(tags), "os": os_name})
+        db.execute(text("INSERT INTO software (asset_id, name, version) VALUES (:a, 'openssh-server', '1:9.6p1-3ubuntu13.19')"),
+                   {"a": aid})
+        ids.append(aid)
+    db.commit()
+    return org_id, ids
+
+
+def test_sql_formula_matches_python_criticality_for_every_combination(db, tmp_path, make_org):
+    """V и уровень на странице считает SQL (страницы и сводка на тысячах находок) — ровно как criticality()."""
+    names = ["Уязвимость, позволяющая выполнить произвольный код", "Уязвимость, позволяющая вызвать отказ в обслуживании",
+             "Уязвимость, позволяющая раскрыть защищаемую информацию", "Уязвимость без понятных последствий",
+             "Межсайтовый скриптинг", "Уязвимость, позволяющая повысить свои привилегии"]
+    cvss_variants = ['<cvss3><vector score="{s}">AV:N</vector></cvss3>', '<cvss><vector score="{s}">AV:N</vector></cvss>', ""]
+    scores = ["9,8", "8,1", "7,5", "5,3", "4,3", "2,1", "0,1", "10"]
+    exploits = [("Существует", "Нет"), ("Существует в открытом доступе", "Да"), ("Данные уточняются", "")]
+    rows, n = [], 0
+    for name in names:
+        for cv in cvss_variants:
+            for score in scores:
+                for exploit, incident in exploits:
+                    n += 1
+                    rows.append(PARITY_XML_TEMPLATE.format(n=n, name=name, cvss=cv.format(s=score), exploit=exploit, incident=incident))
+    archive = tmp_path / "parity.xml"
+    archive.write_text('<?xml version="1.0" encoding="UTF-8"?><vulnerabilities>' + "".join(rows) + "</vulnerabilities>", encoding="utf-8")
+    import_bdu(db, archive)
+
+    # 7 активов разных типов, у части — доступ из интернета; доли поражённых активов — разные пороги L
+    specs = [("srv-a", "linux-server", [], "Ubuntu 22.04"), ("srv-b", "network-device", ["internet-facing"], "Cisco IOS"),
+             ("srv-c", "windows-client", [], "Windows 11"), ("srv-d", "storage", ["internet-facing"], None),
+             ("srv-e", "unknown-kind", [], None), ("srv-f", None, [], None), ("srv-g", "firewall", [], None)]
+    org_id, _ = _org_with_assets(db, make_org, specs)
+    body = organization_vulnerabilities(db, org_id, limit=500)
+    total_assets = len(specs)
+    bdu = {r.bdu_id: r for r in db.execute(text("SELECT * FROM bdu_vulnerabilities")).all()}
+    by_host = {h: (t, tags) for h, t, tags, _ in specs}
+    checked = 0
+    for start in range(0, body["found"], 500):
+        page = organization_vulnerabilities(db, org_id, limit=500, offset=start)
+        for item in page["items"]:
+            v = bdu[item["bdu_id"]]
+            asset_type, tags = by_host[item["asset"]["hostname"]]
+            expected = criticality(
+                cvss3=float(v.cvss3) if v.cvss3 is not None else None, cvss2=float(v.cvss2) if v.cvss2 is not None else None,
+                asset_type=asset_type, affected_assets=total_assets, total_assets=total_assets,
+                internet_facing="internet-facing" in tags, exploit_status=v.exploit_status, incident=v.incident, name=v.name,
+            )
+            if expected is None:
+                assert item["criticality"] is None and item["level"] is None
+            else:
+                assert item["criticality"]["v"] == expected.v and item["level"] == expected.level, (item, expected)
+                assert item["criticality"]["iinfr"] == expected.iinfr
+            checked += 1
+    assert checked == body["found"] == n * total_assets
+
+
+def test_share_of_affected_assets_changes_level_like_python(db, tmp_path, make_org):
+    """L — доля активов организации с уязвимостью: 1 из 20 (0,5), 3 из 20 (0,6), 11 из 20 (0,8), 15 из 20 (1,0)."""
+    archive = tmp_path / "one.xml"
+    archive.write_text('<?xml version="1.0" encoding="UTF-8"?><vulnerabilities>' + PARITY_XML_TEMPLATE.format(
+        n=1, name="Уязвимость, позволяющая выполнить произвольный код", cvss='<cvss3><vector score="8,8">AV:N</vector></cvss3>',
+        exploit="Существует", incident="") + "</vulnerabilities>", encoding="utf-8")
+    import_bdu(db, archive)
+    for affected in (1, 3, 11, 15):
+        specs = [(f"h{i}", "linux-server", [], None) for i in range(20)]
+        org_id, ids = _org_with_assets(db, make_org, specs)
+        db.execute(text("DELETE FROM software WHERE asset_id = ANY(CAST(:ids AS uuid[]))"), {"ids": ids[affected:]})
+        db.commit()
+        item = organization_vulnerabilities(db, org_id)["items"][0]
+        expected = criticality(cvss3=8.8, cvss2=None, asset_type="linux-server", affected_assets=affected, total_assets=20,
+                               internet_facing=False, exploit_status="Существует", incident="", name=item["name"])
+        assert (item["criticality"]["v"], item["level"]) == (expected.v, expected.level)
+
+
+def test_findings_are_recomputed_after_new_software_new_bdu_new_oval_and_os_change(client, db, bdu_loaded, org_with_host,
+                                                                                   oval_file, tmp_path):
+    url, headers = f"/api/organizations/{org_with_host['id']}/vulnerabilities", org_with_host["headers"]
+    first = client.get(url, headers=headers).json()
+    assert first["found"] == 1 and first["items"][0]["distro"] is None
+    computed = db.execute(text("SELECT computed_at FROM asset_vulnerability_state")).scalar()
+    # повторное чтение — без пересчёта
+    client.get(url, headers=headers)
+    assert db.execute(text("SELECT computed_at FROM asset_vulnerability_state")).scalar() == computed
+
+    # данные Ubuntu и ОС актива: статус дистрибутива появляется
+    db.execute(text("UPDATE assets SET os = 'Ubuntu 24.04.4 LTS' WHERE id = :a"), {"a": org_with_host["asset_id"]})
+    db.commit()
+    import_oval(db, "noble", oval_file)
+    assert client.get(url, headers=headers).json()["items"][0]["distro"]["status"] == "fixed"
+
+    # новая копия БДУ без этой уязвимости — находки исчезают
+    single = tmp_path / "other.xml"
+    single.write_text(SAMPLE_XML.replace("BDU:2024-04914", "BDU:2024-00000").replace("от 8.6 до 9.8", "до 1.0"), encoding="utf-8")
+    import_bdu(db, single)
+    assert client.get(url, headers=headers).json()["found"] == 0
+
+
+def test_new_agent_report_recomputes_findings_of_its_asset(client, db, bdu_loaded, make_org, make_agent_key, make_user,
+                                                          add_membership, auth_header):
+    org_id = make_org("Ingest BDU Org")
+    key = make_agent_key(org_id)
+    add_membership(make_user("ingest-bdu@example.com"), org_id)
+    headers = auth_header("ingest-bdu@example.com")
+
+    def report(version):
+        payload = {"environment": "prod", "asset": {"hostname": "web-01", "asset_type": "linux-server", "os": "Debian 12"},
+                   "software": [{"name": "openssh-server", "version": version}], "facts": {}}
+        assert client.post("/api/ingest", json=payload, headers={"X-Agent-Api-Key": key}).status_code == 200
+
+    report("1:9.6p1-3")
+    url = f"/api/organizations/{org_id}/vulnerabilities"
+    assert [i["bdu_id"] for i in client.get(url, headers=headers).json()["items"]] == ["BDU:2024-04914"]
+    report("1:9.9p1-1")  # обновили OpenSSH — уязвимость больше не подходит
+    assert client.get(url, headers=headers).json()["found"] == 0
+    report("1:7.2p1-1")  # старая версия — подходит «до 7.4»
+    assert [i["bdu_id"] for i in client.get(url, headers=headers).json()["items"]] == ["BDU:2019-00001"]
+
+
+def test_filters_search_and_pages(db, tmp_path, make_org, client, add_membership, make_user, auth_header):
+    rows = "".join(PARITY_XML_TEMPLATE.format(
+        n=i, name=f"Уязвимость номер {i}", cvss=f'<cvss3><vector score="{s}">AV:N</vector></cvss3>', exploit="Существует", incident="")
+        for i, s in enumerate(["9,8", "7,5", "4,0", "1,0", "6,0"], start=1))
+    archive = tmp_path / "f.xml"
+    archive.write_text(f'<?xml version="1.0" encoding="UTF-8"?><vulnerabilities>{rows}</vulnerabilities>', encoding="utf-8")
+    import_bdu(db, archive)
+    org_id, ids = _org_with_assets(db, make_org, [("alpha", "network-device", ["internet-facing"], None), ("beta", "linux-server", [], None)])
+    add_membership(make_user("vuln-filter@example.com"), org_id)
+    headers = auth_header("vuln-filter@example.com")
+    url = f"/api/organizations/{org_id}/vulnerabilities"
+
+    def get(**params):
+        resp = client.get(url, params=params, headers=headers)
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+    full = get()
+    assert full["found"] == full["total"] == 10
+    levels = [i["level"] for i in full["items"]]
+    assert levels == sorted(levels, key=lambda lvl: LEVEL_ORDER[lvl])  # сначала самые критичные
+    for level in ("critical", "high", "medium", "low"):
+        assert get(level=level)["found"] == full["summary"][level]
+    assert get(q="alpha")["found"] == 5 and get(q="2030-00003")["found"] == 2 and get(q="%")["found"] == 0
+    assert get(asset_id=ids[1])["found"] == 5 and get(asset_id=ids[1])["summary"] != full["summary"]
+    pages = [get(limit=3, offset=o)["items"] for o in (0, 3, 6, 9)]
+    keys = [(i["bdu_id"], i["asset"]["hostname"]) for p in pages for i in p]
+    assert len(keys) == len(set(keys)) == 10
+    assert get(distro="not_checked")["found"] == 10 and get(distro="fixed")["found"] == 0
+    for bad in ({"level": "urgent"}, {"distro": "x"}, {"limit": 501}):
+        assert client.get(url, params=bad, headers=headers).status_code == 422
+
+
+def test_vulnerability_listing_two_installed_products_is_one_finding(db, tmp_path, make_org):
+    archive = tmp_path / "two.xml"
+    archive.write_text("""<?xml version="1.0" encoding="UTF-8"?><vulnerabilities>
+     <vul><identifier>BDU:2030-99999</identifier><name>Уязвимость OpenSSH и OpenSSL</name>
+      <vulnerable_software>
+       <soft><name>OpenSSH</name><vendor>OpenBSD</vendor><version>от 1.0 до 99.0</version></soft>
+       <soft><name>OpenSSL</name><vendor>OpenSSL</vendor><version>от 1.0 до 99.0</version></soft>
+      </vulnerable_software><cvss3><vector score="7,5">AV:N</vector></cvss3>
+     </vul></vulnerabilities>""", encoding="utf-8")
+    import_bdu(db, archive)
+    org_id, ids = _org_with_assets(db, make_org, [("both", "linux-server", [], None)])
+    db.execute(text("INSERT INTO software (asset_id, name, version) VALUES (:a, 'openssl', '3.0.13-0ubuntu3')"), {"a": ids[0]})
+    db.commit()
+    body = organization_vulnerabilities(db, org_id)
+    assert body["found"] == 1 and body["items"][0]["product"] == "openssh"
+
+
+def test_fewer_assets_in_organization_rescore_share_without_new_reports(db, tmp_path, make_org):
+    archive = tmp_path / "one.xml"
+    archive.write_text('<?xml version="1.0" encoding="UTF-8"?><vulnerabilities>' + PARITY_XML_TEMPLATE.format(
+        n=1, name="Уязвимость, позволяющая выполнить произвольный код", cvss='<cvss3><vector score="8,8">AV:N</vector></cvss3>',
+        exploit="Существует", incident="") + "</vulnerabilities>", encoding="utf-8")
+    import_bdu(db, archive)
+    org_id, ids = _org_with_assets(db, make_org, [(f"h{i}", "linux-server", [], None) for i in range(20)])
+    db.execute(text("DELETE FROM software WHERE asset_id = ANY(CAST(:ids AS uuid[]))"), {"ids": ids[3:]})
+    db.commit()
+
+    def v_for(affected, total):
+        return criticality(cvss3=8.8, cvss2=None, asset_type="linux-server", affected_assets=affected, total_assets=total,
+                           internet_facing=False, exploit_status="Существует", incident="",
+                           name="Уязвимость, позволяющая выполнить произвольный код").v
+
+    assert organization_vulnerabilities(db, org_id)["items"][0]["criticality"]["v"] == v_for(3, 20)  # 15 % → L = 0,6
+    db.execute(text("DELETE FROM assets WHERE id = ANY(CAST(:ids AS uuid[]))"), {"ids": ids[6:]})  # осталось 6
+    db.commit()
+    assert organization_vulnerabilities(db, org_id)["items"][0]["criticality"]["v"] == v_for(3, 6)   # 50 % → L = 0,8
+    assert v_for(3, 6) != v_for(3, 20)

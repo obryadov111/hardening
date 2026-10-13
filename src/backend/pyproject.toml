@@ -26,3 +26,6 @@ extend-immutable-calls = [
 # Голый `pytest tests/` (как в CI) должен находить пакеты app и tests без PYTHONPATH.
 pythonpath = ["."]
 testpaths = ["tests"]
+# Устаревшее API (datetime.utcnow, модуль crypt в passlib) — ошибка теста, а не строчка в сводке:
+# иначе оно копится до обновления Python или библиотеки, на котором ломается прод.
+filterwarnings = ["error::DeprecationWarning", "error::PendingDeprecationWarning"]

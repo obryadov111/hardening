@@ -1,11 +1,16 @@
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
+
+
+def _utcnow() -> datetime:
+    """Время с поясом UTC: datetime.utcnow() без пояса устарел, а в timestamptz зависел бы от пояса сессии БД."""
+    return datetime.now(UTC)
 
 
 class User(Base):
@@ -32,5 +37,5 @@ class User(Base):
     blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # временная блокировка входа после серии неудачных попыток (см. services/login_guard.py)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)

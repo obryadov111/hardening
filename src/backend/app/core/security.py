@@ -1,24 +1,39 @@
 import base64
 import os
+import re
 import secrets
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 
+import bcrypt
 from cryptography.fernet import Fernet
 from jose import jwt
-from passlib.context import CryptContext
 
 from app.core.config import settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# bcrypt напрямую (раньше — через passlib: он не развивается и импортирует модуль crypt, удалённый в
+# Python 3.13). Хеши те же ($2b$, 12 раундов) — прежние пароли проверяются. bcrypt учитывает первые
+# 72 байта пароля (36 кириллических символов); passlib обрезал так же, поэтому обрезка явная.
+BCRYPT_MAX_BYTES = 72
+
+
+def _secret(password: str) -> bytes:
+    return password.encode("utf-8")[:BCRYPT_MAX_BYTES]
+
+
+# Формат проверяется до bcrypt: на усечённом хеше bcrypt 4.0 не бросает ValueError, а паникует
+# (PanicException — наследник BaseException, обычный except его не ловит).
+BCRYPT_HASH = re.compile(r"^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$")
 
 
 def verify_password(plain_password: str, password_hash: str) -> bool:
-    return pwd_context.verify(plain_password, password_hash)
+    if not BCRYPT_HASH.match(password_hash or ""):
+        return False
+    return bcrypt.checkpw(_secret(plain_password), password_hash.encode("ascii"))
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(_secret(password), bcrypt.gensalt(rounds=12)).decode("ascii")
 
 
 ACCESS_TOKEN_TYPE = "access"

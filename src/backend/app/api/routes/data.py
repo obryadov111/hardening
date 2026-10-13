@@ -240,6 +240,9 @@ def _software_row_to_dict(row: dict) -> dict:
     }
 
 
+# Как индекс ix_software_search (миграция c9f2a7e4d815) — иначе поиск идёт полным проходом.
+SOFTWARE_SEARCH = "(coalesce(s.name, '') || ' ' || coalesce(s.version, '') || ' ' || coalesce(s.vendor, ''))"
+
 _SOFTWARE_SORT = {
     "name": "s.name", "version": "s.version", "vendor": "s.vendor", "host": "a.hostname", "created_at": "s.created_at",
 }
@@ -262,8 +265,14 @@ def get_software_by_organization(
     where = ["e.organization_id = :org_id"]
     params: dict = {"org_id": organization_id}
     if q.strip():
-        where.append("(s.name ILIKE :q OR s.version ILIKE :q OR s.vendor ILIKE :q OR a.hostname ILIKE :q)")
         params["q"] = "%" + q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        # Хосты по имени — отдельно (активов мало), ПО — по триграммному индексу (миграция c9f2a7e4d815):
+        # условие «или имя хоста» в одном запросе не дало бы использовать индекс.
+        params["q_assets"] = [str(i) for i in db.execute(text(
+            "SELECT a.id FROM assets a JOIN environments e ON e.id = a.environment_id "
+            "WHERE e.organization_id = :org_id AND a.hostname ILIKE :q"
+        ), params).scalars().all()]
+        where.append(f"({SOFTWARE_SEARCH} ILIKE :q OR s.asset_id = ANY(CAST(:q_assets AS uuid[])))")
     if host:
         where.append("a.hostname = :host")
         params["host"] = host
@@ -277,18 +286,24 @@ def get_software_by_organization(
         text(f"SELECT count(*) FROM software s JOIN assets a ON a.id = s.asset_id JOIN environments e ON e.id = a.environment_id WHERE {condition}"),
         params,
     ).scalar()
+    org = {"org_id": organization_id}
     summary = db.execute(text("""
-        SELECT count(*) AS programs, count(DISTINCT s.category) AS categories,
-               COALESCE(array_agg(DISTINCT a.hostname ORDER BY a.hostname) FILTER (WHERE a.hostname IS NOT NULL), '{}') AS hosts
+        SELECT count(*) AS programs, count(DISTINCT s.category) AS categories
         FROM software s JOIN assets a ON a.id = s.asset_id JOIN environments e ON e.id = a.environment_id
         WHERE e.organization_id = :org_id
-    """), {"org_id": organization_id}).mappings().one()
+    """), org).mappings().one()
+    # Хосты с ПО — по активам и индексу software(asset_id), а не DISTINCT по полутора миллионам строк.
+    hosts = db.execute(text("""
+        SELECT a.hostname FROM assets a JOIN environments e ON e.id = a.environment_id
+        WHERE e.organization_id = :org_id AND EXISTS (SELECT 1 FROM software s WHERE s.asset_id = a.id)
+        ORDER BY a.hostname
+    """), org).scalars().all()
     return {
         "items": [_software_row_to_dict(row) for row in rows],
         "total": total,
         "limit": limit,
         "offset": offset,
-        "summary": {"programs": summary["programs"], "categories": summary["categories"], "hosts": list(summary["hosts"])},
+        "summary": {"programs": summary["programs"], "categories": summary["categories"], "hosts": hosts},
     }
 
 

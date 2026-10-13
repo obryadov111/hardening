@@ -14,6 +14,7 @@ from xml.etree.ElementTree import iterparse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.services.bdu.criticality import exploitation_of, impact_of
 from app.services.bdu.versions import parse_bdu_version
 
 
@@ -128,9 +129,29 @@ def import_bdu(db: Session, path: Path) -> ImportStats:
                 if stats.vulnerabilities % 5000 == 0:
                     flush(cursor)
         flush(cursor)
+    fill_criticality_parts(db)
     db.execute(
         text("INSERT INTO bdu_imports (source, vulnerabilities, software_rows, skipped_rows) VALUES (:s, :v, :r, :k)"),
         {"s": path.name, "v": stats.vulnerabilities, "r": stats.software_rows, "k": stats.skipped_rows},
     )
     db.commit()
     return stats
+
+
+def fill_criticality_parts(db) -> None:
+    """Части V по методике, зависящие только от уязвимости (Icvss, Iat, Iimp), — в bdu_vulnerabilities:
+    при запросе SQL досчитывает Iinfr по активам организации (app/services/bdu/matching.py). db — сессия
+    или соединение (миграция)."""
+    rows = db.execute(text("SELECT bdu_id, name, cvss3, cvss2, exploit_status, incident FROM bdu_vulnerabilities")).all()
+    values = []
+    for bdu_id, name, cvss3, cvss2, exploit_status, incident in rows:
+        icvss, version = (cvss3, "3") if cvss3 is not None else (cvss2, "2") if cvss2 is not None else (None, None)
+        exploitation, iat = exploitation_of(exploit_status, incident)
+        impact, iimp = impact_of(name)
+        values.append({"id": bdu_id, "icvss": icvss, "ver": version, "iat": iat, "expl": exploitation, "iimp": iimp, "imp": impact})
+    for start in range(0, len(values), 5000):
+        db.execute(text("""
+            UPDATE bdu_vulnerabilities SET icvss = :icvss, cvss_version = :ver, iat = :iat, exploitation = :expl,
+                   iimp = :iimp, impact = :imp
+            WHERE bdu_id = :id
+        """), values[start:start + 5000])

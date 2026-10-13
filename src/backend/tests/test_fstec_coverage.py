@@ -24,12 +24,12 @@ def test_catalog_codes_are_unique_and_out_items_explain_why():
     assert all(item.note for section in CATALOG for item in section.items if item.kind == "out")
 
 
-def _ingest_ubuntu(client, key, sshd_config=None):
+def _ingest_ubuntu(client, key, sshd_config=None, hostname="ubuntu-01"):
     host = regression.make_host({"/etc/ssh/sshd_config": sshd_config} if sshd_config else None)
     raw = regression.probes.run_manifest(host, regression.MANIFEST)
     payload = {
         "environment": "prod",
-        "asset": {"hostname": "ubuntu-01", "asset_type": "linux-server"},
+        "asset": {"hostname": hostname, "asset_type": "linux-server"},
         "platform_tags": regression.MANIFEST["tags"],
         "pack": {"id": regression.PACK.pack, "version": regression.PACK.version},
         "probe_results": raw,
@@ -77,3 +77,22 @@ def test_coverage_requires_organization_access(client, make_org, make_user, auth
     org_id = make_org("Closed Org")
     make_user("outsider@example.com")
     assert client.get(f"/api/organizations/{org_id}/fstec-coverage", headers=auth_header("outsider@example.com")).status_code == 403
+
+
+def test_many_hosts_give_counts_and_first_checks_with_violations_first(client, make_org, make_agent_key, make_user,
+                                                                        add_membership, auth_header, monkeypatch):
+    """На тысяче хостов по пункту — тысячи проверок: ответ — счётчики по всем и первые CHECKS_SHOWN, нарушения сначала."""
+    from app.services.fstec import coverage
+    monkeypatch.setattr(coverage, "CHECKS_SHOWN", 2)
+    org_id = make_org("FSTEC Many Org")
+    key = make_agent_key(org_id)
+    add_membership(make_user("fstec-many@example.com"), org_id)
+    headers = auth_header("fstec-many@example.com")
+    hardened = regression.HARDENED_FILES["/etc/ssh/sshd_config"]
+    for i, config in enumerate([hardened, hardened, hardened.replace("PasswordAuthentication no", "PasswordAuthentication yes")]):
+        _ingest_ubuntu(client, key, config, hostname=f"ubuntu-{i:02d}")
+    item = _items(client.get(f"/api/organizations/{org_id}/fstec-coverage", headers=headers).json())["СУД.1.1"]
+    counts = item["check_counts"]
+    assert counts["total"] == counts["fail"] + counts["pass"] + counts["accepted"] + counts["error"]
+    assert counts["fail"] == 1 and counts["total"] > 2
+    assert len(item["checks"]) == 2 and item["checks"][0]["status"] == "fail"
