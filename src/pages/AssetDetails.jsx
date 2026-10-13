@@ -26,7 +26,6 @@ export default function AssetDetails() {
       const data = await getAssetById(currentAssetId);
       setAsset(data);
     } catch (err) {
-      console.error("Ошибка загрузки актива:", err);
       setError(err.message || "Не удалось загрузить актив");
     } finally {
       setLoading(false);
@@ -149,8 +148,8 @@ export default function AssetDetails() {
               <thead className="border-b border-zinc-800 text-zinc-400">
                 <tr>
                   <th className="px-4 py-3">Правило</th>
-                  <th className="px-4 py-3">Actual</th>
-                  <th className="px-4 py-3">Expected</th>
+                  <th className="px-4 py-3">Фактически</th>
+                  <th className="px-4 py-3">Требуется</th>
                   <th className="px-4 py-3">Статус</th>
                   <th className="px-4 py-3">Проверено</th>
                 </tr>

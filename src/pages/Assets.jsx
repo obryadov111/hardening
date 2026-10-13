@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { getAssetsByOrganization } from "../api/assets";
+import { severityRank } from "../utils/severity";
 import { useOrganization } from "../context/OrganizationContext";
 import { useSort } from "../hooks/useSort";
 import SortableHeader from "../components/ui/SortableHeader";
@@ -56,8 +57,10 @@ export default function Assets() {
   const [search, setSearch] = useState("");
   const [environment, setEnvironment] = useState(null);
 
-  async function loadAssets(showRefreshState = false) {
-    if (!selectedOrganization?.id) {
+  const orgId = selectedOrganization?.id;
+
+  const loadAssets = useCallback(async (showRefreshState = false) => {
+    if (!orgId) {
       setAssets([]);
       setLoading(false);
       return;
@@ -72,21 +75,20 @@ export default function Assets() {
         setLoading(true);
       }
 
-      const data = await getAssetsByOrganization(selectedOrganization.id);
+      const data = await getAssetsByOrganization(orgId);
       setAssets(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error("Ошибка загрузки активов:", err);
       setError(err.message || "Не удалось загрузить активы");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }
+  }, [orgId]);
 
   useEffect(() => {
     setEnvironment(null);
     loadAssets();
-  }, [selectedOrganization?.id]);
+  }, [loadAssets]);
 
   const environments = useMemo(() => summarizeEnvironments(assets), [assets]);
 
@@ -119,7 +121,7 @@ export default function Assets() {
     ip_address: (row) => row.ip_address || "",
     os: (row) => row.os || "",
     asset_type: (row) => row.asset_type || "",
-    criticality: (row) => row.criticality || "",
+    criticality: (row) => severityRank(row.criticality),
     environment_name: (row) => row.environment_name || "",
     software_count: (row) => row.software_count ?? 0,
     failed_checks_count: (row) => row.failed_checks_count ?? 0,
@@ -147,7 +149,7 @@ export default function Assets() {
         <div className="flex gap-3">
           <input
             type="text"
-            placeholder="Поиск по hostname, IP, OS..."
+            placeholder="Поиск по имени хоста, IP, ОС..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="field-input w-64"
@@ -183,7 +185,10 @@ export default function Assets() {
           {environments.map((env) => (
             <EnvironmentCard
               key={env.key}
-              {...env}
+              name={env.name}
+              total={env.total}
+              critical={env.critical}
+              failing={env.failing}
               active={environment === env.key}
               onClick={() => setEnvironment(environment === env.key ? null : env.key)}
             />
@@ -205,14 +210,14 @@ export default function Assets() {
             <table className="min-w-full text-left text-sm">
               <thead className="bg-zinc-950 text-zinc-400">
                 <tr>
-                  <SortableHeader label="Hostname" sortKey="hostname" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableHeader label="Имя хоста" sortKey="hostname" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
                   <SortableHeader label="IP" sortKey="ip_address" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="OS" sortKey="os" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Type" sortKey="asset_type" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Criticality" sortKey="criticality" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Environment" sortKey="environment_name" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Software" sortKey="software_count" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Failed checks" sortKey="failed_checks_count" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableHeader label="ОС" sortKey="os" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableHeader label="Тип" sortKey="asset_type" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableHeader label="Критичность" sortKey="criticality" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableHeader label="Контур" sortKey="environment_name" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableHeader label="ПО" sortKey="software_count" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableHeader label="Нарушений" sortKey="failed_checks_count" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
                 </tr>
               </thead>
 

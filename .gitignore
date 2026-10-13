@@ -34,3 +34,7 @@ dist-ssr
 # Конфигурация nginx для HTTPS, сгенерированная deploy/restart_frontend.sh; домен — deploy/frontend.env
 deploy/generated/
 deploy/frontend.env
+
+# замеры покрытия тестов
+.coverage
+htmlcov/

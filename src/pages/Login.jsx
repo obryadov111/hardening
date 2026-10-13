@@ -53,7 +53,6 @@ export default function Login() {
 
       navigate("/", { replace: true });
     } catch (err) {
-      console.error("Ошибка входа:", err.message);
       setError(err.message || "Ошибка входа");
     } finally {
       setLoading(false);
@@ -73,7 +72,6 @@ export default function Login() {
       await authApi.verify2FA(tempToken, code);
       navigate("/", { replace: true });
     } catch (err) {
-      console.error("Ошибка проверки кода:", err.message);
       setError(err.message || "Неверный код");
     } finally {
       setLoading(false);
@@ -118,8 +116,9 @@ export default function Login() {
         {step === "credentials" ? (
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="mb-1 block text-sm text-zinc-300">Email</label>
+              <label htmlFor="login-email" className="mb-1 block text-sm text-zinc-300">Email</label>
               <input
+                id="login-email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -130,8 +129,9 @@ export default function Login() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm text-zinc-300">Пароль</label>
+              <label htmlFor="login-password" className="mb-1 block text-sm text-zinc-300">Пароль</label>
               <input
+                id="login-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -160,8 +160,9 @@ export default function Login() {
             </p>
 
             <div>
-              <label className="mb-1 block text-sm text-zinc-300">Код 2FA или резервный код</label>
+              <label htmlFor="login-code" className="mb-1 block text-sm text-zinc-300">Код 2FA или резервный код</label>
               <input
+                id="login-code"
                 type="text"
                 autoFocus
                 autoComplete="one-time-code"

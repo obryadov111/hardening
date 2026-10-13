@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import ErrorState from "../components/ui/ErrorState";
 import { useSearchParams } from "react-router-dom";
 import AppCard from "../components/ui/AppCard";
 import StatCard from "../components/ui/StatCard";
@@ -128,16 +129,31 @@ export default function ScanCompare() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [listError, setListError] = useState("");
 
+  // Для выбора — последние 200 сканов (у тысячи хостов их тысячи в день); выбранные по ссылке добавляются
+  // из результата сравнения, даже если они старше.
   useEffect(() => {
-    if (orgLoading || !selectedOrganizationId) return;
-    getSnapshotsByOrganization(selectedOrganizationId)
-      .then((list) => setSnapshots(Array.isArray(list) ? list : []))
+    if (orgLoading || !selectedOrganizationId) return undefined;
+    let cancelled = false;
+    getSnapshotsByOrganization(selectedOrganizationId, { limit: 200 })
+      .then((page) => {
+        if (cancelled) return;
+        setListError("");
+        setSnapshots(Array.isArray(page?.items) ? page.items : []);
+      })
       .catch((err) => {
-        console.error("Ошибка загрузки списка сканов:", err.message);
+        if (cancelled) return;
         setSnapshots([]);
+        setListError(err.message || "Не удалось получить данные");
       });
+    return () => { cancelled = true; };
   }, [selectedOrganizationId, orgLoading]);
+
+  const pickerSnapshots = useMemo(() => {
+    const extra = [data?.beforeSnapshot, data?.afterSnapshot].filter((s) => s && !snapshots.some((x) => x.id === s.id));
+    return [...snapshots, ...extra];
+  }, [snapshots, data]);
 
   // Без параметров — по умолчанию последний скан и предыдущий скан того же актива; выбор меняется в форме.
   useEffect(() => {
@@ -158,7 +174,6 @@ export default function ScanCompare() {
         setError("");
         setData(await compareSnapshots(beforeId, afterId));
       } catch (err) {
-        console.error("Ошибка сравнения сканов:", err.message);
         setData(null);
         setError(err.message);
       } finally {
@@ -175,7 +190,7 @@ export default function ScanCompare() {
         <h1 className="text-2xl font-semibold text-white">Сравнение сканов</h1>
         <p className="mt-1 text-sm text-zinc-400">
           {data
-            ? `Snapshot #${data.beforeSnapshot?.scan_number} → Snapshot #${data.afterSnapshot?.scan_number}`
+            ? `Скан №${data.beforeSnapshot?.scan_number} → скан №${data.afterSnapshot?.scan_number}`
             : "Выберите два скана для сравнения"}
         </p>
       </div>
@@ -183,13 +198,15 @@ export default function ScanCompare() {
       <SnapshotPicker
         // Пересоздаётся при смене выбора в адресе (в т.ч. «Назад» в браузере) — форма показывает актуальную пару.
         key={`${beforeId}-${afterId}`}
-        snapshots={snapshots}
+        snapshots={pickerSnapshots}
         beforeId={beforeId}
         afterId={afterId}
         onCompare={(before, after) => setSearchParams({ before, after })}
       />
 
-      {loading ? (
+      {listError ? (
+        <ErrorState title="Ошибка загрузки" description={listError} />
+      ) : loading ? (
         <div className="text-zinc-400">Загрузка сравнения...</div>
       ) : error ? (
         <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
@@ -233,7 +250,7 @@ function ComparisonResult({ data }) {
         <StatCard label="Удалено" value={summary.removed} hint="Проверки нет в новом снимке (например, изменилась версия пака)" tone="default" />
       </div>
 
-      <AppCard title="Итоги сравнения" subtitle="Сравнение метрик двух snapshot">
+      <AppCard title="Итоги сравнения" subtitle="Сравнение метрик двух сканов">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
             <div className="text-sm text-zinc-400">Было</div>
@@ -241,7 +258,7 @@ function ComparisonResult({ data }) {
               #{beforeSnapshot.scan_number} · {formatDateTime(beforeSnapshot.created_at)}
             </div>
             <div className="mt-2 text-sm text-zinc-400">
-              Score: {Math.round(beforeSnapshot.compliance_score || 0)}%
+              Соответствие: {Math.round(beforeSnapshot.compliance_score || 0)}%
             </div>
           </div>
 
@@ -251,7 +268,7 @@ function ComparisonResult({ data }) {
               #{afterSnapshot.scan_number} · {formatDateTime(afterSnapshot.created_at)}
             </div>
             <div className="mt-2 text-sm text-zinc-400">
-              Score: {Math.round(afterSnapshot.compliance_score || 0)}%
+              Соответствие: {Math.round(afterSnapshot.compliance_score || 0)}%
             </div>
           </div>
 
@@ -276,7 +293,7 @@ function ComparisonResult({ data }) {
         </div>
       </AppCard>
 
-      <AppCard title="Детальный diff" subtitle="Сравнение результатов по активам и правилам">
+      <AppCard title="Подробные изменения" subtitle="Сравнение результатов по активам и правилам">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="border-b border-zinc-800 text-left text-zinc-400">
@@ -285,7 +302,7 @@ function ComparisonResult({ data }) {
                 <th className="px-4 py-3">Правило</th>
                 <th className="px-4 py-3">Было</th>
                 <th className="px-4 py-3">Стало</th>
-                <th className="px-4 py-3">Expected</th>
+                <th className="px-4 py-3">Требуется</th>
                 <th className="px-4 py-3">Изменение</th>
               </tr>
             </thead>

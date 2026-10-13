@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import AppCard from "../components/ui/AppCard";
 import EmptyState from "../components/ui/EmptyState";
 import ErrorState from "../components/ui/ErrorState";
 import { useOrganization } from "../context/OrganizationContext";
+import { ROLES } from "../utils/roles";
 import {
   addUserToOrganization,
   getUsersByOrganization,
@@ -27,7 +28,7 @@ export default function OrganizationUsers() {
   const [actionError, setActionError] = useState("");
   const [currentRole, setCurrentRole] = useState(null);
 
-  async function loadUsers() {
+  const loadUsers = useCallback(async () => {
     if (!selectedOrganizationId) {
       setRows([]);
       return;
@@ -43,19 +44,18 @@ export default function OrganizationUsers() {
       setCurrentRole(myRole);
       setRows(myRole === "admin" ? await getUsersByOrganization(selectedOrganizationId) : []);
     } catch (error) {
-      console.error("Ошибка загрузки пользователей:", error.message);
       setRows([]);
       setActionError(error.message);
     } finally {
       setLoading(false);
     }
-  }
+  }, [selectedOrganizationId]);
 
   useEffect(() => {
     if (!orgLoading) {
       loadUsers();
     }
-  }, [selectedOrganizationId, orgLoading]);
+  }, [loadUsers, orgLoading]);
 
   async function handleAddUser() {
     try {
@@ -70,7 +70,6 @@ export default function OrganizationUsers() {
       setRole("auditor");
       await loadUsers();
     } catch (error) {
-      console.error("Ошибка добавления пользователя:", error.message);
       setActionError(error.message);
     }
   }
@@ -83,7 +82,6 @@ export default function OrganizationUsers() {
       await removeUserFromOrganization(userId, selectedOrganizationId);
       await loadUsers();
     } catch (error) {
-      console.error("Ошибка удаления пользователя:", error.message);
       setActionError(error.message);
     }
   }
@@ -94,7 +92,6 @@ export default function OrganizationUsers() {
       await updateUserRole(userId, selectedOrganizationId, newRole);
       await loadUsers();
     } catch (error) {
-      console.error("Ошибка смены роли:", error.message);
       setActionError(error.message);
     }
   }
@@ -165,9 +162,7 @@ export default function OrganizationUsers() {
             onChange={(e) => setRole(e.target.value)}
             className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-white outline-none"
           >
-            <option value="admin">admin</option>
-            <option value="auditor">auditor</option>
-            <option value="viewer">viewer</option>
+            {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
           </select>
 
           <button
@@ -214,9 +209,7 @@ export default function OrganizationUsers() {
                         onChange={(e) => handleChangeRole(item.id, e.target.value)}
                         className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-white outline-none"
                       >
-                        <option value="admin">admin</option>
-                        <option value="auditor">auditor</option>
-                        <option value="viewer">viewer</option>
+                        {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                       </select>
                     </td>
 

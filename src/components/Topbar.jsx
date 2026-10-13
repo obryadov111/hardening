@@ -18,6 +18,7 @@ import {
   getCurrentUserRoleInOrganization,
 } from "../api/users";
 import { useOrganization } from "../context/OrganizationContext";
+import { roleLabel } from "../utils/roles";
 
 export default function Topbar({ onMenuClick }) {
   const navigate = useNavigate();
@@ -41,8 +42,8 @@ export default function Topbar({ onMenuClick }) {
       try {
         const data = await getCurrentUserProfile();
         setProfile(data);
-      } catch (error) {
-        console.error("Ошибка загрузки профиля:", error.message);
+      } catch {
+        // без профиля меню показывает «Пользователь»; недоступный сервер обрабатывает ProtectedRoute
       }
     }
 
@@ -59,8 +60,7 @@ export default function Topbar({ onMenuClick }) {
 
         const role = await getCurrentUserRoleInOrganization(selectedOrganizationId);
         setCurrentRole(role);
-      } catch (error) {
-        console.error("Ошибка загрузки роли:", error.message);
+      } catch {
         setCurrentRole(null);
       }
     }
@@ -80,15 +80,11 @@ export default function Topbar({ onMenuClick }) {
   }, []);
 
   const handleLogout = async () => {
-    try {
-      await authApi.logout();
-      navigate("/login", { replace: true });
-    } catch (error) {
-      console.error("Ошибка выхода:", error.message);
-    }
+    await authApi.logout();  // только стирает токен — ошибиться нечему
+    navigate("/login", { replace: true });
   };
 
-  const roleLabel = currentRole || "viewer";
+  const roleText = profile?.is_superadmin ? "Суперадминистратор" : roleLabel(currentRole);
 
   return (
     <header className="sticky top-0 z-10 border-b border-zinc-800 bg-[#0b0f14]/95 backdrop-blur">
@@ -120,6 +116,7 @@ export default function Topbar({ onMenuClick }) {
             <select
               value={selectedOrganizationId || ""}
               onChange={(e) => setSelectedOrganizationId(e.target.value)}
+              aria-label="Организация"
               disabled={orgLoading || !hasOrganizations}
               className="min-w-[220px] bg-transparent text-sm text-white outline-none disabled:text-zinc-500"
             >
@@ -145,6 +142,9 @@ export default function Topbar({ onMenuClick }) {
             <button
               type="button"
               onClick={() => setMenuOpen((prev) => !prev)}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-label="Меню пользователя"
               className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-left hover:bg-zinc-800/80"
             >
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-500/15 text-blue-300">
@@ -156,7 +156,7 @@ export default function Topbar({ onMenuClick }) {
                   {profile?.email || "Пользователь"}
                 </div>
                 <div className="text-xs text-zinc-400">
-                  {roleLabel}
+                  {roleText}
                 </div>
               </div>
 
@@ -177,7 +177,7 @@ export default function Topbar({ onMenuClick }) {
                       {profile?.email || "Без email"}
                     </div>
                     <div className="mt-1 text-xs text-zinc-400">
-                      Роль: {roleLabel}
+                      Роль: {roleText}
                     </div>
                     <div className="mt-1 text-xs text-zinc-400">
                       Организация: {selectedOrganization?.name || "—"}

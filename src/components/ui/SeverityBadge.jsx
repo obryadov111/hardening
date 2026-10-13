@@ -7,6 +7,8 @@ const TONE_MAP = {
 
 const DEFAULT_TONE = "border-zinc-700 bg-zinc-800 text-zinc-300";
 
+const LABELS = { critical: "критический", high: "высокий", medium: "средний", low: "низкий" };
+
 /**
  * Единый бейдж для 4-уровневой шкалы critical/high/medium/low —
  * используется и для criticality актива, и для severity правила
@@ -20,7 +22,7 @@ export default function SeverityBadge({ value, label }) {
     <span
       className={`inline-flex rounded-full border px-2 py-1 text-xs font-medium ${TONE_MAP[key] || DEFAULT_TONE}`}
     >
-      {label || value || "unknown"}
+      {label || LABELS[key] || value || "неизвестно"}
     </span>
   );
 }

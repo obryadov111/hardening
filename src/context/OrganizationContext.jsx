@@ -54,9 +54,9 @@ export function OrganizationProvider({ children }) {
         }
       } catch (err) {
         if (current !== requestId) return;
-        console.error("Ошибка загрузки организаций:", err);
+        // Выбор организации не сбрасывается: сбой сети или 403 до смены временного пароля и подключения
+        // обязательной 2FA — не повод забыть, с какой организацией работал пользователь. Ошибку показывают страницы.
         setOrganizations([]);
-        setSelectedOrganizationId(null);
         setError(err?.message || "Не удалось загрузить организации");
       } finally {
         if (current === requestId) setLoading(false);

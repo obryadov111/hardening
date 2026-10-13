@@ -14,12 +14,8 @@ import {
   getCurrentUserProfile,
 } from "../api/users";
 import { formatDateTime } from "../utils/datetime";
+import { ROLES } from "../utils/roles";
 
-const ROLES = [
-  { value: "viewer", label: "Наблюдатель" },
-  { value: "auditor", label: "Аудитор" },
-  { value: "admin", label: "Администратор организации" },
-];
 const INPUT = "w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-blue-500";
 const EMPTY_FORM = { email: "", full_name: "", password: "", organization_id: "", role: "viewer" };
 const EMPTY_ORG = { name: "", industry: "" };

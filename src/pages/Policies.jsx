@@ -55,6 +55,7 @@ export default function Policies() {
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [canManage, setCanManage] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [actionError, setActionError] = useState("");
@@ -71,6 +72,7 @@ export default function Policies() {
 
       try {
         setLoading(true);
+        setLoadError("");
         const [data, role] = await Promise.all([
           getPoliciesByOrganization(selectedOrganizationId),
           getCurrentUserRoleInOrganization(selectedOrganizationId).catch(() => null),
@@ -79,7 +81,7 @@ export default function Policies() {
         // Менять политики может администратор организации (сервер проверяет это сам, здесь — только вид).
         setCanManage(role === "admin");
       } catch (error) {
-        console.error("Ошибка загрузки политик:", error.message);
+        setLoadError(error.message || "Не удалось получить данные");
         setRows([]);
       } finally {
         setLoading(false);
@@ -167,10 +169,12 @@ export default function Policies() {
               <Skeleton key={i} className="h-32 w-full" />
             ))}
           </div>
+        ) : loadError ? (
+          <ErrorState title="Ошибка загрузки" description={loadError} />
         ) : rows.length === 0 ? (
           <EmptyState
             title="Нет политик"
-            description="Для выбранной организации в таблице policies пока нет записей."
+            description="Политик пока нет."
           />
         ) : (
           <div className="grid gap-4 lg:grid-cols-2">

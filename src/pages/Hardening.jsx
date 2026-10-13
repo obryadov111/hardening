@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import AppCard from "../components/ui/AppCard";
 import StatCard from "../components/ui/StatCard";
 import EmptyState from "../components/ui/EmptyState";
@@ -8,7 +8,6 @@ import { SkeletonTable } from "../components/ui/Skeleton";
 import SortableHeader from "../components/ui/SortableHeader";
 import SeverityBadge from "../components/ui/SeverityBadge";
 import CheckStatusBadge from "../components/ui/CheckStatusBadge";
-import { useSort } from "../hooks/useSort";
 import { useOrganization } from "../context/OrganizationContext";
 import { getHardeningByOrganization } from "../api/hardening";
 import { createRiskException, getRiskExceptions, revokeRiskException } from "../api/riskExceptions";
@@ -17,6 +16,24 @@ import { getRemediation, REMEDIATION_SOURCE_NOTE } from "../utils/remediation";
 import { endOfLocalDayIso, formatDate, formatDateTime } from "../utils/datetime";
 
 const INPUT = "rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500";
+const PAGER = "rounded-xl border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40";
+// 36 проверок на хост, на тысячу хостов — десятки тысяч строк: фильтры, сортировка и страницы — на сервере.
+const PAGE_SIZE = 100;
+const EMPTY_SUMMARY = { total: 0, passed: 0, failed: 0, accepted: 0, errors: 0, mandatory: 0, hosts: [], open_by_severity: [] };
+const STATUS_FILTERS = [
+  { value: "", label: "Все статусы" },
+  { value: "fail", label: "Нарушено" },
+  { value: "pass", label: "Соблюдено" },
+  { value: "error", label: "Не проверено" },
+  { value: "accepted", label: "Риск принят" },
+];
+const SEVERITY_FILTERS = [
+  { value: "", label: "Все уровни" },
+  { value: "critical", label: "Критический" },
+  { value: "high", label: "Высокий" },
+  { value: "medium", label: "Средний" },
+  { value: "low", label: "Низкий" },
+];
 const EXCEPTION_STATES = {
   active: { label: "Действует", tone: "border-violet-500/30 bg-violet-500/15 text-violet-300" },
   expired: { label: "Истёк срок", tone: "border-zinc-700 bg-zinc-800 text-zinc-400" },
@@ -61,13 +78,15 @@ function AcceptRiskForm({ row, onSubmit, onCancel }) {
         входить в оценку соответствия.
       </div>
       <textarea
+        aria-label="Обоснование"
+        required
         className={`${INPUT} md:col-span-4`}
         rows={2}
         placeholder="Обоснование * (почему нарушение не устраняется и чем риск компенсирован)"
         value={form.reason}
         onChange={(e) => setForm({ ...form, reason: e.target.value })}
       />
-      <select className={INPUT} value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value })}>
+      <select aria-label="Область" className={INPUT} value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value })}>
         <option value="asset">Только {row.asset?.hostname}</option>
         <option value="org">Все активы организации</option>
       </select>
@@ -94,48 +113,92 @@ export default function Hardening() {
     error: orgError,
   } = useOrganization();
 
-  const [rows, setRows] = useState([]);
+  return (
+    <OrgGate
+      title="Харденинг"
+      orgLoading={orgLoading}
+      orgError={orgError}
+      hasOrganizations={hasOrganizations}
+    >
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-semibold text-white">Харденинг</h1>
+          <p className="mt-1 text-sm text-zinc-400">
+            Результаты проверок харденинга по организации{" "}
+            <span className="text-white">{selectedOrganization?.name || "—"}</span>
+          </p>
+        </div>
+        {/* key: смена организации — фильтры, страница и формы с чистого листа */}
+        {selectedOrganizationId ? <HardeningView key={selectedOrganizationId} organizationId={selectedOrganizationId} /> : null}
+      </div>
+    </OrgGate>
+  );
+}
+
+function HardeningView({ organizationId }) {
+  const [result, setResult] = useState({ key: null, items: [], total: 0, summary: EMPTY_SUMMARY, error: "" });
   const [exceptions, setExceptions] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
   const [canManage, setCanManage] = useState(false);
   const [acceptingId, setAcceptingId] = useState(null);
   const [actionError, setActionError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [filters, setFilters] = useState({ q: "", host: "", status: "", severity: "" });
+  const [sort, setSort] = useState({ key: "deadline", dir: "asc" });
+  const [offset, setOffset] = useState(0);
+
+  // Поиск с задержкой: запрос не на каждую букву.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setFilters((prev) => (prev.q === search ? prev : { ...prev, q: search }));
+      setOffset(0);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // Принимать и отзывать риск может администратор организации (сервер проверяет это сам, здесь — только вид).
+  useEffect(() => {
+    let cancelled = false;
+    getCurrentUserRoleInOrganization(organizationId)
+      .then((role) => { if (!cancelled) setCanManage(role === "admin"); })
+      .catch(() => { if (!cancelled) setCanManage(false); });
+    return () => { cancelled = true; };
+  }, [organizationId]);
 
   useEffect(() => {
-    async function loadData() {
-      if (!selectedOrganizationId) {
-        setRows([]);
-        setExceptions([]);
-        setCanManage(false);
-        setLoading(false);
-        return;
-      }
+    let cancelled = false;
+    getRiskExceptions(organizationId, { includeInactive: showHistory })
+      .then((list) => { if (!cancelled) setExceptions(Array.isArray(list) ? list : []); })
+      .catch(() => { if (!cancelled) setExceptions([]); });
+    return () => { cancelled = true; };
+  }, [organizationId, showHistory, reloadKey]);
 
-      try {
-        setLoading(true);
-        const [data, exceptionList, role] = await Promise.all([
-          getHardeningByOrganization(selectedOrganizationId),
-          getRiskExceptions(selectedOrganizationId, { includeInactive: showHistory }).catch(() => []),
-          getCurrentUserRoleInOrganization(selectedOrganizationId).catch(() => null),
-        ]);
-        setRows(data);
-        setExceptions(Array.isArray(exceptionList) ? exceptionList : []);
-        // Принимать и отзывать риск может администратор организации (сервер проверяет это сам, здесь — только вид).
-        setCanManage(role === "admin");
-      } catch (error) {
-        console.error("Ошибка загрузки hardening checks:", error.message);
-        setRows([]);
-      } finally {
-        setLoading(false);
-      }
-    }
+  // Идёт загрузка, пока не пришёл ответ на текущий запрос; ответ на устаревший запрос отбрасывается.
+  const requestKey = JSON.stringify([filters, sort, offset, reloadKey]);
+  const loading = result.key !== requestKey;
 
-    if (!orgLoading) {
-      loadData();
-    }
-  }, [selectedOrganizationId, orgLoading, showHistory, reloadKey]);
+  useEffect(() => {
+    let cancelled = false;
+    getHardeningByOrganization(organizationId, { ...filters, sort: sort.key, dir: sort.dir, limit: PAGE_SIZE, offset })
+      .then((data) => {
+        if (!cancelled) setResult({ key: requestKey, items: data.items || [], total: data.total || 0, summary: data.summary || EMPTY_SUMMARY, error: "" });
+      })
+      .catch((error) => {
+        if (!cancelled) setResult((prev) => ({ ...prev, key: requestKey, error: error.message || "Не удалось получить данные" }));
+      });
+    return () => { cancelled = true; };
+  }, [organizationId, filters, sort, offset, requestKey]);
+
+  function setFilter(name, value) {
+    setFilters((prev) => ({ ...prev, [name]: value }));
+    setOffset(0);
+  }
+
+  function toggleSort(key) {
+    setSort((prev) => ({ key, dir: prev.key === key && prev.dir === "asc" ? "desc" : "asc" }));
+    setOffset(0);
+  }
 
   async function runAction(action) {
     try {
@@ -150,58 +213,28 @@ export default function Hardening() {
 
   function handleRevoke(exceptionId) {
     if (!window.confirm("Отозвать принятие риска? Нарушение снова войдёт в оценку соответствия.")) return;
-    runAction(() => revokeRiskException(selectedOrganizationId, exceptionId));
+    runAction(() => revokeRiskException(organizationId, exceptionId));
   }
 
-  const stats = useMemo(() => {
-    return {
-      total: rows.length,
-      passed: rows.filter((item) => item.status === "pass").length,
-      failed: rows.filter((item) => item.status === "fail" && !isAccepted(item)).length,
-      accepted: rows.filter(isAccepted).length,
-      // Нарушения критического и высокого уровня — обязательны к устранению (п. 3.4.4 методики ФСТЭК).
-      // Раньше здесь считались правила уровня critical независимо от результата, включая пройденные.
-      mandatory: rows.filter((item) => !isAccepted(item) && getRemediation(item.status, item.rule?.severity)?.mandatory).length,
-    };
-  }, [rows]);
-
-  const { sortedRows, activeKey, sortDir, toggleSort } = useSort(rows, {
-    asset: (row) => row.asset?.hostname || "",
-    rule: (row) => row.rule?.title || "",
-    severity: (row) => row.rule?.severity || "",
-    actual: (row) => row.actual_value || "",
-    expected: (row) => row.expected_value || row.rule?.expected_value || "",
-    status: (row) => (isAccepted(row) ? "fail-accepted" : row.status || ""),
-    deadline: (row) => (isAccepted(row) ? 8 : getRemediation(row.status, row.rule?.severity)?.order ?? 9),
-    checked_at: (row) => row.checked_at || "",
-  });
+  const { summary, items: rows, error: loadError } = result;
+  const firstLoad = result.key === null;
+  const filtering = Boolean(filters.q.trim() || filters.host || filters.status || filters.severity);
+  const header = (label, key) => (
+    <SortableHeader label={label} sortKey={key} activeKey={sort.key} sortDir={sort.dir} onSort={toggleSort} />
+  );
 
   return (
-    <OrgGate
-      title="Харденинг"
-      orgLoading={orgLoading}
-      orgError={orgError}
-      hasOrganizations={hasOrganizations}
-    >
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-white">Харденинг</h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          Результаты hardening-checks по организации{" "}
-          <span className="text-white">{selectedOrganization?.name || "—"}</span>
-        </p>
-      </div>
-
+    <>
       <div className="grid gap-4 md:grid-cols-5">
-        <StatCard label="Всего проверок" value={stats.total} loading={loading} hint="Проверки по активам" tone="info" />
-        <StatCard label="Passed" value={stats.passed} loading={loading} hint="Успешно выполнены" tone="success" />
-        <StatCard label="Failed" value={stats.failed} loading={loading} hint="Требуют исправления" tone="danger" />
-        <StatCard label="Риск принят" value={stats.accepted} loading={loading} hint="Нарушения, осознанно оставленные; не входят в оценку" tone="default" />
+        <StatCard label="Всего проверок" value={summary.total} loading={firstLoad} hint="Проверки по активам" tone="info" />
+        <StatCard label="Соблюдено" value={summary.passed} loading={firstLoad} hint="Успешно выполнены" tone="success" />
+        <StatCard label="Нарушено" value={summary.failed} loading={firstLoad} hint="Требуют исправления" tone="danger" />
+        <StatCard label="Риск принят" value={summary.accepted} loading={firstLoad} hint="Нарушения, осознанно оставленные; не входят в оценку" tone="default" />
         <StatCard
           label="Обязательно к устранению"
-          value={stats.mandatory}
-          loading={loading}
-          hint="Нарушения уровня critical и high (п. 3.4.4 методики ФСТЭК)"
+          value={summary.mandatory}
+          loading={firstLoad}
+          hint="Нарушения критического и высокого уровня (п. 3.4.4 методики ФСТЭК)"
           tone="warning"
         />
       </div>
@@ -209,83 +242,132 @@ export default function Hardening() {
       {actionError ? <ErrorState title="Ошибка действия" description={actionError} /> : null}
 
       <AppCard title="Результаты проверок" subtitle={REMEDIATION_SOURCE_NOTE}>
-        {loading ? (
+        {loadError ? (
+          <ErrorState title="Ошибка загрузки" description={loadError} />
+        ) : firstLoad ? (
           <SkeletonTable rows={6} cols={8} />
-        ) : rows.length === 0 ? (
+        ) : summary.total === 0 ? (
           <EmptyState
             title="Нет результатов проверок"
-            description="Для выбранной организации в таблице hardening_checks пока нет записей."
+            description="Результаты появятся после первого отчёта агента или проверки по выгрузке."
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead className="border-b border-zinc-800 text-left text-zinc-400">
-                <tr>
-                  <SortableHeader label="Актив" sortKey="asset" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Правило" sortKey="rule" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Severity" sortKey="severity" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Actual" sortKey="actual" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Expected" sortKey="expected" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Status" sortKey="status" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Срок устранения" sortKey="deadline" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Дата" sortKey="checked_at" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                </tr>
-              </thead>
-              <tbody>
-                {sortedRows.map((item) => (
-                  <Fragment key={item.id}>
-                    <tr className="border-b border-zinc-800/60 text-zinc-200 transition hover:bg-zinc-800/40">
-                      <td className="px-4 py-3 font-medium text-white">
-                        {item.asset?.hostname || "—"}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-white">{item.rule?.title || "—"}</div>
-                        <div className="text-xs text-zinc-500">{item.rule?.rule_code || "—"}</div>
-                        {isAccepted(item) ? (
-                          <div className="mt-1 max-w-md text-xs text-violet-300">
-                            Риск принят{item.risk_exception.org_wide ? " для всех активов" : ""}
-                            {item.risk_exception.expires_at ? ` до ${formatDate(item.risk_exception.expires_at)}` : ""}:{" "}
-                            <span className="text-zinc-300">{item.risk_exception.reason}</span>
-                          </div>
-                        ) : item.status === "fail" && item.rule?.remediation ? (
-                          <div className="mt-1 max-w-md text-xs text-zinc-400">Как исправить: {item.rule.remediation}</div>
-                        ) : null}
-                      </td>
-                      <td className="px-4 py-3"><SeverityBadge value={item.rule?.severity} /></td>
-                      <td className="px-4 py-3">{item.actual_value || "—"}</td>
-                      <td className="px-4 py-3">{item.expected_value || item.rule?.expected_value || "—"}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-col items-start gap-2">
-                          <CheckStatusBadge value={item.status} />
-                          {canManage && isAccepted(item) ? (
-                            <button type="button" onClick={() => handleRevoke(item.risk_exception.id)} className="text-xs text-zinc-400 underline hover:text-white">
-                              отозвать
-                            </button>
-                          ) : canManage && item.status === "fail" && item.rule?.rule_code ? (
-                            <button type="button" onClick={() => setAcceptingId(acceptingId === item.id ? null : item.id)} className="text-xs text-violet-300 underline hover:text-violet-200">
-                              принять риск
-                            </button>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3"><RemediationCell row={item} /></td>
-                      <td className="px-4 py-3">{formatDateTime(item.checked_at)}</td>
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                type="search"
+                aria-label="Поиск проверок"
+                placeholder="Поиск: проверка, код, хост…"
+                className={`${INPUT} min-w-[16rem] flex-1`}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <select aria-label="Статус" className={INPUT} value={filters.status} onChange={(e) => setFilter("status", e.target.value)}>
+                {STATUS_FILTERS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <select aria-label="Уровень" className={INPUT} value={filters.severity} onChange={(e) => setFilter("severity", e.target.value)}>
+                {SEVERITY_FILTERS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <select aria-label="Хост" className={INPUT} value={filters.host} onChange={(e) => setFilter("host", e.target.value)}>
+                <option value="">Все хосты</option>
+                {summary.hosts.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+              <span className="text-sm text-zinc-400" aria-live="polite">
+                {filtering ? `Найдено: ${result.total} из ${summary.total}` : `Всего: ${summary.total}`}
+              </span>
+            </div>
+
+            {rows.length === 0 ? (
+              <div className="text-sm text-zinc-400">{loading ? "Поиск…" : "Под фильтр не попала ни одна проверка."}</div>
+            ) : (
+              <div className={`overflow-x-auto ${loading ? "opacity-60" : ""}`}>
+                <table className="min-w-full text-sm">
+                  <thead className="border-b border-zinc-800 text-left text-zinc-400">
+                    <tr>
+                      {header("Актив", "asset")}
+                      {header("Правило", "rule")}
+                      {header("Уровень", "severity")}
+                      <th className="px-4 py-3">Фактически</th>
+                      <th className="px-4 py-3">Требуется</th>
+                      {header("Статус", "status")}
+                      {header("Срок устранения", "deadline")}
+                      {header("Дата", "checked_at")}
                     </tr>
-                    {acceptingId === item.id ? (
-                      <tr className="border-b border-zinc-800/60">
-                        <td colSpan={8} className="px-4 py-3">
-                          <AcceptRiskForm
-                            row={item}
-                            onCancel={() => setAcceptingId(null)}
-                            onSubmit={(body) => runAction(() => createRiskException(selectedOrganizationId, body))}
-                          />
-                        </td>
-                      </tr>
-                    ) : null}
-                  </Fragment>
-                ))}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody>
+                    {rows.map((item) => (
+                      <Fragment key={item.id}>
+                        <tr className="border-b border-zinc-800/60 text-zinc-200 transition hover:bg-zinc-800/40">
+                          <td className="px-4 py-3 font-medium text-white">
+                            {item.asset?.hostname || "—"}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="font-medium text-white">{item.rule?.title || "—"}</div>
+                            <div className="text-xs text-zinc-500">{item.rule?.rule_code || "—"}</div>
+                            {isAccepted(item) ? (
+                              <div className="mt-1 max-w-md text-xs text-violet-300">
+                                Риск принят{item.risk_exception.org_wide ? " для всех активов" : ""}
+                                {item.risk_exception.expires_at ? ` до ${formatDate(item.risk_exception.expires_at)}` : ""}:{" "}
+                                <span className="text-zinc-300">{item.risk_exception.reason}</span>
+                              </div>
+                            ) : item.status === "fail" && item.rule?.remediation ? (
+                              <div className="mt-1 max-w-md text-xs text-zinc-400">Как исправить: {item.rule.remediation}</div>
+                            ) : null}
+                          </td>
+                          <td className="px-4 py-3"><SeverityBadge value={item.rule?.severity} /></td>
+                          <td className="px-4 py-3">{item.actual_value || "—"}</td>
+                          <td className="px-4 py-3">{item.expected_value || item.rule?.expected_value || "—"}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-col items-start gap-2">
+                              <CheckStatusBadge value={item.status} />
+                              {canManage && isAccepted(item) ? (
+                                <button type="button" onClick={() => handleRevoke(item.risk_exception.id)} className="text-xs text-zinc-400 underline hover:text-white">
+                                  отозвать
+                                </button>
+                              ) : canManage && item.status === "fail" && item.rule?.rule_code ? (
+                                <button
+                                  type="button"
+                                  aria-expanded={acceptingId === item.id}
+                                  onClick={() => setAcceptingId(acceptingId === item.id ? null : item.id)}
+                                  className="text-xs text-violet-300 underline hover:text-violet-200"
+                                >
+                                  принять риск
+                                </button>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3"><RemediationCell row={item} /></td>
+                          <td className="px-4 py-3">{formatDateTime(item.checked_at)}</td>
+                        </tr>
+                        {acceptingId === item.id ? (
+                          <tr className="border-b border-zinc-800/60">
+                            <td colSpan={8} className="px-4 py-3">
+                              <AcceptRiskForm
+                                row={item}
+                                onCancel={() => setAcceptingId(null)}
+                                onSubmit={(body) => runAction(() => createRiskException(organizationId, body))}
+                              />
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {result.total > PAGE_SIZE ? (
+              <div className="flex items-center gap-3 text-sm text-zinc-400">
+                <button type="button" className={PAGER} disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
+                  Назад
+                </button>
+                <span>{offset + 1}–{Math.min(offset + PAGE_SIZE, result.total)} из {result.total}</span>
+                <button type="button" className={PAGER} disabled={offset + PAGE_SIZE >= result.total || loading} onClick={() => setOffset(offset + PAGE_SIZE)}>
+                  Вперёд
+                </button>
+              </div>
+            ) : null}
           </div>
         )}
       </AppCard>
@@ -350,7 +432,6 @@ export default function Hardening() {
           </div>
         )}
       </AppCard>
-    </div>
-    </OrgGate>
+    </>
   );
 }

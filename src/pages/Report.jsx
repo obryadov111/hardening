@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import AppCard from "../components/ui/AppCard";
 import StatCard from "../components/ui/StatCard";
 import EmptyState from "../components/ui/EmptyState";
+import ErrorState from "../components/ui/ErrorState";
 import OrgGate from "../components/OrgGate";
 import { SkeletonTable } from "../components/ui/Skeleton";
 import SortableHeader from "../components/ui/SortableHeader";
@@ -11,22 +12,16 @@ import { getReportsByOrganization } from "../api/reports";
 import { getScoreTone } from "../utils/score";
 import { getHardeningByOrganization } from "../api/hardening";
 import SeverityBadge from "../components/ui/SeverityBadge";
-import { REMEDIATION_BY_SEVERITY, REMEDIATION_SOURCE_NOTE, getRemediation } from "../utils/remediation";
+import { REMEDIATION_BY_SEVERITY, REMEDIATION_SOURCE_NOTE } from "../utils/remediation";
 import { Link } from "react-router-dom";
 import { formatDateTime } from "../utils/datetime";
 
 /** Текущие нарушения по уровням: сколько, на скольких активах, в какой срок и обязательно ли. */
-function remediationPlan(checks) {
-  const byLevel = {};
-  for (const check of checks) {
-    const severity = (check.rule?.severity || "").toLowerCase();
-    if (!getRemediation(check.status, severity)) continue;
-    const entry = (byLevel[severity] ||= { severity, count: 0, assets: new Set() });
-    entry.count += 1;
-    if (check.asset?.id) entry.assets.add(check.asset.id);
-  }
-  return Object.values(byLevel)
-    .map((entry) => ({ ...entry, ...REMEDIATION_BY_SEVERITY[entry.severity], assets: entry.assets.size }))
+/** План устранения: открытые нарушения по уровням (считает сервер) + сроки и обязательность по методике. */
+function remediationPlan(openBySeverity) {
+  return (openBySeverity || [])
+    .filter((row) => REMEDIATION_BY_SEVERITY[row.severity])
+    .map((row) => ({ ...row, ...REMEDIATION_BY_SEVERITY[row.severity] }))
     .sort((a, b) => a.order - b.order);
 }
 
@@ -40,30 +35,34 @@ export default function Report() {
   } = useOrganization();
 
   const [reports, setReports] = useState([]);
-  const [checks, setChecks] = useState([]);
+  const [openBySeverity, setOpenBySeverity] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     async function loadData() {
       if (!selectedOrganizationId) {
         setReports([]);
-        setChecks([]);
+        setOpenBySeverity([]);
         setLoading(false);
         return;
       }
 
       try {
         setLoading(true);
+        setLoadError("");
         const [data, current] = await Promise.all([
-          getReportsByOrganization(selectedOrganizationId),
-          getHardeningByOrganization(selectedOrganizationId),
+          // по дням: отчёт пересчитывается при каждом приёме данных
+          getReportsByOrganization(selectedOrganizationId, { daily: true, limit: 90 }),
+          // limit=1: нужна только сводка по организации, а не сами проверки
+          getHardeningByOrganization(selectedOrganizationId, { limit: 1 }),
         ]);
         setReports(data);
-        setChecks(Array.isArray(current) ? current : []);
+        setOpenBySeverity(current?.summary?.open_by_severity || []);
       } catch (error) {
-        console.error("Ошибка загрузки отчётов:", error.message);
+        setLoadError(error.message || "Не удалось получить данные");
         setReports([]);
-        setChecks([]);
+        setOpenBySeverity([]);
       } finally {
         setLoading(false);
       }
@@ -75,7 +74,7 @@ export default function Report() {
   }, [selectedOrganizationId, orgLoading]);
 
   const latest = reports[0] || null;
-  const plan = useMemo(() => remediationPlan(checks), [checks]);
+  const plan = useMemo(() => remediationPlan(openBySeverity), [openBySeverity]);
 
   const avgScore = useMemo(() => {
     if (!reports.length) return 0;
@@ -109,7 +108,7 @@ export default function Report() {
 
       <div className="grid gap-4 md:grid-cols-4">
         <StatCard
-          label="Последний Score"
+          label="Последнее соответствие"
           value={latest ? `${Math.round(latest.compliance_score || 0)}%` : "—"}
           loading={loading}
           hint="Последний рассчитанный показатель"
@@ -117,12 +116,14 @@ export default function Report() {
         />
         <StatCard label="Пройдено" value={latest?.passed ?? "—"} loading={loading} hint="Успешные проверки" tone="success" />
         <StatCard label="Нарушения" value={latest?.failed ?? "—"} loading={loading} hint="Проваленные проверки" tone="danger" />
-        <StatCard label="Средний Score" value={`${avgScore}%`} loading={loading} hint="Среднее по отчётам" tone="default" />
+        <StatCard label="Среднее соответствие" value={`${avgScore}%`} loading={loading} hint="Среднее по дням, до 90 дней" tone="default" />
       </div>
 
       <AppCard title="Что устранить и в какие сроки" subtitle={REMEDIATION_SOURCE_NOTE}>
         {loading ? (
           <SkeletonTable rows={4} cols={5} />
+        ) : loadError ? (
+          <ErrorState title="Ошибка загрузки" description={loadError} />
         ) : plan.length === 0 ? (
           <div className="text-sm text-zinc-400">Текущих нарушений нет.</div>
         ) : (
@@ -159,13 +160,15 @@ export default function Report() {
         )}
       </AppCard>
 
-      <AppCard title="История отчётов" subtitle="Отчёты по выбранной организации">
+      <AppCard title="История отчётов" subtitle="По дням: последний отчёт каждого дня, до 90 дней">
         {loading ? (
           <SkeletonTable rows={5} cols={5} />
+        ) : loadError ? (
+          <ErrorState title="Ошибка загрузки" description={loadError} />
         ) : reports.length === 0 ? (
           <EmptyState
             title="Нет отчётов"
-            description="Для выбранной организации в таблице hardening_reports пока нет записей."
+            description="Отчёт формируется после каждого скана: пока сканов не было."
           />
         ) : (
           <div className="overflow-x-auto">
@@ -174,9 +177,9 @@ export default function Report() {
                 <tr>
                   <SortableHeader label="Дата" sortKey="date" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
                   <SortableHeader label="Всего проверок" sortKey="total" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Passed" sortKey="passed" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Failed" sortKey="failed" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Score" sortKey="score" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableHeader label="Соблюдено" sortKey="passed" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableHeader label="Нарушено" sortKey="failed" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableHeader label="Соответствие" sortKey="score" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
                 </tr>
               </thead>
               <tbody>

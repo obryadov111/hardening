@@ -1,15 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AppCard from "../components/ui/AppCard";
 import StatCard from "../components/ui/StatCard";
 import EmptyState from "../components/ui/EmptyState";
+import ErrorState from "../components/ui/ErrorState";
 import OrgGate from "../components/OrgGate";
 import { SkeletonTable } from "../components/ui/Skeleton";
-import SortableHeader from "../components/ui/SortableHeader";
-import { useSort } from "../hooks/useSort";
 import { getScoreTone } from "../utils/score";
 import { useOrganization } from "../context/OrganizationContext";
 import { getSnapshotsByOrganization } from "../api/snapshots";
+import { getAssetsByOrganization } from "../api/assets";
 import { downloadSnapshotExport } from "../api/exports";
 import { formatDateTime } from "../utils/datetime";
 import { collectionSource } from "../utils/collection";
@@ -44,6 +44,11 @@ function getStatusLabel(status) {
   }
 }
 
+const PAGE_SIZE = 50;
+const PAGER = "rounded-xl border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40";
+const SELECT = "rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white outline-none";
+const EMPTY_SUMMARY = { total: 0, completed: 0, failed: 0, latest: null };
+
 export default function Scans() {
   const {
     selectedOrganization,
@@ -53,48 +58,65 @@ export default function Scans() {
     error: orgError,
   } = useOrganization();
 
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(false);
+  return (
+    <OrgGate
+      title="Сканирования"
+      orgLoading={orgLoading}
+      orgError={orgError}
+      hasOrganizations={hasOrganizations}
+    >
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-semibold text-white">Сканирования</h1>
+          <p className="mt-1 text-sm text-zinc-400">
+            История сканирований организации{" "}
+            <span className="text-white">{selectedOrganization?.name || "—"}</span>.{" "}
+            Устройство без агента и SSH-доступа можно проверить{" "}
+            <Link to="/offline-scan" className="text-blue-300 underline hover:text-blue-200">по выгрузке конфигурации</Link>.
+          </p>
+        </div>
+        {/* key: смена организации — фильтр, страница и выбор для сравнения с чистого листа */}
+        {selectedOrganizationId ? <ScansView key={selectedOrganizationId} organizationId={selectedOrganizationId} /> : null}
+      </div>
+    </OrgGate>
+  );
+}
+
+function ScansView({ organizationId }) {
+  const [result, setResult] = useState({ key: null, items: [], total: 0, summary: EMPTY_SUMMARY, error: "" });
+  const [hosts, setHosts] = useState([]);
+  const [host, setHost] = useState("");
+  const [offset, setOffset] = useState(0);
   const [busyKey, setBusyKey] = useState("");
   const [exportError, setExportError] = useState("");
-  // Два скана для сравнения, отмеченные пользователем (любые, не только соседние).
+  // Два скана для сравнения, отмеченные пользователем (любые, не только соседние; выбор переживает смену страницы).
   const [selected, setSelected] = useState([]);
   const navigate = useNavigate();
 
   useEffect(() => {
-    async function loadData() {
-      if (!selectedOrganizationId) {
-        setRows([]);
-        setLoading(false);
-        return;
-      }
+    let cancelled = false;
+    getAssetsByOrganization(organizationId)
+      .then((assets) => {
+        if (!cancelled) setHosts([...new Set((assets || []).map((a) => a.hostname))].sort((a, b) => a.localeCompare(b, "ru")));
+      })
+      .catch(() => { if (!cancelled) setHosts([]); });
+    return () => { cancelled = true; };
+  }, [organizationId]);
 
-      try {
-        setLoading(true);
-        setSelected([]);
-        const data = await getSnapshotsByOrganization(selectedOrganizationId);
-        setRows(data);
-      } catch (error) {
-        console.error("Ошибка загрузки snapshots:", error.message);
-        setRows([]);
-      } finally {
-        setLoading(false);
-      }
-    }
+  const requestKey = JSON.stringify([host, offset]);
+  const loading = result.key !== requestKey;
 
-    if (!orgLoading) {
-      loadData();
-    }
-  }, [selectedOrganizationId, orgLoading]);
-
-  const stats = useMemo(() => {
-    const total = rows.length;
-    const completed = rows.filter((item) => item.status === "completed").length;
-    const failed = rows.filter((item) => item.status === "failed").length;
-    const latest = rows[0] || null;
-
-    return { total, completed, failed, latest };
-  }, [rows]);
+  useEffect(() => {
+    let cancelled = false;
+    getSnapshotsByOrganization(organizationId, { host, limit: PAGE_SIZE, offset })
+      .then((data) => {
+        if (!cancelled) setResult({ key: requestKey, items: data.items || [], total: data.total || 0, summary: data.summary || EMPTY_SUMMARY, error: "" });
+      })
+      .catch((error) => {
+        if (!cancelled) setResult((prev) => ({ ...prev, key: requestKey, error: error.message || "Не удалось получить данные" }));
+      });
+    return () => { cancelled = true; };
+  }, [organizationId, host, offset, requestKey]);
 
   // Файл формируется на бэкенде на лету и скачивается авторизованным запросом: без хранилища
   // и подписанных ссылок, у отчёта аудита нет публичного URL.
@@ -114,71 +136,44 @@ export default function Scans() {
       link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) {
-      console.error(`Ошибка экспорта ${format}:`, error.message);
       setExportError(`Не удалось сформировать ${format === "pdf" ? "PDF" : "Excel"}: ${error.message}`);
     } finally {
       setBusyKey("");
     }
   }
 
-  function toggleSelected(id) {
+  const isSelected = (id) => selected.some((item) => item.id === id);
+
+  function toggleSelected(snapshot) {
     setSelected((current) => {
-      if (current.includes(id)) return current.filter((item) => item !== id);
+      if (current.some((item) => item.id === snapshot.id)) return current.filter((item) => item.id !== snapshot.id);
       // Третий отмеченный скан вытесняет отмеченный первым — выбранными всегда остаются два последних.
-      return [...current, id].slice(-2);
+      return [...current, snapshot].slice(-2);
     });
   }
 
   function compareSelected() {
-    const [a, b] = selected.map((id) => rows.find((row) => row.id === id)).filter(Boolean);
+    const [a, b] = selected;
     if (!a || !b) return;
     // «Было» — более ранний скан, «стало» — более поздний, в каком бы порядке их ни отметили.
     const [before, after] = new Date(a.created_at) <= new Date(b.created_at) ? [a, b] : [b, a];
     navigate(`/scan-compare?before=${before.id}&after=${after.id}`);
   }
 
-  const { sortedRows, activeKey, sortDir, toggleSort } = useSort(rows, {
-    snapshot: (row) => row.snapshot_label || row.scan_number || "",
-    date: (row) => row.created_at || "",
-    status: (row) => row.status || "",
-    assets: (row) => row.total_assets ?? 0,
-    software: (row) => row.total_software ?? 0,
-    checks: (row) => row.total_checks ?? 0,
-    failed: (row) => row.failed ?? 0,
-    score: (row) => row.compliance_score ?? 0,
-  });
+  const { summary, items: rows, error: loadError } = result;
+  const firstLoad = result.key === null;
 
   return (
-    <OrgGate
-      title="Сканирования"
-      orgLoading={orgLoading}
-      orgError={orgError}
-      hasOrganizations={hasOrganizations}
-    >
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-white">Сканирования</h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          История snapshot-сканов по организации{" "}
-          <span className="text-white">{selectedOrganization?.name || "—"}</span>.{" "}
-          Устройство без агента и SSH-доступа можно проверить{" "}
-          <Link to="/offline-scan" className="text-blue-300 underline hover:text-blue-200">по выгрузке конфигурации</Link>.
-        </p>
-      </div>
-
+    <>
       <div className="grid gap-4 md:grid-cols-4">
-        <StatCard label="Всего snapshot" value={stats.total} loading={loading} hint="История сканирований" tone="info" />
-        <StatCard label="Завершено" value={stats.completed} loading={loading} hint="Успешно обработанные" tone="success" />
-        <StatCard label="Ошибки" value={stats.failed} loading={loading} hint="Неудачные запуски" tone="danger" />
+        <StatCard label="Всего сканов" value={summary.total} loading={firstLoad} hint="История сканирований" tone="info" />
+        <StatCard label="Завершено" value={summary.completed} loading={firstLoad} hint="Успешно обработанные" tone="success" />
+        <StatCard label="Ошибки" value={summary.failed} loading={firstLoad} hint="Неудачные запуски" tone="danger" />
         <StatCard
-          label="Последний score"
-          value={
-            stats.latest?.compliance_score != null
-              ? `${Math.round(stats.latest.compliance_score)}%`
-              : "—"
-          }
-          loading={loading}
-          hint="Последний snapshot"
+          label="Последнее соответствие"
+          value={summary.latest?.compliance_score != null ? `${Math.round(summary.latest.compliance_score)}%` : "—"}
+          loading={firstLoad}
+          hint="Последний скан"
           tone="default"
         />
       </div>
@@ -196,8 +191,8 @@ export default function Scans() {
         </div>
       ) : null}
 
-      <AppCard title="История snapshot-сканов" subtitle="Сравнение и экспорт по каждому запуску">
-        {rows.length > 1 ? (
+      <AppCard title="История сканирований" subtitle="Сравнение и экспорт по каждому запуску">
+        {summary.total > 1 ? (
           <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950/70 px-4 py-3 text-sm">
             <span className="text-zinc-400">
               Отметьте два любых скана для сравнения: выбрано {selected.length} из 2
@@ -215,36 +210,50 @@ export default function Scans() {
                 сбросить
               </button>
             ) : null}
+            <select
+              aria-label="Хост"
+              className={`${SELECT} ml-auto`}
+              value={host}
+              onChange={(e) => { setHost(e.target.value); setOffset(0); }}
+            >
+              <option value="">Все хосты</option>
+              {hosts.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
           </div>
         ) : null}
-        {loading ? (
+        {loadError ? (
+          <ErrorState title="Ошибка загрузки" description={loadError} />
+        ) : firstLoad ? (
           <SkeletonTable rows={6} cols={8} />
-        ) : rows.length === 0 ? (
+        ) : summary.total === 0 ? (
           <EmptyState
             title="Нет сканирований"
-            description="Для выбранной организации в таблице scan_snapshots пока нет записей."
+            description="Сканы появятся после первого отчёта агента или проверки по выгрузке."
           />
+        ) : rows.length === 0 ? (
+          <div className="text-sm text-zinc-400">{loading ? "Загрузка…" : "У этого хоста сканов нет."}</div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className={`overflow-x-auto ${loading ? "opacity-60" : ""}`}>
             <table className="min-w-full text-sm">
               <thead className="border-b border-zinc-800 text-left text-zinc-400">
                 <tr>
                   <th className="px-4 py-3"><span className="sr-only">Выбрать для сравнения</span></th>
-                  <SortableHeader label="Snapshot" sortKey="snapshot" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Дата" sortKey="date" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Статус" sortKey="status" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Активы" sortKey="assets" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="ПО" sortKey="software" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Checks" sortKey="checks" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Failed" sortKey="failed" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableHeader label="Score" sortKey="score" activeKey={activeKey} sortDir={sortDir} onSort={toggleSort} />
+                  <th className="px-4 py-3">Скан</th>
+                  <th className="px-4 py-3">Хосты</th>
+                  <th className="px-4 py-3">Дата</th>
+                  <th className="px-4 py-3">Статус</th>
+                  <th className="px-4 py-3">Активы</th>
+                  <th className="px-4 py-3">ПО</th>
+                  <th className="px-4 py-3">Проверок</th>
+                  <th className="px-4 py-3">Нарушено</th>
+                  <th className="px-4 py-3">Соответствие</th>
                   <th className="px-4 py-3">PDF</th>
                   <th className="px-4 py-3">Excel</th>
                   <th className="px-4 py-3">С предыдущим</th>
                 </tr>
               </thead>
               <tbody>
-                {sortedRows.map((item) => {
+                {rows.map((item) => {
                   // Предыдущий снимок того же актива (считает бэкенд): соседняя строка может быть про другой сервер.
                   const previousId = item.previous_snapshot_id || null;
                   const pdfBusy = busyKey === `${item.id}-pdf`;
@@ -254,21 +263,21 @@ export default function Scans() {
                     <tr
                       key={item.id}
                       className={`border-b border-zinc-800/60 text-zinc-200 transition hover:bg-zinc-800/40 ${
-                        selected.includes(item.id) ? "bg-blue-500/10" : ""
+                        isSelected(item.id) ? "bg-blue-500/10" : ""
                       }`}
                     >
                       <td className="px-4 py-3">
                         <input
                           type="checkbox"
-                          aria-label={`Выбрать Snapshot #${item.scan_number} для сравнения`}
-                          checked={selected.includes(item.id)}
-                          onChange={() => toggleSelected(item.id)}
+                          aria-label={`Выбрать скан №${item.scan_number} для сравнения`}
+                          checked={isSelected(item.id)}
+                          onChange={() => toggleSelected(item)}
                           className="h-4 w-4 accent-blue-500"
                         />
                       </td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-white">
-                          {item.snapshot_label || `Snapshot #${item.scan_number}`}
+                          {item.snapshot_label || `Скан №${item.scan_number}`}
                         </div>
                         {collectionSource(item.collection) ? (
                           <div
@@ -281,6 +290,15 @@ export default function Scans() {
                         {item.notes ? (
                           <div className="mt-1 text-xs text-zinc-500">{item.notes}</div>
                         ) : null}
+                      </td>
+
+                      <td className="px-4 py-3">
+                        {item.hosts?.length ? (
+                          <span title={item.hosts.join(", ")}>
+                            {item.hosts.slice(0, 3).join(", ")}
+                            {item.hosts.length > 3 ? ` и ещё ${item.hosts.length - 3}` : ""}
+                          </span>
+                        ) : "—"}
                       </td>
 
                       <td className="px-4 py-3">
@@ -309,6 +327,7 @@ export default function Scans() {
                         <button
                           type="button"
                           disabled={pdfBusy}
+                          aria-label={`Скачать PDF скана №${item.scan_number}`}
                           onClick={() => handleExport(item, "pdf")}
                           className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800 disabled:opacity-50"
                         >
@@ -320,6 +339,7 @@ export default function Scans() {
                         <button
                           type="button"
                           disabled={excelBusy}
+                          aria-label={`Скачать Excel скана №${item.scan_number}`}
                           onClick={() => handleExport(item, "excel")}
                           className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800 disabled:opacity-50"
                         >
@@ -331,6 +351,7 @@ export default function Scans() {
                         {previousId ? (
                           <Link
                             to={`/scan-compare?before=${previousId}&after=${item.id}`}
+                            aria-label={`Сравнить скан №${item.scan_number} с предыдущим`}
                             className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800"
                           >
                             Сравнить
@@ -346,8 +367,18 @@ export default function Scans() {
             </table>
           </div>
         )}
+        {result.total > PAGE_SIZE ? (
+          <div className="mt-4 flex items-center gap-3 text-sm text-zinc-400">
+            <button type="button" className={PAGER} disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
+              Назад
+            </button>
+            <span>{offset + 1}–{Math.min(offset + PAGE_SIZE, result.total)} из {result.total}</span>
+            <button type="button" className={PAGER} disabled={offset + PAGE_SIZE >= result.total || loading} onClick={() => setOffset(offset + PAGE_SIZE)}>
+              Вперёд
+            </button>
+          </div>
+        ) : null}
       </AppCard>
-    </div>
-    </OrgGate>
+    </>
   );
 }

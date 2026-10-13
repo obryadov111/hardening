@@ -23,7 +23,8 @@ export default function ComplianceChart({ passed = 0, failed = 0, notEvaluated =
 
   return (
     <div className="relative" style={{ width: "100%", height: 220 }}>
-      <ResponsiveContainer width="100%" height="100%">
+      {/* initialDimension: до первого замера контейнера Recharts иначе пишет в консоль «width(-1) and height(-1)» */}
+      <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 220, height: 220 }}>
         <PieChart>
           <Pie
             data={data}

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import AppCard from "../components/ui/AppCard";
 import StatCard from "../components/ui/StatCard";
 import EmptyState from "../components/ui/EmptyState";
+import ErrorState from "../components/ui/ErrorState";
 import OrgGate from "../components/OrgGate";
 import ComplianceChart from "../components/ComplianceChart";
 import TrendChart from "../components/TrendChart";
@@ -45,6 +46,7 @@ export default function Dashboard() {
   const [summary, setSummary] = useState(EMPTY_SUMMARY);
   const [reportsHistory, setReportsHistory] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     async function loadData() {
@@ -57,14 +59,17 @@ export default function Dashboard() {
 
       try {
         setLoading(true);
+        setLoadError("");
         const [data, reports] = await Promise.all([
           getDashboardSummary(selectedOrganizationId),
-          getReportsByOrganization(selectedOrganizationId),
+          // по дням: отчёт пересчитывается при каждом приёме, тысяча хостов — тысяча точек в день
+          getReportsByOrganization(selectedOrganizationId, { daily: true, limit: 30 }),
         ]);
         setSummary(data);
         setReportsHistory(Array.isArray(reports) ? reports : []);
       } catch (error) {
-        console.error("Ошибка загрузки dashboard:", error.message);
+        // Сбой — это не «нет данных»: иначе пустая организация и недоступный сервер выглядят одинаково.
+        setLoadError(error.message || "Не удалось получить данные");
         setSummary(EMPTY_SUMMARY);
         setReportsHistory([]);
       } finally {
@@ -82,7 +87,6 @@ export default function Dashboard() {
   const trendData = [...reportsHistory]
     .filter((report) => report.generated_at)
     .sort((a, b) => new Date(a.generated_at) - new Date(b.generated_at))
-    .slice(-8)
     .map((report) => ({
       date: formatTrendDate(report.generated_at),
       compliance: Math.round(report.compliance_score || 0),
@@ -145,7 +149,7 @@ export default function Dashboard() {
           )}
         </AppCard>
 
-        <AppCard title="Динамика соответствия" subtitle="Compliance score по последним отчётам">
+        <AppCard title="Динамика соответствия" subtitle="Соответствие по дням (последний отчёт дня), до 30 дней">
           {loading ? <Skeleton className="h-[220px] w-full" /> : <TrendChart data={trendData} />}
         </AppCard>
       </div>
@@ -169,7 +173,7 @@ export default function Dashboard() {
           label="Проверки"
           value={summary.checksCount}
           loading={loading}
-          hint="Всего выполненных hardening-checks"
+          hint="Всего выполненных проверок харденинга"
           tone="default"
         />
         <StatCard
@@ -181,10 +185,12 @@ export default function Dashboard() {
         />
       </div>
 
-      {!loading && !hasAnyData ? (
+      {loadError ? (
+        <ErrorState title="Ошибка загрузки" description={loadError} />
+      ) : !loading && !hasAnyData ? (
         <EmptyState
           title="Нет данных по организации"
-          description="Организация выбрана, но связанные данные в БД пока отсутствуют."
+          description="Данные появятся после первого отчёта агента: ключ и команда установки — на странице «Агенты»."
         />
       ) : (
         <div className="grid gap-6 xl:grid-cols-3">

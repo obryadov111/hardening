@@ -37,7 +37,7 @@ export default function OrgGate({
         <h1 className="text-2xl font-semibold text-white">{title}</h1>
         <EmptyState
           title="Нет организаций"
-          description="Таблица client_organizations пустая. Сначала добавь хотя бы одну организацию."
+          description="Вас ещё не добавили ни в одну организацию. Организации создаёт суперадминистратор («Пользователи и организации»), доступ к ним выдаёт администратор организации."
         />
       </div>
     );

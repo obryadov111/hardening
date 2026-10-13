@@ -1,7 +1,10 @@
 import { apiFetch } from "./client";
 
-export async function getSnapshotsByOrganization(organizationId) {
-  return apiFetch(`/organizations/${organizationId}/snapshots`);
+/** Страница сканов организации, новые сначала: { items, total, limit, offset, summary: { total, completed, failed, latest } }. */
+export async function getSnapshotsByOrganization(organizationId, { host = "", limit = 50, offset = 0 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (host) params.set("host", host);
+  return apiFetch(`/organizations/${organizationId}/snapshots?${params}`);
 }
 
 export async function compareSnapshots(beforeSnapshotId, afterSnapshotId) {

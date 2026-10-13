@@ -7,15 +7,23 @@ const TONE_MAP = {
 
 const DEFAULT_TONE = "border-zinc-700 bg-zinc-800 text-zinc-300";
 
-/** Бейдж результата проверки харденинга: pass/fail/error/skipped. */
+const LABELS = {
+  pass: "соблюдено",
+  fail: "нарушено",
+  error: "не проверено",
+  skipped: "пропущено",
+};
+
+/** Бейдж результата проверки харденинга: pass/fail/error/skipped — по-русски, код статуса в title. */
 export default function CheckStatusBadge({ value }) {
   const key = (value || "").toLowerCase();
 
   return (
     <span
+      title={value || undefined}
       className={`inline-flex rounded-full border px-2 py-1 text-xs font-medium ${TONE_MAP[key] || DEFAULT_TONE}`}
     >
-      {value || "unknown"}
+      {LABELS[key] || value || "неизвестно"}
     </span>
   );
 }

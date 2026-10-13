@@ -1,14 +1,19 @@
 import { ChevronDown, ChevronUp, ChevronsUpDown } from "lucide-react";
 
+/** Заголовок сортируемой колонки: кнопка (работает и с клавиатуры), направление — в aria-sort. */
 export default function SortableHeader({ label, sortKey, activeKey, sortDir, onSort }) {
   const isActive = activeKey === sortKey;
 
   return (
     <th
-      onClick={() => onSort(sortKey)}
-      className="cursor-pointer select-none px-4 py-3 hover:text-zinc-200"
+      className="px-4 py-3"
+      aria-sort={isActive ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
     >
-      <span className="inline-flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className="inline-flex select-none items-center gap-1 hover:text-zinc-200"
+      >
         {label}
         {isActive ? (
           sortDir === "asc" ? (
@@ -19,7 +24,7 @@ export default function SortableHeader({ label, sortKey, activeKey, sortDir, onS
         ) : (
           <ChevronsUpDown size={13} className="text-zinc-600" />
         )}
-      </span>
+      </button>
     </th>
   );
 }
