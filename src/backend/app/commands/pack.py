@@ -13,6 +13,7 @@
 Формат фикстур — pack_tests/README.md.
 """
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -130,10 +131,11 @@ def cmd_evaluate(args) -> int:
     # Проба, которой нужна отсутствующая в окружении команда (в контейнере нет systemd и kmod), —
     # «не проверено» по построению; по причине, а не по списку id: новая проверка не ломает CI.
     missing = {f"команда {cmd} не найдена" for cmd in (args.allow_missing_command or [])}
+    patterns = [re.compile(p) for p in (args.allow_error_matching or [])]
 
     def allowed(r) -> bool:
-        error = run["probe_results"].get(r.check_id, {}).get("error")
-        return r.check_id in (args.allow_error or []) or error in missing
+        error = run["probe_results"].get(r.check_id, {}).get("error") or ""
+        return r.check_id in (args.allow_error or []) or error in missing or any(p.search(error) for p in patterns)
 
     unexpected = [r for r in results if r.status == "error" and not allowed(r)]
     counts = {s: sum(r.status == s for r in results) for s in ("pass", "fail", "error")}
@@ -173,6 +175,9 @@ def main(argv=None) -> int:
     evaluate.add_argument("--allow-error", action="append", help="проверка, которой разрешено «не проверено» (можно несколько)")
     evaluate.add_argument("--allow-missing-command", action="append",
                           help="разрешить «не проверено», если в окружении нет этой команды, например systemctl (можно несколько)")
+    evaluate.add_argument("--allow-error-matching", action="append",
+                          help="разрешить «не проверено», если текст ошибки пробы подходит под регулярное выражение "
+                               "(например, systemctl без systemd в контейнере; можно несколько)")
     evaluate.add_argument("--packs", default=str(PACKS_DIR), help="каталог паков")
     evaluate.set_defaults(func=cmd_evaluate)
     args = parser.parse_args(argv)

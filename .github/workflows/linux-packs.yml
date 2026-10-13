@@ -4,7 +4,8 @@
 # не выполнилась — например, дистрибутив в новой версии поменял путь или формат.
 # В контейнере нет systemd и kmod — пробы, которым нужны systemctl или modprobe, здесь «не проверено» по
 # построению: разрешено по причине (--allow-missing-command), а не списком проверок — новая проверка служб
-# не ломает CI. --allow-error — для проб, которые падают в контейнере иначе (systemctl без systemd в RHEL).
+# не ломает CI; systemctl есть, а systemd не запущен (Debian 13, Astra) — по тексту ошибки (--allow-error-matching).
+# --allow-error — для проб, которые падают в контейнере иначе (firewalld, auditd).
 # Образы «плавающие» (rockylinux:9 и т. п.): падение после выхода новой версии ОС — полезный сигнал.
 name: Linux packs
 
@@ -98,4 +99,5 @@ jobs:
           args=""
           for check in ${{ matrix.allow }}; do args="$args --allow-error $check"; done
           python -m app.commands.pack evaluate ../../payload.json --pack ${{ matrix.pack }} $args \
-            --allow-missing-command systemctl --allow-missing-command modprobe
+            --allow-missing-command systemctl --allow-missing-command modprobe \
+            --allow-error-matching "not been booted with systemd"

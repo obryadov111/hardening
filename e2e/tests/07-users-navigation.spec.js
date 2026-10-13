@@ -65,8 +65,9 @@ test('суперадмин: новая организация сразу выб�
   await page.getByPlaceholder('Название *').fill(name)
   await page.getByPlaceholder('Отрасль').fill('Энергетика')
   await page.getByRole('button', { name: /Создать организацию|Создать/ }).first().click()
-  await expect(page.getByText(new RegExp(`«?${name}»? создана|Организация «${name}»`))).toBeVisible()
   await expect(page.getByText(`Текущая организация: ${name}`)).toBeVisible()
+  // сообщение остаётся и после того, как новая организация стала выбранной (страница не пересоздаётся)
+  await expect(page.getByText(`Организация «${name}» создана и выбрана.`, { exact: false })).toBeVisible()
   await expect(page.getByLabel('Организация').first()).toContainText(name)
 
   await page.getByPlaceholder('Название *').fill(name.toUpperCase())

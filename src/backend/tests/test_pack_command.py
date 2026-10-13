@@ -55,3 +55,13 @@ def test_pack_not_run_on_this_platform_fails(tmp_path, capsys):
     path, _ = _payload(tmp_path, {})
     assert main(["evaluate", str(path), "--pack", "astra-linux"]) == 1
     assert "не выполнен" in capsys.readouterr().out
+
+
+def test_errors_allowed_by_message_pattern(tmp_path):
+    check = load_registry(PACKS_DIR).get("ubuntu-server").checks[0].id
+    path, _ = _payload(tmp_path, {check: "systemctl is-active inetd: состояние не получено (System has not been booted "
+                                         "with systemd as init system (PID 1). Can't operate.)"})
+    base = ["evaluate", str(path), "--pack", "ubuntu-server"]
+    assert main(base) == 1
+    assert main([*base, "--allow-error-matching", "not been booted with systemd"]) == 0
+    assert main([*base, "--allow-error-matching", "нет прав"]) == 1
