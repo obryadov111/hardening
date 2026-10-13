@@ -133,7 +133,7 @@ test('принятие риска: форма, обязательное обос
   await expect(register.locator('tbody tr', { hasText: code })).toContainText('Отозвано')
 })
 
-test('принятие риска на все активы организации со сроком', async ({ page, request }) => {
+test('принятие риска на все активы организации со сроком', async ({ page }) => {
   await loginAs(page, 'admin')
   await page.goto('/hardening')
   await page.getByLabel('Статус').selectOption({ label: 'Нарушено' })

@@ -96,7 +96,6 @@ test('сканы: «Сравнить» с предыдущим сканом то
 })
 
 test('сравнение: по умолчанию последний и предыдущий того же актива; итоги и таблица изменений', async ({ page, request }) => {
-  const s = seed()
   const h = await apiAs(request, 'viewer')
   const body = await snapshotsApi(request, '&host=web-01')
   const [newest, , oldest] = body.items
@@ -113,7 +112,6 @@ test('сравнение: по умолчанию последний и пред
   const all = await snapshotsApi(request)
   await page.goto('/scan-compare')
   await expect(page).toHaveURL(new RegExp(`after=${all.items[0].id}`))
-  void s
 })
 
 test('сравнение: выбор в форме, «поменять местами», один и тот же скан, «было» новее «стало»', async ({ page, request }) => {
@@ -157,7 +155,7 @@ test('выгрузка: наблюдатель не загружает', async (
   await expect(page.getByRole('button', { name: 'Проверить выгрузку' })).toBeDisabled()
 })
 
-test('выгрузка: Cisco — распознавание по show version, снимок создан, скан появился', async ({ page, request }) => {
+test('выгрузка: Cisco — распознавание по show version, снимок создан, скан появился', async ({ page }) => {
   await loginAs(page, 'admin')
   await page.goto('/offline-scan')
   const submit = page.getByRole('button', { name: 'Проверить выгрузку' })
@@ -179,7 +177,6 @@ test('выгрузка: Cisco — распознавание по show version, 
   await expect(page.locator('tbody tr').first()).toContainText('E2E выгрузка')
   await expect(page.locator('tbody tr').first()).toContainText('sw-e2e-01')
   await expect(page.locator('tbody tr').first()).toContainText(/выгрузк/i)
-  void request
 })
 
 test('выгрузка: только running-config — подтверждение пака; чужая выгрузка — ошибка сервера', async ({ page }) => {

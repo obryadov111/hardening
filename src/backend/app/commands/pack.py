@@ -6,7 +6,7 @@
                                                                 # паки на ЭТОЙ машине настоящими пробами
     python -m app.commands.pack manifests --key-file файл --out файл [--transport local]
                                                                 # подписанные манифесты для --manifests-file агента
-    python -m app.commands.pack evaluate результат.json --pack id [--allow-error check_id ...]
+    python -m app.commands.pack evaluate результат.json --pack id [--allow-error check_id ...] [--allow-missing-command systemctl ...]
                                                                 # оценка сохранённого прогона агента (--dry-run)
 
 Код выхода 1 — есть ошибки валидации или несовпадения в фикстурах; предупреждения на код не влияют.
@@ -124,8 +124,18 @@ def cmd_evaluate(args) -> int:
         return 1
     run = runs[args.pack]
     pack = load_registry(Path(args.packs)).get(args.pack, run["version"])
-    results = evaluate_pack(pack, {k: SimpleNamespace(**v) for k, v in run["probe_results"].items()})
-    unexpected = [r for r in results if r.status == "error" and r.check_id not in (args.allow_error or [])]
+    # Необязательные поля — как в схеме приёма (IngestProbeResult): агент может их не присылать.
+    defaults = {"found": True, "value": None, "evidence": None, "error": None}
+    results = evaluate_pack(pack, {k: SimpleNamespace(**{**defaults, **v}) for k, v in run["probe_results"].items()})
+    # Проба, которой нужна отсутствующая в окружении команда (в контейнере нет systemd и kmod), —
+    # «не проверено» по построению; по причине, а не по списку id: новая проверка не ломает CI.
+    missing = {f"команда {cmd} не найдена" for cmd in (args.allow_missing_command or [])}
+
+    def allowed(r) -> bool:
+        error = run["probe_results"].get(r.check_id, {}).get("error")
+        return r.check_id in (args.allow_error or []) or error in missing
+
+    unexpected = [r for r in results if r.status == "error" and not allowed(r)]
     counts = {s: sum(r.status == s for r in results) for s in ("pass", "fail", "error")}
     mark = "✗" if unexpected else "✓"
     print(f"{mark} {os_name}: {pack.pack} {pack.version} — соблюдено {counts['pass']}, нарушено {counts['fail']}, не проверено {counts['error']}")
@@ -161,6 +171,8 @@ def main(argv=None) -> int:
     evaluate.add_argument("payload")
     evaluate.add_argument("--pack", required=True)
     evaluate.add_argument("--allow-error", action="append", help="проверка, которой разрешено «не проверено» (можно несколько)")
+    evaluate.add_argument("--allow-missing-command", action="append",
+                          help="разрешить «не проверено», если в окружении нет этой команды, например systemctl (можно несколько)")
     evaluate.add_argument("--packs", default=str(PACKS_DIR), help="каталог паков")
     evaluate.set_defaults(func=cmd_evaluate)
     args = parser.parse_args(argv)

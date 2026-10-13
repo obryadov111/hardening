@@ -27,4 +27,10 @@ export default defineConfig([
       'no-console': ['warn', { allow: ['warn', 'error'] }],
     },
   },
+  {
+    // Сквозные тесты и конфиги сборки выполняются в Node, а не в браузере
+    files: ['e2e/**/*.js', '*.config.js'],
+    languageOptions: { globals: globals.node },
+    rules: { 'react-refresh/only-export-components': 'off', 'react-hooks/rules-of-hooks': 'off' },
+  },
 ])

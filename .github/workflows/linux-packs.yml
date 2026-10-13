@@ -2,7 +2,9 @@
 # контейнерах официальных образов с типовыми серверными пакетами и умолчаниями дистрибутива; результат
 # оценивается логикой сервера (pack evaluate). Падает, если пак не распознал ОС или файловая проба
 # не выполнилась — например, дистрибутив в новой версии поменял путь или формат.
-# В контейнере нет systemd — пробы служб здесь «не проверено» по построению (--allow-error).
+# В контейнере нет systemd и kmod — пробы, которым нужны systemctl или modprobe, здесь «не проверено» по
+# построению: разрешено по причине (--allow-missing-command), а не списком проверок — новая проверка служб
+# не ломает CI. --allow-error — для проб, которые падают в контейнере иначе (systemctl без systemd в RHEL).
 # Образы «плавающие» (rockylinux:9 и т. п.): падение после выхода новой версии ОС — полезный сигнал.
 name: Linux packs
 
@@ -68,6 +70,23 @@ jobs:
           head -c 32 /dev/urandom | base64 > ../../work/key
           python -m app.commands.pack manifests --key-file ../../work/key --out ../../work/manifests.json
 
+      # Реестр РЕД ОС подписан Russian Trusted Root CA (Минцифры), которого нет у раннера GitHub
+      - name: Russian Trusted CA for registry.red-soft.ru
+        if: startsWith(matrix.image, 'registry.red-soft.ru/')
+        run: |
+          sudo mkdir -p /etc/docker/certs.d/registry.red-soft.ru
+          sudo cp deploy/certs/russian-trusted-ca.pem /etc/docker/certs.d/registry.red-soft.ru/ca.crt
+
+      # Реестры вне GitHub (Astra, РЕД ОС) иногда не отвечают — три попытки скачать образ
+      - name: Pull ${{ matrix.image }}
+        run: |
+          for attempt in 1 2 3; do
+            docker pull -q "${{ matrix.image }}" && exit 0
+            echo "попытка $attempt не удалась, повтор через 20 с" >&2
+            sleep 20
+          done
+          exit 1
+
       - name: Agent inside ${{ matrix.image }}
         run: |
           docker run --rm -v "$PWD/agent:/agent:ro" -v "$PWD/work:/work:ro" -v "$PWD/.github/scripts:/scripts:ro" \
@@ -78,4 +97,5 @@ jobs:
         run: |
           args=""
           for check in ${{ matrix.allow }}; do args="$args --allow-error $check"; done
-          python -m app.commands.pack evaluate ../../payload.json --pack ${{ matrix.pack }} $args
+          python -m app.commands.pack evaluate ../../payload.json --pack ${{ matrix.pack }} $args \
+            --allow-missing-command systemctl --allow-missing-command modprobe

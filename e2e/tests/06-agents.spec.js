@@ -30,7 +30,6 @@ test('ключ площадки: создание, показ один раз, �
   await page.getByPlaceholder('Казань, ЦОД, сегмент АСУ').fill('E2E Казань')
   await page.getByLabel('Срок действия').selectOption({ label: '90 дней' })
   await create.click()
-  const box = page.locator('div', { hasText: /^Ключ «E2E Казань» создан/ }).first()
   await expect(page.getByText(/Ключ «E2E Казань» создан, действует до \d\d\.\d\d\.\d{4}/)).toBeVisible()
   const key = (await page.locator('pre, code').filter({ hasText: /^[A-Za-z0-9_-]{30,}$/ }).first().textContent()).trim()
   expect(key.length).toBeGreaterThan(30)
@@ -41,7 +40,6 @@ test('ключ площадки: создание, показ один раз, �
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(key)
   await page.getByRole('button', { name: 'Скрыть ключ' }).click()
   await expect(page.getByText(key)).toHaveCount(0)
-  void box
 
   // в таблице ключей: действует, не использовался
   const keysTable = page.locator('table').filter({ hasText: 'Действует до' })
@@ -106,7 +104,6 @@ test('хосты: поиск, отзыв (отчёты больше не при�
 test('охват: список из AD — плитки, фильтр, поиск, периоды, CSV, замена и удаление списка', async ({ page }) => {
   await loginAs(page, 'admin')
   await page.goto('/agents')
-  const cover = page.locator('section, div').filter({ has: page.getByRole('heading', { name: 'Охват' }) }).last()
   await page.getByRole('button', { name: 'копировать' }).click()
   await expect(page.getByRole('button', { name: 'Загрузить список' })).toBeDisabled()
 
@@ -126,7 +123,6 @@ test('охват: список из AD — плитки, фильтр, поис�
   await expect(tile('Агент не установлен')).toContainText('1')
   await tile('Агент не установлен').click()
   await expect(tile('Агент не установлен')).toHaveAttribute('aria-pressed', 'true')
-  const rows = cover.locator('tbody tr')
   await expect(page.getByText('агент не установлен: 1')).toBeVisible()
   const coverTable = page.locator('table').filter({ hasText: 'Последний вход (AD)' })
   await expect(coverTable.locator('tr', { hasText: 'PC-404' })).toContainText('агента нет')
@@ -134,7 +130,6 @@ test('охват: список из AD — плитки, фильтр, поис�
   await tile('Нет в списке').click()
   await expect(coverTable.locator('tr', { hasText: 'win-srv-01' })).toContainText('нет в списке')
   await tile('Нет в списке').click()
-  void rows
 
   await page.getByLabel('Поиск в охвате').fill('pc-4')
   await expect(page.getByText('весь список: 1')).toBeVisible()

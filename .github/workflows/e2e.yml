@@ -1,0 +1,74 @@
+# Сквозные тесты интерфейса (e2e/): Playwright + Chromium против настоящего бэкенда на одноразовой БД.
+# Каждая страница, кнопка и роль; любая ошибка или предупреждение в консоли и любой 5xx валят тест.
+name: E2E
+
+on:
+  push:
+    paths:
+      - "src/**"
+      - "agent/**"
+      - "e2e/**"
+      - "package.json"
+      - "package-lock.json"
+      - "vite.config.js"
+      - ".github/workflows/e2e.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "agent/**"
+      - "e2e/**"
+  workflow_dispatch:
+
+jobs:
+  playwright:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app_e2e_db
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      E2E_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5433/app_e2e_db
+      E2E_PYTHON: python
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install
+        run: |
+          pip install -r src/backend/requirements.txt
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Playwright
+        run: npm run test:e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+          retention-days: 7
