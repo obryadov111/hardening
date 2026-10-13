@@ -12,9 +12,10 @@ export default defineConfig({
   server: {
     // Тот же origin, что и в проде (deploy/nginx.conf: /api/ -> backend:8000):
     // браузер ходит на /api текущего адреса, без CORS и мимо системного прокси.
+    // VITE_API_PROXY — другой бэкенд, например стенд сквозных тестов (e2e/playwright.config.js).
     proxy: {
-      '/api': 'http://localhost:8000',
-      '/health': 'http://localhost:8000',
+      '/api': process.env.VITE_API_PROXY || 'http://localhost:8000',
+      '/health': process.env.VITE_API_PROXY || 'http://localhost:8000',
     },
   },
 })
