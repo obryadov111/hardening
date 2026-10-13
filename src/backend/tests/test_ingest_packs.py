@@ -243,7 +243,7 @@ def test_hardening_api_shows_pack_results_with_title_severity_evidence_and_pack(
     resp = client.get(f"/api/organizations/{org_id}/hardening", headers=_viewer_headers(make_user, add_membership, auth_header, org_id))
 
     assert resp.status_code == 200, resp.text
-    by_code = {item["rule"]["rule_code"]: item for item in resp.json()}
+    by_code = {item["rule"]["rule_code"]: item for item in resp.json()["items"]}
     item = by_code["ssh.permit_root_login"]
     assert item["rule"]["title"] == "Запрет root по SSH"
     assert item["rule"]["severity"] == "critical"
@@ -266,7 +266,7 @@ def test_hardening_api_still_serves_legacy_results_from_the_rules_table(
 
     resp = client.get(f"/api/organizations/{org_id}/hardening", headers=_viewer_headers(make_user, add_membership, auth_header, org_id))
 
-    by_code = {item["rule"]["rule_code"]: item for item in resp.json()}
+    by_code = {item["rule"]["rule_code"]: item for item in resp.json()["items"]}
     item = by_code["ssh.permit_root_login"]
     assert item["rule"]["title"] == "Запрет входа по SSH под root" and item["rule"]["severity"] == "critical"
     assert item["rule"]["remediation"] and item["rule"]["id"] is not None

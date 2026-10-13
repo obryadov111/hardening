@@ -5,8 +5,8 @@ from app.api.routes.admin_organizations import router as admin_organizations_rou
 from app.api.routes.admin_users import router as admin_users_router
 from app.api.routes.agent import router as agent_router
 from app.api.routes.agent_keys import router as agent_keys_router
-from app.api.routes.coverage import router as coverage_router
 from app.api.routes.auth import router as auth_router
+from app.api.routes.coverage import router as coverage_router
 from app.api.routes.data import router as data_router
 from app.api.routes.exports import router as exports_router
 from app.api.routes.fstec import router as fstec_router

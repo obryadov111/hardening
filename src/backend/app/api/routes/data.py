@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -9,6 +11,7 @@ from app.api.deps import (
     get_user_role_in_org,
     require_org_access,
 )
+from app.core.config import settings
 from app.models.asset import Asset
 from app.models.environment import Environment
 from app.models.organization import ClientOrganization
@@ -237,13 +240,56 @@ def _software_row_to_dict(row: dict) -> dict:
     }
 
 
+_SOFTWARE_SORT = {
+    "name": "s.name", "version": "s.version", "vendor": "s.vendor", "host": "a.hostname", "created_at": "s.created_at",
+}
+
+
 @router.get("/organizations/{organization_id}/software")
-def get_software_by_organization(organization_id: str, _: User = Depends(require_org_access), db: Session = Depends(get_db)):
+def get_software_by_organization(
+    organization_id: str,
+    q: str = Query("", max_length=200, description="Подстрока в названии, версии, производителе или имени хоста"),
+    host: str = Query("", max_length=255, description="Только ПО этого хоста"),
+    sort: Literal["name", "version", "vendor", "host", "created_at"] = "name",
+    direction: Literal["asc", "desc"] = Query("asc", alias="dir"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    _: User = Depends(require_org_access),
+    db: Session = Depends(get_db),
+):
+    """Страница инвентаризации ПО: на хосте ~1500 пакетов, на тысячу хостов — полтора миллиона строк,
+    поэтому поиск, фильтр по хосту и сортировка — на сервере, а в ответе страница и итоги."""
+    where = ["e.organization_id = :org_id"]
+    params: dict = {"org_id": organization_id}
+    if q.strip():
+        where.append("(s.name ILIKE :q OR s.version ILIKE :q OR s.vendor ILIKE :q OR a.hostname ILIKE :q)")
+        params["q"] = "%" + q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    if host:
+        where.append("a.hostname = :host")
+        params["host"] = host
+    condition = " AND ".join(where)
+    order = f"{_SOFTWARE_SORT[sort]} {direction.upper()} NULLS LAST, s.name ASC, a.hostname ASC, s.id ASC"
     rows = db.execute(
-        text(_SOFTWARE_SELECT + " WHERE e.organization_id = :org_id ORDER BY s.name ASC"),
-        {"org_id": organization_id},
+        text(_SOFTWARE_SELECT + f" WHERE {condition} ORDER BY {order} LIMIT :limit OFFSET :offset"),
+        {**params, "limit": limit, "offset": offset},
     ).mappings().all()
-    return [_software_row_to_dict(row) for row in rows]
+    total = db.execute(
+        text(f"SELECT count(*) FROM software s JOIN assets a ON a.id = s.asset_id JOIN environments e ON e.id = a.environment_id WHERE {condition}"),
+        params,
+    ).scalar()
+    summary = db.execute(text("""
+        SELECT count(*) AS programs, count(DISTINCT s.category) AS categories,
+               COALESCE(array_agg(DISTINCT a.hostname ORDER BY a.hostname) FILTER (WHERE a.hostname IS NOT NULL), '{}') AS hosts
+        FROM software s JOIN assets a ON a.id = s.asset_id JOIN environments e ON e.id = a.environment_id
+        WHERE e.organization_id = :org_id
+    """), {"org_id": organization_id}).mappings().one()
+    return {
+        "items": [_software_row_to_dict(row) for row in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "summary": {"programs": summary["programs"], "categories": summary["categories"], "hosts": list(summary["hosts"])},
+    }
 
 
 @router.get("/assets/{asset_id}/software")
@@ -304,13 +350,100 @@ def _hardening_row_to_dict(row: dict) -> dict:
     }
 
 
+_SEVERITY = "lower(COALESCE(r.severity, hc.severity))"
+_SEVERITY_RANK = f"CASE {_SEVERITY} WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END"
+_ACCEPTED = "(hc.status = 'fail' AND hc.risk_exception_id IS NOT NULL)"
+_OPEN_FAIL = "(hc.status = 'fail' AND hc.risk_exception_id IS NULL)"
+# Срок устранения: открытые нарушения — от критических к низким, затем принятые риски, остальное — в конце.
+_DEADLINE = f"CASE WHEN {_OPEN_FAIL} THEN 4 - {_SEVERITY_RANK} WHEN {_ACCEPTED} THEN 8 ELSE 9 END"
+_HARDENING_SORT = {
+    "asset": "a.hostname",
+    "rule": "COALESCE(r.title, hc.title)",
+    "severity": _SEVERITY_RANK,
+    "status": f"CASE WHEN {_ACCEPTED} THEN 'fail-accepted' ELSE hc.status END",
+    "deadline": _DEADLINE,
+    "checked_at": "hc.checked_at",
+}
+_HARDENING_STATUS = {
+    "pass": "hc.status = 'pass'",
+    "fail": _OPEN_FAIL,
+    "accepted": _ACCEPTED,
+    "error": "hc.status NOT IN ('pass', 'fail')",
+}
+_FROM_CHECKS = """
+    FROM hardening_checks hc
+    JOIN assets a ON a.id = hc.asset_id
+    JOIN environments e ON e.id = a.environment_id
+    LEFT JOIN hardening_rules r ON r.id = hc.rule_id
+"""
+
+
 @router.get("/organizations/{organization_id}/hardening")
-def get_hardening_by_organization(organization_id: str, _: User = Depends(require_org_access), db: Session = Depends(get_db)):
+def get_hardening_by_organization(
+    organization_id: str,
+    q: str = Query("", max_length=200, description="Подстрока в названии или коде проверки, имени хоста"),
+    host: str = Query("", max_length=255),
+    status: Literal["", "pass", "fail", "accepted", "error"] = Query("", description="fail — открытые нарушения, accepted — с принятым риском"),
+    severity: Literal["", "critical", "high", "medium", "low"] = "",
+    sort: Literal["asset", "rule", "severity", "status", "deadline", "checked_at"] = "deadline",
+    direction: Literal["asc", "desc"] = Query("asc", alias="dir"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    _: User = Depends(require_org_access),
+    db: Session = Depends(get_db),
+):
+    """Текущие результаты проверок организации: 36 проверок на хост, на тысячу хостов — десятки тысяч строк,
+    поэтому фильтры, сортировка и страницы — на сервере. summary — по всей организации (плитки и план
+    устранения на «Харденинге» и в «Отчётах»), без учёта фильтров."""
+    where = ["e.organization_id = :org_id"]
+    params: dict = {"org_id": organization_id}
+    if q.strip():
+        where.append("(COALESCE(r.title, hc.title) ILIKE :q OR COALESCE(r.rule_code, hc.check_id) ILIKE :q OR a.hostname ILIKE :q)")
+        params["q"] = "%" + q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    if host:
+        where.append("a.hostname = :host")
+        params["host"] = host
+    if status:
+        where.append(_HARDENING_STATUS[status])
+    if severity:
+        where.append(f"{_SEVERITY} = :severity")
+        params["severity"] = severity
+    condition = " AND ".join(where)
+    order = f"{_HARDENING_SORT[sort]} {direction.upper()} NULLS LAST, a.hostname ASC, COALESCE(r.rule_code, hc.check_id) ASC, hc.id ASC"
     rows = db.execute(
-        text(_HARDENING_SELECT + " WHERE e.organization_id = :org_id ORDER BY hc.checked_at DESC NULLS LAST"),
-        {"org_id": organization_id},
+        text(_HARDENING_SELECT + f" WHERE {condition} ORDER BY {order} LIMIT :limit OFFSET :offset"),
+        {**params, "limit": limit, "offset": offset},
     ).mappings().all()
-    return [_hardening_row_to_dict(row) for row in rows]
+    total = db.execute(text(f"SELECT count(*) {_FROM_CHECKS} WHERE {condition}"), params).scalar()
+
+    org = {"org_id": organization_id}
+    counts = db.execute(text(f"""
+        SELECT count(*) AS total,
+               count(*) FILTER (WHERE hc.status = 'pass') AS passed,
+               count(*) FILTER (WHERE {_OPEN_FAIL}) AS failed,
+               count(*) FILTER (WHERE {_ACCEPTED}) AS accepted,
+               count(*) FILTER (WHERE hc.status NOT IN ('pass', 'fail')) AS errors,
+               count(*) FILTER (WHERE {_OPEN_FAIL} AND {_SEVERITY} IN ('critical', 'high')) AS mandatory,
+               COALESCE(array_agg(DISTINCT a.hostname ORDER BY a.hostname), '{{}}') AS hosts
+        {_FROM_CHECKS} WHERE e.organization_id = :org_id
+    """), org).mappings().one()
+    by_severity = db.execute(text(f"""
+        SELECT {_SEVERITY} AS severity, count(*) AS count, count(DISTINCT hc.asset_id) AS assets
+        {_FROM_CHECKS} WHERE e.organization_id = :org_id AND {_OPEN_FAIL} AND {_SEVERITY} IN ('critical', 'high', 'medium', 'low')
+        GROUP BY 1 ORDER BY max({_SEVERITY_RANK}) DESC
+    """), org).mappings().all()
+    return {
+        "items": [_hardening_row_to_dict(row) for row in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "summary": {
+            **{k: counts[k] for k in ("total", "passed", "failed", "accepted", "errors", "mandatory")},
+            "hosts": list(counts["hosts"]),
+            # открытые нарушения по уровням — план устранения (сроки и обязательность — во фронтенде, utils/remediation.js)
+            "open_by_severity": [dict(row) for row in by_severity],
+        },
+    }
 
 
 @router.get("/assets/{asset_id}/hardening")
@@ -323,43 +456,108 @@ def get_hardening_by_asset(asset_id: str, current_user: User = Depends(get_curre
     return [_hardening_row_to_dict(row) for row in rows]
 
 
-@router.get("/organizations/{organization_id}/snapshots", response_model=list[ScanSnapshotOut])
-def get_snapshots_by_organization(organization_id: str, _: User = Depends(require_org_access), db: Session = Depends(get_db)):
-    query = db.query(ScanSnapshot).filter(ScanSnapshot.organization_id == organization_id)
-    snapshots = query.order_by(ScanSnapshot.scan_number.desc()).all()
-    # Снимок создаётся на каждый прогон агента и обычно покрывает один актив, поэтому соседний по
-    # номеру снимок может быть про другой сервер. Для сравнения нужен предыдущий снимок с общим активом.
-    previous = dict(db.execute(
-        text("""
-            WITH sa AS (
+@router.get("/organizations/{organization_id}/snapshots")
+def get_snapshots_by_organization(
+    organization_id: str,
+    host: str = Query("", max_length=255, description="Только сканы этого хоста"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    _: User = Depends(require_org_access),
+    db: Session = Depends(get_db),
+):
+    """Сканы организации, новые сначала. Снимок создаётся на каждый прогон агента — тысяча хостов дают
+    тысячу снимков в день, поэтому страницы; у каждого — имена хостов и предыдущий снимок с общим активом
+    (соседний по номеру обычно про другой сервер). Предыдущий ищется только для снимков страницы."""
+    where = "s.organization_id = :org_id"
+    params: dict = {"org_id": organization_id}
+    if host:
+        where += """ AND EXISTS (
+            SELECT 1 FROM scan_check_results scr JOIN assets a ON a.id = scr.asset_id
+            WHERE scr.snapshot_id = s.id AND a.hostname = :host)"""
+        params["host"] = host
+    ids = db.execute(
+        text(f"SELECT s.id FROM scan_snapshots s WHERE {where} ORDER BY s.scan_number DESC LIMIT :limit OFFSET :offset"),
+        {**params, "limit": limit, "offset": offset},
+    ).scalars().all()
+    by_id = {snapshot.id: snapshot for snapshot in db.query(ScanSnapshot).filter(ScanSnapshot.id.in_(ids)).all()} if ids else {}
+    snapshots = [by_id[i] for i in ids]
+    total = db.execute(text(f"SELECT count(*) FROM scan_snapshots s WHERE {where}"), params).scalar()
+    hosts: dict = {}
+    previous: dict = {}
+    if ids:
+        hosts = dict(db.execute(text("""
+            SELECT scr.snapshot_id, array_agg(DISTINCT a.hostname ORDER BY a.hostname)
+            FROM scan_check_results scr JOIN assets a ON a.id = scr.asset_id
+            WHERE scr.snapshot_id = ANY(:ids)
+            GROUP BY scr.snapshot_id
+        """), {"ids": ids}).all())
+        previous = dict(db.execute(text("""
+            WITH cur AS (
                 SELECT DISTINCT scr.snapshot_id, scr.asset_id, s.scan_number
-                FROM scan_check_results scr
-                JOIN scan_snapshots s ON s.id = scr.snapshot_id
-                WHERE s.organization_id = :org_id
+                FROM scan_check_results scr JOIN scan_snapshots s ON s.id = scr.snapshot_id
+                WHERE scr.snapshot_id = ANY(:ids)
             )
-            SELECT DISTINCT ON (cur.snapshot_id) cur.snapshot_id, prev.snapshot_id AS previous_id
-            FROM sa cur
-            JOIN sa prev ON prev.asset_id = cur.asset_id AND prev.scan_number < cur.scan_number
+            SELECT DISTINCT ON (cur.snapshot_id) cur.snapshot_id, prev.id
+            FROM cur
+            CROSS JOIN LATERAL (
+                SELECT s2.id, s2.scan_number
+                FROM scan_check_results scr2 JOIN scan_snapshots s2 ON s2.id = scr2.snapshot_id
+                WHERE scr2.asset_id = cur.asset_id AND s2.organization_id = :org_id AND s2.scan_number < cur.scan_number
+                ORDER BY s2.scan_number DESC
+                LIMIT 1
+            ) prev
             ORDER BY cur.snapshot_id, prev.scan_number DESC
-        """),
-        {"org_id": organization_id},
-    ).all())
-    return [
-        ScanSnapshotOut.model_validate(snapshot).model_copy(update={"previous_snapshot_id": previous.get(snapshot.id)})
-        for snapshot in snapshots
-    ]
+        """), {"ids": ids, "org_id": organization_id}).all())
+    summary = db.execute(text("""
+        SELECT count(*) AS total,
+               count(*) FILTER (WHERE status = 'completed') AS completed,
+               count(*) FILTER (WHERE status = 'failed') AS failed
+        FROM scan_snapshots WHERE organization_id = :org_id
+    """), {"org_id": organization_id}).mappings().one()
+    latest = (
+        db.query(ScanSnapshot).filter(ScanSnapshot.organization_id == organization_id)
+        .order_by(ScanSnapshot.scan_number.desc()).first()
+    )
+    return {
+        "items": [
+            ScanSnapshotOut.model_validate(snapshot).model_copy(
+                update={"previous_snapshot_id": previous.get(snapshot.id), "hosts": list(hosts.get(snapshot.id) or [])}
+            )
+            for snapshot in snapshots
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "summary": {**summary, "latest": ScanSnapshotOut.model_validate(latest) if latest else None},
+    }
 
 
 @router.get("/organizations/{organization_id}/reports")
-def get_reports_by_organization(organization_id: str, _: User = Depends(require_org_access), db: Session = Depends(get_db)):
+def get_reports_by_organization(
+    organization_id: str,
+    daily: bool = Query(False, description="Один отчёт за день — последний: отчёт пересчитывается при каждом приёме"),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    _: User = Depends(require_org_access),
+    db: Session = Depends(get_db),
+):
+    """Отчёты организации, новые сначала. Отчёт пересчитывается при каждом приёме данных (тысяча хостов —
+    тысяча отчётов в день), поэтому для динамики — daily: последний отчёт каждого дня (по DISPLAY_TIMEZONE)."""
+    source = "hardening_reports WHERE organization_id = :org_id"
+    if daily:
+        source = """(
+            SELECT DISTINCT ON ((generated_at AT TIME ZONE :tz)::date) *
+            FROM hardening_reports WHERE organization_id = :org_id
+            ORDER BY (generated_at AT TIME ZONE :tz)::date, generated_at DESC
+        ) daily"""
     rows = db.execute(
-        text("""
+        text(f"""
             SELECT id, organization_id, total_checks, passed, failed, compliance_score, generated_at
-            FROM hardening_reports
-            WHERE organization_id = :org_id
+            FROM {source}
             ORDER BY generated_at DESC
+            LIMIT :limit OFFSET :offset
         """),
-        {"org_id": organization_id},
+        {"org_id": organization_id, "tz": settings.DISPLAY_TIMEZONE, "limit": limit, "offset": offset},
     ).mappings().all()
     return [dict(row) for row in rows]
 

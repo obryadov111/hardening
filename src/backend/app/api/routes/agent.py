@@ -6,7 +6,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
-    AgentIdentity, client_ip, get_agent_identity, get_agent_organization_id, get_db, get_pack_registry, normalize_hostname,
+    AgentIdentity,
+    client_ip,
+    get_agent_identity,
+    get_agent_organization_id,
+    get_db,
+    get_pack_registry,
+    normalize_hostname,
 )
 from app.core.config import settings
 from app.core.security import generate_agent_host_key, hash_agent_api_key

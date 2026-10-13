@@ -12,7 +12,6 @@
 (агент на Windows присылает имя NetBIOS). Отключённые в AD компьютеры (Enabled = False) не загружаются.
 """
 import csv
-import io
 import re
 from datetime import UTC, datetime, timedelta
 

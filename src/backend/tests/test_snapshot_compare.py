@@ -2,6 +2,7 @@
 import uuid
 
 import pytest
+from sqlalchemy import text
 
 from app.api.routes.snapshots import classify
 from tests.test_ingest_packs import pack_payload, pack_registry  # noqa: F401 — фикстура пака
@@ -97,11 +98,38 @@ def test_previous_snapshot_is_the_previous_run_of_the_same_asset(client, org):
     db_1 = ingest("db-01", root_login="yes", max_tries="3")
     web_2 = ingest("web-01", root_login="no", max_tries="3")
 
-    rows = client.get(f"/api/organizations/{org_id}/snapshots", headers=headers).json()
-    previous = {row["id"]: row["previous_snapshot_id"] for row in rows}
+    body = client.get(f"/api/organizations/{org_id}/snapshots", headers=headers).json()
+    previous = {row["id"]: row["previous_snapshot_id"] for row in body["items"]}
+    hosts = {row["id"]: row["hosts"] for row in body["items"]}
 
     assert previous[web_2] == web_1  # не db_1, хотя он ближе по номеру
     assert previous[db_1] is None and previous[web_1] is None
+    assert hosts[web_2] == ["web-01"] and hosts[db_1] == ["db-01"]
+    assert body["total"] == 3 and body["summary"]["total"] == 3 and body["summary"]["latest"]["id"] == web_2
+
+    # предыдущий снимок находится и когда он на другой странице
+    page = client.get(f"/api/organizations/{org_id}/snapshots", params={"limit": 1}, headers=headers).json()
+    assert [r["id"] for r in page["items"]] == [web_2] and page["items"][0]["previous_snapshot_id"] == web_1
+
+    # фильтр по хосту
+    web = client.get(f"/api/organizations/{org_id}/snapshots", params={"host": "web-01"}, headers=headers).json()
+    assert [r["id"] for r in web["items"]] == [web_2, web_1] and web["total"] == 2
+    assert client.get(f"/api/organizations/{org_id}/snapshots", params={"limit": 501}, headers=headers).status_code == 422
+
+
+def test_daily_reports_keep_the_last_report_of_each_day(client, db, org):
+    org_id, headers, ingest = org
+    for _ in range(3):
+        ingest("web-01", root_login="yes", max_tries="3")
+    reports = client.get(f"/api/organizations/{org_id}/reports", headers=headers).json()
+    assert len(reports) == 3
+    # два отчёта «вчера», один «сегодня» — по дням остаются последний вчерашний и сегодняшний
+    db.execute(text("UPDATE hardening_reports SET generated_at = generated_at - interval '1 day' WHERE id IN (:a, :b)"),
+               {"a": reports[1]["id"], "b": reports[2]["id"]})
+    db.commit()
+    daily = client.get(f"/api/organizations/{org_id}/reports", params={"daily": "true"}, headers=headers).json()
+    assert [r["id"] for r in daily] == [reports[0]["id"], reports[1]["id"]]
+    assert len(client.get(f"/api/organizations/{org_id}/reports", params={"limit": 1}, headers=headers).json()) == 1
 
 
 def test_compare_access(client, org, make_org, make_user, add_membership, auth_header):

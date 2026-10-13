@@ -70,6 +70,7 @@ class ScanSnapshotOut(BaseModel):
     total_software: int
     created_at: datetime | None = None
     previous_snapshot_id: UUID | None = None  # предыдущий снимок с общим активом — для сравнения
+    hosts: list[str] = []  # имена хостов снимка (список сканов организации)
 
 
 class LatestReportOut(BaseModel):

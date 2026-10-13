@@ -42,7 +42,7 @@ def accept(client, org, check_key=ROOT, asset_id=None, reason="Вход root н�
 
 
 def hardening(client, org):
-    rows = client.get(f"/api/organizations/{org['id']}/hardening", headers=org["viewer"]).json()
+    rows = client.get(f"/api/organizations/{org['id']}/hardening", params={"limit": 500}, headers=org["viewer"]).json()["items"]
     return {(r["asset"]["hostname"], r["rule"]["rule_code"]): r for r in rows}
 
 
@@ -242,3 +242,61 @@ def test_duplicate_active_exception_is_rejected(client, org):
     assert accept(client, org, asset_id=asset_id).status_code == 201
     assert accept(client, org, asset_id=asset_id).status_code == 409
     assert accept(client, org).status_code == 201  # общее на организацию — другое исключение
+
+
+# ---------- страница «Харденинг»: фильтры, сортировка, страницы, сводка (на сервере) ----------
+
+def test_hardening_list_filters_sorting_paging_and_summary(client, org):
+    org["ingest"]("web-01")  # root: нарушение (critical), попытки: соблюдено
+    org["ingest"]("web-02", probe_results={
+        "ssh.permit_root_login": {"found": True, "value": "no"},
+        "ssh.max_auth_tries": {"found": True, "value": "9"},
+    })
+    org["ingest"]("web-03", probe_results={
+        "ssh.permit_root_login": {"found": True, "value": "yes"},
+        "ssh.max_auth_tries": {"found": False, "error": "нет прав на sshd_config"},
+    })
+    assert accept(client, org, asset_id=hardening(client, org)[("web-03", ROOT)]["asset"]["id"]).status_code == 201
+    base = f"/api/organizations/{org['id']}/hardening"
+
+    def get(**params):
+        resp = client.get(base, params=params, headers=org["viewer"])
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+    def keys(body):
+        return [(i["asset"]["hostname"], i["rule"]["rule_code"]) for i in body["items"]]
+
+    body = get()
+    tries_severity = next(i for i in body["items"] if i["rule"]["rule_code"] == "ssh.max_auth_tries")["rule"]["severity"]
+    assert body["total"] == 6
+    assert body["summary"] | {"open_by_severity": None} == {
+        "total": 6, "passed": 2, "failed": 2, "accepted": 1, "errors": 1,
+        "mandatory": 1, "hosts": ["web-01", "web-02", "web-03"], "open_by_severity": None,
+    }
+    assert body["summary"]["open_by_severity"] == sorted(
+        [{"severity": "critical", "count": 1, "assets": 1}, {"severity": tries_severity, "count": 1, "assets": 1}],
+        key=lambda r: ["critical", "high", "medium", "low"].index(r["severity"]),
+    )
+    # по умолчанию — по сроку устранения: сначала открытые нарушения от критических, затем принятый риск, остальное
+    assert keys(body)[:3] == [("web-01", ROOT), ("web-02", "ssh.max_auth_tries"), ("web-03", ROOT)]
+
+    assert keys(get(status="fail")) == [("web-01", ROOT), ("web-02", "ssh.max_auth_tries")]
+    assert keys(get(status="accepted")) == [("web-03", ROOT)]
+    assert keys(get(status="error")) == [("web-03", "ssh.max_auth_tries")]
+    assert get(status="pass")["total"] == 2
+    assert keys(get(severity="critical", status="fail")) == [("web-01", ROOT)]
+    assert get(host="web-02")["total"] == 2
+    assert get(q="ROOT")["total"] == 3 and get(q="web-03")["total"] == 2 and get(q="попыт")["total"] == 3
+    assert get(q="%")["total"] == 0
+    # фильтр не меняет сводку по организации
+    assert get(host="web-02")["summary"]["total"] == 6
+
+    assert [i["asset"]["hostname"] for i in get(sort="asset", dir="desc")["items"]][:2] == ["web-03", "web-03"]
+    assert get(sort="severity", dir="desc")["items"][0]["rule"]["severity"] == "critical"
+    pages = [get(limit=4, offset=o)["items"] for o in (0, 4)]
+    assert len(pages[0]) == 4 and len(pages[1]) == 2
+    assert len({i["id"] for p in pages for i in p}) == 6
+
+    for bad in ({"status": "open"}, {"severity": "urgent"}, {"sort": "hc.id"}, {"limit": 1000}):
+        assert client.get(base, params=bad, headers=org["viewer"]).status_code == 422

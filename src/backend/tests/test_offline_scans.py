@@ -91,7 +91,7 @@ def test_upload_creates_snapshot_marked_as_export(client, db, org):
     stored = db.execute(text("SELECT actual_value, evidence FROM scan_check_results WHERE check_id = 'cisco_ios.snmp_no_community'")).one()
     assert "S3cr3tComm" not in (stored.actual_value or "") + (stored.evidence or "")
 
-    listed = client.get(f"/api/organizations/{org['id']}/snapshots", headers=org["viewer"]).json()
+    listed = client.get(f"/api/organizations/{org['id']}/snapshots", headers=org["viewer"]).json()["items"]
     assert listed[0]["collection"]["source"] == "offline-config"
 
 
