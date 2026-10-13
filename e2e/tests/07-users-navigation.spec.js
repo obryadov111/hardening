@@ -149,6 +149,27 @@ test('суперадмин: сброс пароля, блокировка и р�
   await expect(page.getByRole('button', { name: `Сбросить 2FA ${user.email}` })).toHaveCount(0)
 })
 
+test('копирование работает и без HTTPS (http://адрес-в-сети): запасной способ через выделение', async ({ page, context }) => {
+  // Не защищённый контекст: navigator.clipboard нет, как у браузера по http://192.168.x.x
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'isSecureContext', { value: false })
+    Object.defineProperty(navigator, 'clipboard', { value: undefined })
+  })
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await loginAs(page, 'super')
+  await page.goto('/admin/users')
+  const form = page.locator('form').filter({ has: page.getByPlaceholder('Email *') })
+  await form.getByPlaceholder('Email *').fill(unique('copy'))
+  await form.getByRole('button', { name: 'Сгенерировать' }).click()
+  const password = await form.getByPlaceholder('Временный пароль * (от 12 символов)').inputValue()
+  await form.getByRole('button', { name: 'Создать' }).click()
+  await page.getByRole('button', { name: /Скопировать|копировать/ }).first().click()
+  await expect(page.getByRole('button', { name: 'Скопировано' })).toBeVisible()
+  const reader = await context.newPage()  // у этой страницы обычный буфер обмена
+  await reader.goto('/login')
+  expect(await reader.evaluate(() => navigator.clipboard.readText())).toBe(password)
+})
+
 test('не суперадмин: «Пользователи и организации» закрыта', async ({ page }) => {
   await loginAs(page, 'admin')
   await page.goto('/admin/users')

@@ -1,4 +1,4 @@
-import { formatDateTime } from "./datetime";
+import { formatDateTime } from "./datetime.js";
 
 /**
  * Источник данных снимка. null — живой хост или устройство (агент), отметка не нужна.
