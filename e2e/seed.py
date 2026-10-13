@@ -177,6 +177,50 @@ def main(out_path: str):
     db.commit()
     db.close()
 
+    # Выгрузки Cisco для «Проверки по выгрузке»: те же образцы, что у пака (укреплённый и слабый коммутатор).
+    offline = Path(out_path).parent / "offline"
+    offline.mkdir(exist_ok=True)
+    spec = yaml.safe_load((BACKEND / "pack_tests" / "cisco-ios.yaml").read_text(encoding="utf-8"))
+    base_cli = spec["base"]["cli"]
+    weak_cli = {**base_cli, **spec["cases"][1]["cli"]}
+    (offline / "show_version.txt").write_text(base_cli["show version"], encoding="utf-8")
+    (offline / "running_good.txt").write_text(base_cli["show running-config"], encoding="utf-8")
+    (offline / "running_weak.txt").write_text(weak_cli["show running-config"], encoding="utf-8")
+    (offline / "not_cisco.txt").write_text("Linux web-01 6.8.0-45-generic x86_64 GNU/Linux\n", encoding="utf-8")
+
+    # Отчёты агента «из файла» (агент --out): подписаны ключом площадки той же функцией, что у агента.
+    sys.path.insert(0, str(BACKEND.parents[1] / "agent"))
+    import collector  # noqa: PLC0415 — агент лежит вне пакета бэкенда
+
+    report = {
+        "environment": "isolated",
+        "asset": {"hostname": "air-gap-01", "os": "Ubuntu 24.04", "asset_type": "linux-server", "criticality": "high"},
+        "software": SOFTWARE[:2],
+        "platform_tags": ["linux-server", "debian-family", "ubuntu"],
+        "packs": [probe_results(agent, registry, "ubuntu-server", 3)],
+        "scan_label": "e2e отчёт из файла",
+        "run_id": str(uuid.uuid4()),
+        "collected_at": now.isoformat(),
+    }
+    signed = collector.sign_report(report, site_key)
+    (offline / "agent_report.json").write_text(json.dumps(signed, ensure_ascii=False), encoding="utf-8")
+    tampered = json.loads(json.dumps(signed))
+    tampered["payload"]["asset"]["hostname"] = "air-gap-02"
+    (offline / "agent_report_tampered.json").write_text(json.dumps(tampered, ensure_ascii=False), encoding="utf-8")
+    (offline / "not_a_report.json").write_text('{"hello": "world"}', encoding="utf-8")
+    # Выгрузка компьютеров из AD (Export-Csv): web-01 отчитывается, PC-404 — агента нет, OLD-PC отключён в AD,
+    # повтор WEB-01.corp.local — тот же web-01; win-srv-01 и db-01 в список не входят — «нет в списке».
+    (offline / "computers.csv").write_text(
+        '#TYPE Selected.Microsoft.ActiveDirectory.Management.ADComputer\n'
+        '"Name","DNSHostName","OperatingSystem","LastLogonDate","Enabled"\n'
+        '"WEB-01","web-01.corp.local","Ubuntu","10.10.2026 09:00:00","True"\n'
+        '"PC-404","pc-404.corp.local","Windows 11 Pro","01.10.2026 10:00:00","True"\n'
+        '"OLD-PC","old-pc.corp.local","Windows 7","01.01.2020 10:00:00","False"\n'
+        '"web-01","web-01.corp.local","Ubuntu","10.10.2026 09:00:00","True"\n',
+        encoding="utf-8-sig",
+    )
+    (offline / "no_name_column.csv").write_text("foo;bar\n1;2\n", encoding="utf-8")
+
     Path(out_path).write_text(json.dumps({
         "password": PASSWORD, "users": USERS, "user_ids": ids,
         "orgs": {"main": {"id": main_org, "name": ORG_MAIN}, "other": {"id": orgs[ORG_OTHER], "name": ORG_OTHER}},
