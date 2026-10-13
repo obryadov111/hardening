@@ -88,6 +88,7 @@ function SnapshotPicker({ snapshots, beforeId, afterId, onCompare }) {
         <button
           type="button"
           title="Поменять местами"
+          aria-label="Поменять местами"
           onClick={() => { setBefore(after); setAfter(before); }}
           className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
         >

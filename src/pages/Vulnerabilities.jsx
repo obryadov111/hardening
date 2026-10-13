@@ -165,11 +165,11 @@ export default function Vulnerabilities() {
 
         <AppCard title="Находки" subtitle="Сначала самые критичные; номер БДУ ведёт на страницу уязвимости на сайте ФСТЭК, USN — на бюллетень Ubuntu">
           <div className="mb-4 flex flex-wrap gap-3">
-            <select className={INPUT} value={level} onChange={(e) => { setLevel(e.target.value); setShown(PAGE); }}>
+            <select aria-label="Уровень" className={INPUT} value={level} onChange={(e) => { setLevel(e.target.value); setShown(PAGE); }}>
               <option value="">Все уровни</option>
               {LEVELS.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
             </select>
-            <select className={INPUT} value={distroFilter} onChange={(e) => { setDistroFilter(e.target.value); setShown(PAGE); }}>
+            <select aria-label="Статус в Ubuntu" className={INPUT} value={distroFilter} onChange={(e) => { setDistroFilter(e.target.value); setShown(PAGE); }}>
               <option value="open">Без исправленных в Ubuntu</option>
               <option value="vulnerable">Уязвимо: исправление не установлено</option>
               <option value="unfixed">Исправления нет</option>
@@ -178,6 +178,8 @@ export default function Vulnerabilities() {
               <option value="all">Все</option>
             </select>
             <input
+              type="search"
+              aria-label="Поиск уязвимостей"
               className={`${INPUT} min-w-[18rem]`}
               placeholder="Поиск: пакет, BDU, CVE, актив…"
               value={search}

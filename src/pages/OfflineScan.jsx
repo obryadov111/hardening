@@ -139,6 +139,7 @@ export default function OfflineScan() {
                   <button
                     key={p.pack}
                     type="button"
+                    aria-pressed={p.pack === packId}
                     onClick={() => choosePack(p.pack)}
                     className={`rounded-xl border px-3 py-2 text-sm ${
                       p.pack === packId
@@ -168,6 +169,7 @@ export default function OfflineScan() {
                       </div>
                       <input
                         type="file"
+                        aria-label={`Файл выгрузки «${c.command}»`}
                         accept=".txt,.cfg,.conf,.log,text/plain"
                         onChange={(e) => {
                           const file = e.target.files?.[0];

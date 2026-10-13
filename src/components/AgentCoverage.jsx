@@ -102,6 +102,7 @@ export default function AgentCoverage({ organizationId }) {
     <form onSubmit={upload} className="flex flex-wrap items-center gap-3">
       <input
         type="file"
+        aria-label="Файл списка компьютеров"
         accept=".csv,.txt,text/csv,text/plain"
         onChange={(e) => setFile(e.target.files?.[0] || null)}
         className="text-sm text-zinc-300 file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-800 file:px-3 file:py-1.5 file:text-zinc-200"
@@ -146,7 +147,7 @@ export default function AgentCoverage({ organizationId }) {
         <span className="flex items-center gap-2">
           отчитался за
           {PERIODS.map((d) => (
-            <button key={d} type="button" onClick={() => setDays(d)} className={`rounded-lg border px-2 py-0.5 text-xs ${days === d ? "border-blue-500 text-white" : "border-zinc-700 text-zinc-400 hover:text-white"}`}>
+            <button key={d} type="button" aria-pressed={days === d} onClick={() => setDays(d)} className={`rounded-lg border px-2 py-0.5 text-xs ${days === d ? "border-blue-500 text-white" : "border-zinc-700 text-zinc-400 hover:text-white"}`}>
               {d === 1 ? "сутки" : `${d} дн.`}
             </button>
           ))}
@@ -170,7 +171,7 @@ export default function AgentCoverage({ organizationId }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <input className={`${INPUT} max-w-xs`} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск: имя, ОС" />
+        <input type="search" aria-label="Поиск в охвате" className={`${INPUT} max-w-xs`} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск: имя, ОС" />
         <span className="text-zinc-400">{filter ? STATUS[filter].tile.toLowerCase() : "весь список"}: {rows.length}</span>
         <button type="button" disabled={!rows.length} onClick={() => downloadCsv(rows, `охват-${filter || "все"}.csv`)} className="text-xs text-zinc-300 underline hover:text-white disabled:opacity-40">
           Скачать CSV

@@ -202,7 +202,7 @@ function AgentHosts({ hosts, onRevoke, onDelete }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-3 text-sm">
-        <input className={`${INPUT} max-w-xs`} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск: имя, ОС, адрес, площадка" />
+        <input type="search" aria-label="Поиск хостов" className={`${INPUT} max-w-xs`} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск: имя, ОС, адрес, площадка" />
         <span className="text-zinc-400">
           всего {hosts.length}
           {silent ? <span className="text-amber-300"> · молчат больше {SILENT_DAYS} суток: {silent}</span> : null}
@@ -239,11 +239,11 @@ function AgentHosts({ hosts, onRevoke, onDelete }) {
                   </td>
                   <td className="space-x-3 whitespace-nowrap py-2 text-right">
                     {host.status === "active" ? (
-                      <button type="button" onClick={() => onRevoke(host)} className="text-xs text-rose-300 hover:text-rose-200">
+                      <button type="button" aria-label={`Отозвать хост ${host.hostname}`} onClick={() => onRevoke(host)} className="text-xs text-rose-300 hover:text-rose-200">
                         Отозвать
                       </button>
                     ) : null}
-                    <button type="button" onClick={() => onDelete(host)} className="text-xs text-zinc-400 hover:text-white">
+                    <button type="button" aria-label={`Удалить регистрацию ${host.hostname}`} onClick={() => onDelete(host)} className="text-xs text-zinc-400 hover:text-white">
                       Удалить регистрацию
                     </button>
                   </td>
@@ -493,7 +493,7 @@ export default function AgentKeys() {
                             </td>
                             <td className="py-2 text-right">
                               {key.state === "active" ? (
-                                <button type="button" onClick={() => revoke(key)} className="text-xs text-rose-300 hover:text-rose-200">
+                                <button type="button" aria-label={`Отозвать ключ «${key.name}»`} onClick={() => revoke(key)} className="text-xs text-rose-300 hover:text-rose-200">
                                   Отозвать
                                 </button>
                               ) : null}
@@ -527,6 +527,7 @@ export default function AgentKeys() {
               <form onSubmit={upload} className="space-y-3">
                 <input
                   type="file"
+                  aria-label="Файл отчёта агента"
                   accept=".json,application/json"
                   onChange={(e) => {
                     setReportFile(e.target.files?.[0] || null);

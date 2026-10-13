@@ -124,7 +124,7 @@ export default function FstecCoverage() {
 
         <AppCard title="Пункты методики" subtitle="Пункт закрывается проверками паков, у которых в источниках указан этот пункт; уязвимости ПО — по БДУ ФСТЭК">
           <div className="mb-4">
-            <select className={SELECT} value={filter} onChange={(e) => setFilter(e.target.value)}>
+            <select aria-label="Статус пункта" className={SELECT} value={filter} onChange={(e) => setFilter(e.target.value)}>
               <option value="">Все пункты</option>
               {ORDER.map((s) => <option key={s} value={s}>{STATUS[s].label}</option>)}
             </select>

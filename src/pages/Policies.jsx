@@ -152,7 +152,7 @@ export default function Policies() {
             <input className={INPUT} placeholder="Владелец" value={form.owner_name} onChange={(e) => setForm({ ...form, owner_name: e.target.value })} />
             <input className={INPUT} placeholder="Источник (например, методика ФСТЭК от 25.11.2025)" value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} />
             <textarea className={`${INPUT} md:col-span-2`} rows={2} placeholder="Описание" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-            <select className={INPUT} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+            <select aria-label="Статус" className={INPUT} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
               {STATUSES.map((s) => <option key={s} value={s}>{getStatusLabel(s)}</option>)}
             </select>
             <button type="submit" className="rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2 text-sm text-white hover:bg-zinc-800">

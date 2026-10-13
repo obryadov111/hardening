@@ -14,7 +14,7 @@ import {
   getCurrentUserProfile,
 } from "../api/users";
 import { formatDateTime } from "../utils/datetime";
-import { ROLES } from "../utils/roles";
+import { ROLES, roleLabel } from "../utils/roles";
 
 const INPUT = "w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-blue-500";
 const EMPTY_FORM = { email: "", full_name: "", password: "", organization_id: "", role: "viewer" };
@@ -72,9 +72,11 @@ export default function AdminUsers() {
 
   const load = useCallback(async () => {
     try {
-      const [profile, rows] = await Promise.all([getCurrentUserProfile(), adminListUsers()]);
+      // Сначала профиль: не суперадмину список не запрашивается (сервер ответит 403), страница
+      // показывает «Недостаточно прав», а не формы с ошибкой запроса.
+      const profile = await getCurrentUserProfile();
       setMe(profile);
-      setUsers(rows);
+      if (profile?.is_superadmin) setUsers(await adminListUsers());
     } catch (err) {
       setError(err.message);
     } finally {
@@ -147,6 +149,10 @@ export default function AdminUsers() {
       : `Разблокировать ${user.email}?`;
     if (!window.confirm(question)) return;
     run(`block-${user.id}`, () => adminSetUserBlocked(user.id, blocked));
+  }
+
+  if (loading && !me) {
+    return <div className="text-zinc-400">Загрузка...</div>;
   }
 
   if (!loading && me && !me.is_superadmin) {
@@ -237,7 +243,7 @@ export default function AdminUsers() {
                     </td>
                     <td className="px-4 py-3 text-xs text-zinc-300">
                       {user.organizations.length
-                        ? user.organizations.map((o) => <div key={o.id}>{o.name} <span className="text-zinc-500">({o.role})</span></div>)
+                        ? user.organizations.map((o) => <div key={o.id}>{o.name} <span className="text-zinc-500">({roleLabel(o.role).toLowerCase()})</span></div>)
                         : <span className="text-zinc-500">{user.is_superadmin ? "все" : "нет"}</span>}
                     </td>
                     <td className="px-4 py-3"><StatusBadge user={user} /></td>
@@ -247,17 +253,18 @@ export default function AdminUsers() {
                         <span className="text-xs text-zinc-500">свой пароль — в меню профиля</span>
                       ) : (
                         <div className="flex flex-wrap gap-2">
-                          <button type="button" disabled={!!busy} onClick={() => handleReset(user)} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800 disabled:opacity-50">
+                          <button type="button" disabled={!!busy} aria-label={`Сбросить пароль ${user.email}`} onClick={() => handleReset(user)} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800 disabled:opacity-50">
                             Сбросить пароль
                           </button>
                           {user.two_factor_enabled ? (
-                            <button type="button" disabled={!!busy} onClick={() => handleReset2FA(user)} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800 disabled:opacity-50">
+                            <button type="button" disabled={!!busy} aria-label={`Сбросить 2FA ${user.email}`} onClick={() => handleReset2FA(user)} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800 disabled:opacity-50">
                               Сбросить 2FA
                             </button>
                           ) : null}
                           <button
                             type="button"
                             disabled={!!busy}
+                            aria-label={`${blocked ? "Разблокировать" : "Заблокировать"} ${user.email}`}
                             onClick={() => handleBlock(user, !blocked)}
                             className={`rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50 ${blocked ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300" : "border-rose-500/20 bg-rose-500/10 text-rose-300"}`}
                           >

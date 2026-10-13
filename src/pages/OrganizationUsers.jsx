@@ -57,7 +57,8 @@ export default function OrganizationUsers() {
     }
   }, [loadUsers, orgLoading]);
 
-  async function handleAddUser() {
+  async function handleAddUser(event) {
+    event.preventDefault();
     try {
       setActionError("");
 
@@ -148,9 +149,10 @@ export default function OrganizationUsers() {
       ) : null}
 
       <AppCard title="Добавить пользователя" subtitle="Пользователь должен уже существовать в системе">
-        <div className="grid gap-3 md:grid-cols-[1fr_180px_160px]">
+        <form onSubmit={handleAddUser} className="grid gap-3 md:grid-cols-[1fr_180px_160px]">
           <input
             type="email"
+            aria-label="Email пользователя"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="email@example.com"
@@ -158,6 +160,7 @@ export default function OrganizationUsers() {
           />
 
           <select
+            aria-label="Роль"
             value={role}
             onChange={(e) => setRole(e.target.value)}
             className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-white outline-none"
@@ -166,13 +169,12 @@ export default function OrganizationUsers() {
           </select>
 
           <button
-            type="button"
-            onClick={handleAddUser}
+            type="submit"
             className="rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2 text-sm text-white hover:bg-zinc-800"
           >
             Добавить
           </button>
-        </div>
+        </form>
       </AppCard>
 
       <AppCard title="Список пользователей" subtitle="Пользователи, связанные с текущей организацией">
@@ -205,6 +207,7 @@ export default function OrganizationUsers() {
 
                     <td className="px-4 py-3">
                       <select
+                        aria-label={`Роль ${item.email}`}
                         value={item.role}
                         onChange={(e) => handleChangeRole(item.id, e.target.value)}
                         className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-white outline-none"
@@ -216,10 +219,11 @@ export default function OrganizationUsers() {
                     <td className="px-4 py-3">
                       <button
                         type="button"
+                        aria-label={`Убрать ${item.email} из организации`}
                         onClick={() => handleDeleteUser(item.id)}
                         className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-300 hover:bg-rose-500/20"
                       >
-                        Удалить
+                        Убрать
                       </button>
                     </td>
                   </tr>

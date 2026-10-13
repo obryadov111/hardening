@@ -1,5 +1,5 @@
 import { AnimatePresence, motion as Motion } from "framer-motion";
-import { Link, useLocation } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
   Server,
@@ -31,29 +31,23 @@ const menuItems = [
   { to: "/scan-compare", label: "Сравнение сканов", icon: GitCompareArrows },
 ];
 
+// NavLink подсвечивает раздел и вложенные адреса (/assets/<id> — «Активы») и ставит aria-current="page".
+const itemClassName = ({ isActive }) =>
+  [
+    "flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-colors",
+    isActive
+      ? "border border-blue-500/20 bg-blue-500/15 text-blue-300"
+      : "border border-transparent text-zinc-400 hover:bg-zinc-800 hover:text-white",
+  ].join(" ");
+
 export default function Sidebar({ open = false, onClose }) {
-  const location = useLocation();
-
-  const getItemClassName = (path) => {
-    const isActive =
-      location.pathname === path ||
-      (path !== "/dashboard" && location.pathname.startsWith(path));
-
-    return [
-      "flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-colors",
-      isActive
-        ? "border border-blue-500/20 bg-blue-500/15 text-blue-300"
-        : "border border-transparent text-zinc-400 hover:bg-zinc-800 hover:text-white",
-    ].join(" ");
-  };
-
   const nav = (
-    <nav className="flex flex-col gap-2">
+    <nav aria-label="Разделы" className="flex flex-col gap-2">
       {menuItems.map((item) => (
-        <Link key={item.to} to={item.to} className={getItemClassName(item.to)} onClick={onClose}>
+        <NavLink key={item.to} to={item.to} className={itemClassName} onClick={onClose}>
           <item.icon size={18} />
           <span>{item.label}</span>
-        </Link>
+        </NavLink>
       ))}
     </nav>
   );
