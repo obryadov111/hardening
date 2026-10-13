@@ -57,7 +57,7 @@ jobs:
 
       - name: Install
         run: |
-          pip install -r src/backend/requirements.txt
+          pip install -r src/backend/requirements-dev.txt  # засев (e2e/seed.py) — через TestClient: нужен httpx
           npm ci
           npx playwright install --with-deps chromium
 
