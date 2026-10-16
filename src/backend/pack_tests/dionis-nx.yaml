@@ -1,0 +1,120 @@
+# Образцы для пака dionis-nx (transport: ssh). Пак draft: на живом устройстве не запускался.
+# «Пример файерволла» — конфигурация из приложения «ПО Dionis-NX 2.0-2. Руководство по настройке» (сокращена);
+# «настроенный» — тот же пример с исправлениями по разделам руководства. Platform ID — из руководства.
+pack: dionis-nx
+
+base:
+  cli:
+    show version: |
+      Platform ID: 4F7F-7879-F676-E85B-5369
+    show running-config: |
+      !
+      timezone MSK-4
+      session timeout adm 15
+      !
+      hostname raul
+      !
+      interface ethernet 0
+          ip address 195.220.32.68/27
+          ip access-group outside in
+          enable
+      !
+      service log
+          log
+          remote 192.168.33.10 *.info
+          remote 192.168.33.10 dish.*
+      !
+      service ntp
+          server 192.168.33.1
+      !
+      service snmp
+          listen 192.168.33.254 udp
+          acl Mon1t0r-pass 192.168.33.20
+      !
+      service ssh
+          listen 192.168.33.254
+          allow *@192.168.33.5
+          enable
+      !
+      ip forwarding
+
+cases:
+  - name: настроенный межсетевой экран — всё соблюдено
+    detect: true
+    expect:
+      dionis_nx.telnet_disabled: pass
+      dionis_nx.diweb_disabled: pass
+      dionis_nx.ssh_adm_login_disabled: pass
+      dionis_nx.ssh_access_restricted: pass
+      dionis_nx.snmp_default_password_absent: pass
+      dionis_nx.snmp_acl_has_address: pass
+      dionis_nx.remote_log: pass
+      dionis_nx.ntp_server: pass
+      dionis_nx.admin_session_timeout: pass
+
+  - name: пример файерволла из руководства — SSH всем, нет удалённого журнала, сеанс adm без тайм-аута
+    cli:
+      show running-config: |
+        !
+        timezone MSK-4
+        session timeout adm none
+        !
+        hostname raul
+        !
+        service log
+            log
+            alert beep
+            size 262144 131072
+            trace
+        !
+        service ntp
+            server 0.ru.pool.ntp.org
+        !
+        service ssh
+            enable
+        !
+        ip forwarding
+    expect:
+      dionis_nx.ssh_access_restricted: fail
+      dionis_nx.remote_log: fail
+      dionis_nx.admin_session_timeout: fail
+      dionis_nx.ntp_server: pass
+      dionis_nx.telnet_disabled: pass
+
+  - name: включены Telnet и веб, вход adm по SSH, SNMP public и пароль без адреса, нет NTP
+    cli:
+      show running-config: |
+        !
+        service telnet
+            enable
+        !
+        service diweb
+            enable
+        !
+        service snmp
+            acl public
+            acl Str0ng-pass
+        !
+        service ssh
+            permit-adm-login
+            enable
+        !
+    expect:
+      dionis_nx.telnet_disabled: fail
+      dionis_nx.diweb_disabled: fail
+      dionis_nx.ssh_adm_login_disabled: fail
+      dionis_nx.snmp_default_password_absent: fail
+      dionis_nx.snmp_acl_has_address: fail
+      dionis_nx.ntp_server: fail
+
+  - name: выгрузка не конфигурация — проверки не выполняются
+    cli:
+      show running-config: "% Unknown command\n"
+    expect:
+      dionis_nx.telnet_disabled: error
+
+  - name: не Dionis — пак не применяется
+    cli:
+      show version: |
+        Cisco IOS Software, C2960 Software (C2960-LANBASEK9-M), Version 15.0(2)SE11
+    detect: false

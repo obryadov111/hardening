@@ -1,0 +1,117 @@
+# Пак «Dionis-NX» (АО «Фактор-ТС»): маршрутизаторы, межсетевые экраны и криптошлюзы на ОС Dionis-NX 2.x.
+# Сбор по SSH (учётка cli/adm) или по выгрузке `show running-config`.
+#
+# maturity: draft. Проверки написаны по документации и проверены ТОЛЬКО на образцах (pack_tests/dionis-nx.yaml):
+# конфигурации — из примеров приложения руководства (раздел «Пример файерволла») и синтетические нарушения.
+# На живом устройстве пак не запускался — verified_on пуст.
+#
+# Источник: «ПО Dionis-NX 2.0-2. Руководство по настройке» (RU.НКБГ.70007-06 90, factor-ts.ru): службы ssh
+# (enable, permit-adm-login, allow/deny), telnet, diweb, snmp (acl <пароль> [адрес]), log (remote), ntp.
+#
+# Особенности:
+#  * службы показываются блоками `service <имя>` … `!`, включённая служба содержит строку `enable`;
+#  * SNMP: `acl <пароль> [адрес|сеть]` — пароль доступа (community). Значение в отчёт не попадает: проверки считают
+#    блоки (cli_blocks), свидетельство — только заголовок `service snmp`;
+#  * учётные записи фиксированы: cli (непривилегированный режим) и adm (администратор); вход adm по SSH —
+#    отдельная опция permit-adm-login.
+# Распознавание — по строке «Platform ID: XXXX-XXXX-XXXX-XXXX-XXXX» в show version (из руководства, раздел о
+# лицензировании): другие строки вывода show version в руководстве не приведены.
+
+pack: dionis-nx
+version: 1.0.0
+maturity: draft
+tags: [network-device, firewall, factor-ts, dionis-nx]
+transport: ssh
+asset_type: network-device
+
+detect:
+  - probe: { type: cli_config, cmd: show version, match: '^\s*Platform ID:\s*([0-9A-F]{4}(?:-[0-9A-F]{4}){4})\s*$' }
+    regex: '^[0-9A-F]{4}-'
+
+checks:
+  - id: dionis_nx.telnet_disabled
+    title: Служба Telnet не включена
+    probe: { type: cli_blocks, cmd: show running-config, require: '(?m)^!\s*$', block: '^service telnet$', has: ['^enable$'] }
+    assert: { op: eq, value: 0 }
+    severity: high
+    remediation: "`service telnet` → `disable` или `no service telnet`; удалённый доступ — только по SSH."
+    refs:
+      - { source: "Dionis-NX 2.0-2. Руководство по настройке", id: "34. Сервис Telnet" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.7" }
+
+  - id: dionis_nx.diweb_disabled
+    title: Веб-интерфейс diweb по HTTP не включён
+    probe: { type: cli_blocks, cmd: show running-config, require: '(?m)^!\s*$', block: '^service diweb$', has: ['^enable$'] }
+    assert: { op: eq, value: 0 }
+    severity: medium
+    remediation: "`no service diweb`, если веб-интерфейс не нужен; иначе — ограничить доступ ACL на интерфейсе управления."
+    refs:
+      - { source: "Dionis-NX 2.0-2. Руководство по настройке", id: "35. Сервис DIWEB" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+
+  - id: dionis_nx.ssh_adm_login_disabled
+    title: Прямой вход администратора adm по SSH запрещён (нет permit-adm-login)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^!\s*$', section: '^service ssh$', match: '^\s+permit-adm-login' }
+    assert: { op: absent }
+    severity: medium
+    remediation: "`service ssh` → `no permit-adm-login`: вход под cli, повышение — командой enable."
+    refs:
+      - { source: "Dionis-NX 2.0-2. Руководство по настройке", id: "33.1 Служба SSH" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.5" }
+
+  - id: dionis_nx.ssh_access_restricted
+    title: Доступ по SSH ограничен пользователями и адресами (allow)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^!\s*$', section: '^service ssh$', match: '^\s+allow (\S+)' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "`service ssh` → `allow *@<адрес администратора>` (без allow доступ разрешён всем); `listen <адрес управления>`."
+    refs:
+      - { source: "Dionis-NX 2.0-2. Руководство по настройке", id: "33.1.1 Контроль доступа" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.5" }
+
+  - id: dionis_nx.snmp_default_password_absent
+    title: SNMP-пароль доступа (acl) не public / private
+    probe: { type: cli_blocks, cmd: show running-config, require: '(?m)^!\s*$', block: '^service snmp$', has: ['^acl (?:public|private)\b'] }
+    assert: { op: eq, value: 0 }
+    severity: high
+    remediation: "Заменить `acl public`/`acl private` уникальным паролем с адресом станции управления."
+    refs:
+      - { source: "Dionis-NX 2.0-2. Руководство по настройке", id: "32.3 Настройка правил доступа (SNMP)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.3" }
+
+  - id: dionis_nx.snmp_acl_has_address
+    title: Каждое правило доступа SNMP ограничено адресом узла или сети
+    probe: { type: cli_blocks, cmd: show running-config, require: '(?m)^!\s*$', block: '^service snmp$', has: ['^acl \S+$'] }
+    assert: { op: eq, value: 0 }
+    severity: medium
+    remediation: "`acl <пароль> <адрес станции управления>` вместо `acl <пароль>` (без адреса доступ с любого узла)."
+    refs:
+      - { source: "Dionis-NX 2.0-2. Руководство по настройке", id: "32.3 Настройка правил доступа (SNMP)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.5" }
+
+  - id: dionis_nx.remote_log
+    title: События отправляются на удалённый syslog-сервер
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^!\s*$', section: '^service log$', match: '^\s+remote (\S+)' }
+    assert: { op: exists }
+    severity: low
+    remediation: "`service log` → `remote <адрес> *.info` и `remote <адрес> dish.*` (все команды администратора)."
+    refs:
+      - { source: "Dionis-NX 2.0-2. Руководство по настройке", id: "10.7.2 Настройка удалённых оповещений" }
+
+  - id: dionis_nx.ntp_server
+    title: Время синхронизируется с заданным NTP-сервером
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^!\s*$', section: '^service ntp$', match: '^\s+server (\S+)' }
+    assert: { op: exists }
+    severity: low
+    remediation: "`service ntp` → `server <адрес>` (собственный или доверенный сервер времени)."
+    refs:
+      - { source: "Dionis-NX 2.0-2. Руководство по настройке", id: "Служба NTP" }
+
+  - id: dionis_nx.admin_session_timeout
+    title: Сеанс администратора завершается при бездействии (нет session timeout … none)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^!\s*$', match: '^session timeout \S+ none\s*$' }
+    assert: { op: absent }
+    severity: low
+    remediation: "Задать тайм-аут бездействия сеанса вместо none (например, 15 минут)."
+    refs:
+      - { source: "Dionis-NX 2.0-2. Руководство по настройке", id: "Приложение: пример конфигурации (session timeout adm none)" }

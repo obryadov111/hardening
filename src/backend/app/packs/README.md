@@ -170,6 +170,7 @@ firmware:
 | `astra-linux` | 1.2.0 | local | draft | 25 | Astra SE 1.8 в контейнере; МКЦ, МРД, ЗПС не проверяются (нужна ВМ) |
 | `cisco-ios` | 1.3.0 | ssh | draft | 12 | Сбор по SSH или выгрузке; на устройстве не запускался |
 | `debian-server` | 1.1.0 | local | draft | 25 | Debian 11–13 |
+| `dionis-nx` | 1.0.0 | ssh | draft | 9 | Dionis-NX 2.x (Фактор-ТС): Telnet, diweb, SSH (adm, allow), SNMP acl, журнал, NTP, тайм-аут сеанса |
 | `docker` | 1.2.0 | local | baseline | 11 | Подтверждён на реальном Docker; применяется вместе с паком ОС |
 | `eltex-esr` | 1.0.0 | ssh | draft | 16 | Eltex ESR/vESR; ESR Hardening Guide, справочник CLI 1.5.10 (FSTEC); прошивка → БДУ |
 | `eltex-mes` | 1.0.0 | ssh | draft | 10 | Eltex MES23xx/33xx/53xx (ПО 4.x–6.x); прошивка → БДУ |
