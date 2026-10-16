@@ -39,7 +39,9 @@ Severity = Literal["critical", "high", "medium", "low", "info"]
 # inventory — только обнаружение платформы; draft — проверки написаны по документации и НЕ подтверждены на
 # реальном оборудовании; baseline и выше — подтверждены (обязателен verified_on: на чём именно проверено).
 Maturity = Literal["inventory", "draft", "baseline", "full", "certified"]
-Transport = Literal["local", "ssh"]
+# manual — проверка по опросу: оборудование без машиночитаемой конфигурации (Континент 4: настройки только в
+# графическом Менеджере конфигурации), аудитор отвечает на вопросы по экранам системы управления.
+Transport = Literal["local", "ssh", "manual"]
 
 
 class StrictModel(BaseModel):
@@ -320,10 +322,28 @@ class WinAdProbe(StrictModel):
     fact: Literal[AD_FACTS]  # type: ignore[valid-type]
 
 
+class ManualProbe(StrictModel):
+    """Вопрос аудитору (транспорт manual): ответ вводится в интерфейсе по экранам системы управления устройством.
+    yesno — значение "yes"/"no"; number — число; choice — одно из choices; text — строка (например, версия ПО)."""
+
+    type: Literal["manual"]
+    question: str = Field(min_length=5, max_length=500)
+    hint: str | None = Field(default=None, max_length=500)  # где смотреть: раздел МК, пункт меню
+    answer: Literal["yesno", "number", "choice", "text"] = "yesno"
+    choices: list[str] | None = Field(default=None, max_length=10)
+    unit: str | None = Field(default=None, max_length=30)
+
+    @model_validator(mode="after")
+    def _choices(self) -> "ManualProbe":
+        if (self.answer == "choice") != bool(self.choices):
+            raise ValueError("choices задаются только для answer: choice и для него обязательны")
+        return self
+
+
 LeafProbe = (
     FileKvProbe | FileRegexProbe | FileStatProbe | CmdRegexProbe | CmdForeachProbe | CliConfigProbe | CliBlocksProbe
     | ServiceStateProbe
-    | PkgVersionProbe | RegValueProbe | WinSecpolProbe | WinAuditpolProbe | WinAdProbe
+    | PkgVersionProbe | RegValueProbe | WinSecpolProbe | WinAuditpolProbe | WinAdProbe | ManualProbe
 )
 
 
@@ -425,7 +445,7 @@ class Firmware(StrictModel):
     vendor: str
     product: str | None = None
     product_probe: CliConfigProbe | None = None
-    version_probe: CliConfigProbe
+    version_probe: Annotated[CliConfigProbe | ManualProbe, Field(discriminator="type")]
 
     @model_validator(mode="after")
     def _product_source(self) -> "Firmware":
@@ -442,9 +462,9 @@ class Pack(StrictModel):
     tags: list[str] = Field(min_length=1)
     transport: Transport
     asset_type: str | None = None
-    detect: list[DetectRule] = Field(min_length=1)
+    detect: list[DetectRule] = Field(default_factory=list)  # обязателен, кроме manual: там платформу выбирает аудитор
     checks: list[Check] = Field(default_factory=list)
-    firmware: Firmware | None = None  # только сетевые устройства (transport: ssh)
+    firmware: Firmware | None = None  # только сетевые устройства (transport: ssh) и проверка по опросу (manual)
 
     @field_validator("pack")
     @classmethod
@@ -477,8 +497,28 @@ class Pack(StrictModel):
         if self.maturity == "inventory" and self.checks:
             raise ValueError("maturity=inventory — только обнаружение платформы, без проверок (проверки — draft или выше)")
 
-        if self.firmware is not None and self.transport != "ssh":
-            raise ValueError("firmware — для сетевых устройств (transport: ssh); ПО хоста агент собирает сам")
+        if self.firmware is not None and self.transport == "local":
+            raise ValueError("firmware — для сетевых устройств (transport: ssh) и опроса (manual); ПО хоста агент собирает сам")
+        all_probes = [
+            leaf
+            for probe in [check.probe for check in self.checks] + [rule.probe for rule in self.detect]
+            for leaf in leaf_probes(probe)
+        ]
+        if self.firmware is not None:
+            all_probes += [p for p in (self.firmware.version_probe, self.firmware.product_probe) if p is not None]
+        if self.transport == "manual":
+            if self.detect:
+                raise ValueError("транспорт manual: detect не задаётся — пак выбирает аудитор")
+            wrong = sorted({p.type for p in all_probes if p.type != "manual"})
+            if wrong:
+                raise ValueError(f"транспорт manual допускает только пробы manual, найдено: {', '.join(wrong)}")
+            if self.firmware is not None and self.firmware.product_probe is not None:
+                raise ValueError("транспорт manual: продукт прошивки задаётся постоянным product")
+            return self
+        if not self.detect:
+            raise ValueError("detect обязателен: без него агент не поймёт, подходит ли пак хосту")
+        if any(p.type == "manual" for p in all_probes):
+            raise ValueError("проба manual — только в паках с transport: manual (агент её не выполнит)")
         if self.transport == "ssh":
             probes = [
                 leaf

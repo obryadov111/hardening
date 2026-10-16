@@ -183,8 +183,8 @@ test('навигация: каждый пункт бокового меню от
   await page.goto('/dashboard')
   const nav = page.getByRole('navigation', { name: 'Разделы' }).first()
   const links = nav.getByRole('link')
-  await expect(links).toHaveCount(12)
-  for (let i = 0; i < 12; i++) {
+  await expect(links).toHaveCount(13)
+  for (let i = 0; i < 13; i++) {
     const link = links.nth(i)
     const href = await link.getAttribute('href')
     await link.click()

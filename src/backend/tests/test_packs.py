@@ -460,6 +460,7 @@ def test_shipped_packs_and_their_maturity():
         "eltex-esr": "draft", "eltex-mes": "draft", "qtech-qsw": "draft", "snr-switch": "draft",
         "vipnet-coordinator": "draft", "s-terra-gate": "draft", "usergate-ngfw": "draft",
         "pt-ngfw": "inventory",  # CLI только операционный: распознавание и версия для БДУ, без проверок
+        "kontinent-4": "draft",  # проверка по опросу: конфигурация только в графическом Менеджере конфигурации
     }
     assert packs["cisco-ios"].verified_on == []
     assert all(p.verified_on for p in packs.values() if p.maturity == "baseline")  # baseline = подтверждено на оборудовании
@@ -510,3 +511,33 @@ def test_firmware_is_only_for_network_packs_and_reaches_the_manifest():
         Pack.model_validate({**data, "firmware": {"vendor": "Eltex", "version_probe": version}})
     with pytest.raises(ValueError, match="для сетевых устройств"):
         Pack.model_validate({**make_pack(), "firmware": data["firmware"]})
+
+
+def _manual_pack(**overrides):
+    data = {"pack": "m-test", "version": "1.0.0", "maturity": "draft", "transport": "manual", "tags": ["network-device"],
+            "checks": [{"id": "m.q", "title": "x", "probe": {"type": "manual", "question": "Пароль сменён?"},
+                        "assert": {"op": "eq", "value": "yes"}}]}
+    data.update(overrides)
+    return data
+
+
+def test_manual_packs_have_questions_only_and_no_detect():
+    pack = Pack.model_validate(_manual_pack())
+    assert pack.transport == "manual" and pack.detect == []
+    with pytest.raises(ValueError, match="detect не задаётся"):
+        Pack.model_validate(_manual_pack(detect=[{"probe": {"type": "manual", "question": "Это шлюз?"}, "equals": "yes"}]))
+    cli = {"id": "m.c", "title": "x", "probe": {"type": "cli_config", "cmd": "show version", "match": "x"}, "assert": {"op": "exists"}}
+    with pytest.raises(ValueError, match="только пробы manual"):
+        Pack.model_validate(_manual_pack(checks=[cli]))
+    with pytest.raises(ValueError, match="choices"):
+        Pack.model_validate(_manual_pack(checks=[{"id": "m.q", "title": "x", "assert": {"op": "eq", "value": "a"},
+                                                  "probe": {"type": "manual", "answer": "choice", "question": "Что выбрано?"}}]))
+
+
+def test_manual_probe_is_rejected_outside_manual_packs_and_detect_is_required_elsewhere():
+    question = {"id": "n.q", "title": "x", "probe": {"type": "manual", "question": "Пароль сменён?"},
+                "assert": {"op": "eq", "value": "yes"}}
+    with pytest.raises(ValueError, match="только в паках с transport: manual"):
+        Pack.model_validate(_ssh_pack_with({"type": "cli_config", "cmd": "show running-config", "match": "x"}) | {"checks": [question]})
+    with pytest.raises(ValueError, match="detect обязателен"):
+        Pack.model_validate(make_pack(detect=[]))

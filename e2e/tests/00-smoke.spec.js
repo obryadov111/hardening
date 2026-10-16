@@ -13,6 +13,7 @@ const PAGES = [
   ['/report', 'Отчёт'],
   ['/scans', 'Сканирования'],
   ['/offline-scan', 'выгрузке'],
+  ['/manual-scan', 'по опросу'],
   ['/agents', 'Агенты'],
   ['/scan-compare', 'Сравнение'],
   ['/organization-users', 'Управление доступом'],

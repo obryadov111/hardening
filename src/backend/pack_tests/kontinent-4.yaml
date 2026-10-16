@@ -1,0 +1,59 @@
+# Образцы для пака kontinent-4 (transport: manual — проверка по опросу). Вместо вывода команд — ответы аудитора:
+# {id проверки: значение} или {id: {value, comment}}; firmware_version — ответ на вопрос о версии ПО.
+pack: kontinent-4
+
+cases:
+  - name: комплекс настроен по документации — всё соблюдено
+    firmware_version: 4.2.1
+    firmware: { name: комплекс безопасности «континент». версия 4, version: 4.2.1 }
+    answers:
+      kontinent4.loader_password_changed: { value: да, comment: "проверено в ЛМ УБ-01, 12.10" }
+      kontinent4.bios_password_changed: да
+      kontinent4.password_min_length: 12
+      kontinent4.lockout_enabled: yes
+      kontinent4.personal_admin_accounts: да
+      kontinent4.ssh_access_restricted: выключен
+      kontinent4.inactivity_timeout: 300
+      kontinent4.snmp_secure: "SNMP v3: аутентификация SHA и шифрование AES"
+      kontinent4.remote_syslog: да
+    expect:
+      kontinent4.loader_password_changed: pass
+      kontinent4.bios_password_changed: pass
+      kontinent4.password_min_length: pass
+      kontinent4.lockout_enabled: pass
+      kontinent4.personal_admin_accounts: pass
+      kontinent4.ssh_access_restricted: pass
+      kontinent4.inactivity_timeout: pass
+      kontinent4.snmp_secure: pass
+      kontinent4.remote_syslog: pass
+
+  - name: после обновления пароль загрузчика не сменён, SSH открыт всем, SNMP v2, тайм-аут час
+    answers:
+      kontinent4.loader_password_changed: нет
+      kontinent4.bios_password_changed: no
+      kontinent4.password_min_length: "6"
+      kontinent4.lockout_enabled: нет
+      kontinent4.personal_admin_accounts: нет
+      kontinent4.ssh_access_restricted: включён без ограничения адресов
+      kontinent4.inactivity_timeout: 3600
+      kontinent4.snmp_secure: SNMP v2 (сообщество)
+      kontinent4.remote_syslog: нет
+    expect:
+      kontinent4.loader_password_changed: fail
+      kontinent4.bios_password_changed: fail
+      kontinent4.password_min_length: fail
+      kontinent4.lockout_enabled: fail
+      kontinent4.personal_admin_accounts: fail
+      kontinent4.ssh_access_restricted: fail
+      kontinent4.inactivity_timeout: fail
+      kontinent4.snmp_secure: fail
+      kontinent4.remote_syslog: fail
+
+  - name: на вопрос не ответили — «не проверено», а не соблюдение; версию не указали — для БДУ нечего
+    firmware: null
+    answers:
+      kontinent4.loader_password_changed: да
+    expect:
+      kontinent4.loader_password_changed: pass
+      kontinent4.bios_password_changed: error
+      kontinent4.snmp_secure: error

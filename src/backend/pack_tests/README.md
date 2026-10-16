@@ -35,6 +35,9 @@ cases:
     drop: [/путь]                   # убрать файл из base (нет файла)
     drop_commands: ["команда"]      # убрать команду из base
     detect: true                    # необязательно: должен ли пак распознать платформу
+    firmware: { name: esr-30, version: 1.5.10 }   # пак с firmware: что уйдёт в БДУ (null — не извлечь)
+    answers: { kontinent4.bios_password_changed: да }   # пак manual: ответы аудитора вместо вывода команд
+    firmware_version: 4.2.1         # пак manual: ответ на вопрос о версии ПО
     expect:                         # ожидаемые статусы: pass | fail | error
       docker.no_host_pid: fail
 ```

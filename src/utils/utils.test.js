@@ -75,5 +75,10 @@ test("источник данных: живой хост — без отметк
   const file = collectionSource({ source: "agent-report", transfer: "file", agent_key: "ЦОД", uploaded_by: "a@b.c" });
   assert.equal(file.short, "файлом");
   assert.match(file.text, /подпись ключа «ЦОД» проверена; загрузил a@b\.c/);
+  const manual = collectionSource({ source: "manual", answered_by: "auditor@example.com", unanswered: ["a", "b"] });
+  assert.equal(manual.short, "по опросу");
+  assert.match(manual.text, /не чтение конфигурации/);
+  assert.match(manual.text, /auditor@example\.com/);
+  assert.match(manual.text, /без ответа вопросов: 2/);
   assert.deepEqual(collectionSource({ source: "что-то новое" }), { short: "что-то новое", text: "что-то новое" });
 });

@@ -25,6 +25,9 @@ from types import SimpleNamespace
 
 import yaml
 
+from app.services.manual_scan import ManualScanError
+from app.services.manual_scan import firmware_software as manual_firmware_software
+from app.services.manual_scan import probe_results as manual_probe_results
 from app.services.packs.evaluate import evaluate_pack
 from app.services.packs.manifest import build_manifest
 from app.services.packs.models import Pack, leaf_probes
@@ -315,17 +318,32 @@ def run_fixture(path: Path, registry: PackRegistry, agent=None) -> FixtureResult
     results = []
     for i, case in enumerate(spec["cases"]):
         result = CaseResult(name=case.get("name") or f"case {i + 1}")
-        host = FixtureHost(agent, pack.transport, **_merge(base, case))
+        manual = pack.transport == "manual"
+        host = None if manual else FixtureHost(agent, pack.transport, **_merge(base, case))
+        manual_raw = None
+        if manual:
+            # Проверка по опросу: вместо вывода команд — ответы аудитора {id: значение или {value, comment}}.
+            answers = {k: v if isinstance(v, dict) else {"value": v} for k, v in (case.get("answers") or {}).items()}
+            try:
+                manual_raw, _ = manual_probe_results(pack, answers)
+            except ManualScanError as exc:
+                result.problems.append(f"answers: {exc}")
+                results.append(result)
+                continue
 
-        if "detect" in case:
+        if "detect" in case and not manual:
             detected = agent.matches_detect(host, manifest["detect"])
             if detected != bool(case["detect"]):
                 result.problems.append(f"detect: ожидалось {bool(case['detect'])}, получено {detected}")
 
         if "firmware" in case:
             # Модель и версия ПО устройства для БДУ: {name, version} или null — «прошивку не извлечь».
-            got = agent.collect_firmware(host, manifest)
-            got = {"name": got["name"], "version": got["version"]} if got else None
+            if manual:
+                software = manual_firmware_software(pack, case.get("firmware_version"))
+                got = {"name": software[0]["name"], "version": software[0]["version"]} if software else None
+            else:
+                got = agent.collect_firmware(host, manifest)
+                got = {"name": got["name"], "version": got["version"]} if got else None
             if got != case["firmware"]:
                 result.problems.append(f"firmware: ожидалось {case['firmware']!r}, получено {got!r}")
             elif got:
@@ -340,7 +358,7 @@ def run_fixture(path: Path, registry: PackRegistry, agent=None) -> FixtureResult
             result.problems.append(f"статус должен быть одним из {', '.join(STATUSES)}: {', '.join(bad)}")
 
         if expect:
-            raw = agent.run_manifest(host, manifest)
+            raw = manual_raw if manual else agent.run_manifest(host, manifest)
             for check_result in evaluate_pack(pack, {k: SimpleNamespace(**v) for k, v in raw.items()}):
                 result.statuses[check_result.check_id] = check_result.status
                 want = expect.get(check_result.check_id)

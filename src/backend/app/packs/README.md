@@ -104,7 +104,9 @@ CVSS-оценки вендора: Icvss пришлось бы считать к�
 | `file_regex` | `path`, `pattern` | группа 1 (или совпадение); нет совпадения — пусто |
 | `file_stat` | `path`, `field` (mode/owner/group/uid/gid) | права/владелец без чтения содержимого |
 | `cmd_regex` | `cmd` (argv, без shell), `pattern` | группа 1 (или совпадение) |
-| `cli_config` | `cmd` (show/display, `/export`, `… print`), `match`, `section`, `require` | совпавшая строка конфигурации устройства. Ошибка устройства (`% …`) и отсутствие `require` в ответе — проба не выполнилась (иначе при нехватке прав все проверки «параметра нет» ложно прошли бы) |
+| `cli_config` | `cmd` (show/display, `/export`, `… print`, просмотр ViPNet), `match`, `section`, `require`, `default`, `multiline` | совпавшая строка конфигурации устройства. Ошибка устройства (`% …`) и отсутствие `require` в ответе — проба не выполнилась (иначе при нехватке прав все проверки «параметра нет» ложно прошли бы). `default` — значение, когда строки нет (умолчания устройство в running-config не показывает: минимальная длина пароля ESR — 1). `multiline: true` — `match` по всему выводу (запись из нескольких строк, UserGate) |
+| `cli_blocks` | `cmd`, `block`, `within`, `has`, `lacks`, `require` | **число** блоков конфигурации (по отступам), в теле которых есть строки под все `has` и нет строк под `lacks`; `within` — блок-родитель. Пример: правила `security zone-pair untrusted self` Eltex ESR с `action permit` без `match source-address` |
+| `manual` | `question`, `hint`, `answer` (yesno/number/choice/text), `choices`, `unit` | только в паках `transport: manual`: ответ аудитора на странице «Проверка по опросу»; без ответа — «не проверено» |
 | `service_state` | `service`, `field` (active/enabled) | состояние службы systemd |
 | `pkg_version` | `package` | версия пакета; пусто — не установлен |
 | `cmd_foreach` | `list_cmd`, `item_cmd` (элемент — последним аргументом), `pattern`, `max_items` | **число** элементов списка, вывод которых подходит под `pattern`; пустой список — 0; сбой любой команды — проба не выполнилась, а не 0 |
@@ -112,6 +114,32 @@ CVSS-оценки вендора: Icvss пришлось бы считать к�
 
 Агент выполняет только эти пробы и только команды из собственного белого списка.
 Чтение `/etc/shadow` и ключей файловыми пробами запрещено (для прав — `file_stat`).
+
+## Прошивка сетевого устройства (`firmware`) — для БДУ ФСТЭК
+
+```yaml
+firmware:
+  vendor: Eltex
+  product: esr                       # запасное имя, если модель не нашлась
+  product_probe: { type: cli_config, cmd: show system, match: 'System type:\s+Eltex (v?ESR-?\S*)' }
+  version_probe: { type: cli_config, cmd: show system, match: 'Software version:\s+(\d+(?:\.\d+)+)' }
+```
+
+Агент (и загрузка выгрузки) передаёт модель и версию как ПО актива: имя в нижнем регистре должно совпасть с
+продуктом БДУ целиком («esr-200», «qsw-2800-28t-ac», «vipnet coordinator hw1000», «pt ngfw»). По ним работают
+«Уязвимости ПО» и пункт УСИ.1 методики. В паке `manual` версия — вопрос аудитору, продукт — постоянный `product`.
+Фикстура пака с `firmware` обязана показать извлечение: `firmware: { name: …, version: … }` в сценарии.
+
+## Три способа сбора
+
+| Транспорт | Кто выполняет | Где применяется |
+|---|---|---|
+| `local` | агент на хосте | Linux, Windows, Docker, СУБД |
+| `ssh` | агент по SSH (команды только на чтение) **или** выгрузка вывода команд в файлы (`--offline-dir`, страница «Проверка по выгрузке») | Cisco, Eltex, Qtech, SNR, ViPNet, С-Терра, UserGate, PT NGFW |
+| `manual` | аудитор отвечает на вопросы пака на странице «Проверка по опросу»; снимок помечен «по опросу» | оборудование без машиночитаемой конфигурации: Континент 4 (настройки только в Менеджере конфигурации) |
+
+Пак `manual` не задаёт `detect` (платформу выбирает аудитор) и содержит только пробы `manual`; агенту такие паки
+не выдаются.
 
 ## Утверждения (`assert`)
 
@@ -136,13 +164,28 @@ CVSS-оценки вендора: Icvss пришлось бы считать к�
 
 ## Паки в каталоге
 
-| Пак | Версия | Уровень | Проверок | Примечание |
-|---|---|---|---|---|
-| `ubuntu-server` | 1.2.0 | baseline | 13 | Перенос старого агента + auditd (ФСТЭК ОПС.1.11); см. `docs/agent-packs/stage1-report.md` |
-| `docker` | 1.1.0 | baseline | 7 | Подтверждён на реальном Docker; применяется вместе с паком ОС |
-| `postgresql` | 1.0.0 | draft | 6 | Только Ubuntu + пакет `postgresql-16`; раздел СУБД методики ФСТЭК |
-| `samba` | 1.0.0 | draft | 1 | Выделен из ubuntu-server 1.1.0; применяется только при наличии `smb.conf` |
-| `cisco-ios` | 1.1.0 | draft | 11 | Сбор по SSH; проверен на образцах вывода, на устройстве не запускался |
-| `astra-linux` | 1.0.0 | inventory | 0 | Только обнаружение: проверки без образа системы не пишутся |
+| Пак | Версия | Транспорт | Уровень | Проверок | Примечание |
+|---|---|---|---|---|---|
+| `alt-linux` | 1.1.0 | local | draft | 14 | Альт p10/p11 |
+| `astra-linux` | 1.2.0 | local | draft | 25 | Astra SE 1.8 в контейнере; МКЦ, МРД, ЗПС не проверяются (нужна ВМ) |
+| `cisco-ios` | 1.3.0 | ssh | draft | 12 | Сбор по SSH или выгрузке; на устройстве не запускался |
+| `debian-server` | 1.1.0 | local | draft | 25 | Debian 11–13 |
+| `docker` | 1.2.0 | local | baseline | 11 | Подтверждён на реальном Docker; применяется вместе с паком ОС |
+| `eltex-esr` | 1.0.0 | ssh | draft | 16 | Eltex ESR/vESR; ESR Hardening Guide, справочник CLI 1.5.10 (FSTEC); прошивка → БДУ |
+| `eltex-mes` | 1.0.0 | ssh | draft | 10 | Eltex MES23xx/33xx/53xx (ПО 4.x–6.x); прошивка → БДУ |
+| `kontinent-4` | 1.0.0 | manual | draft | 9 | Континент 4 (Код Безопасности): **проверка по опросу** — настройки только в Менеджере конфигурации |
+| `postgresql` | 1.1.0 | local | draft | 9 | Раздел СУБД методики ФСТЭК |
+| `pt-ngfw` | 1.0.0 | ssh | inventory | 0 | PT NGFW: CLI только операционный — распознавание и версия для БДУ; проверки после доступа к API |
+| `qtech-qsw` | 1.0.0 | ssh | draft | 10 | Qtech QSW-2800…4610 (ПО семейства DCN); прошивка → БДУ |
+| `rhel-family` | 1.1.0 | local | draft | 19 | РЕД ОС, Rocky, Alma, Oracle, CentOS Stream; CI на официальных образах |
+| `s-terra-gate` | 1.0.0 | ssh | draft | 7 | С-Терра Шлюз 4.2: ГОСТ в IKE/IPsec, SNMP, пароли; основной путь — выгрузка из cs_console |
+| `samba` | 1.0.0 | local | draft | 1 | Только при наличии `smb.conf` |
+| `snr-switch` | 1.0.0 | ssh | draft | 10 | SNR-S (ПО семейства DCN); прошивка → БДУ |
+| `ubuntu-server` | 1.4.0 | local | baseline | 25 | Перенос старого агента + auditd, политика паролей; см. `docs/agent-packs/stage1-report.md` |
+| `usergate-ngfw` | 1.0.0 | ssh | draft | 6 | UserGate NGFW 7.x: политика паролей администраторов, управление из Untrusted; по выгрузке вывода CLI |
+| `vipnet-coordinator` | 1.0.0 | ssh | draft | 6 | ViPNet Coordinator HW/KB 4.x (ИнфоТеКС); прошивка → БДУ |
+| `windows-client` | 1.0.0 | local | draft | 39 | Windows 10/11 |
+| `windows-dc` | 1.0.0 | local | draft | 26 | Контроллер домена AD |
+| `windows-server` | 1.0.0 | local | baseline | 40 | Подтверждён на Windows Server |
 
 Образцы для каждого пака — `pack_tests/*.yaml`; прогон — `python -m app.commands.pack test`.

@@ -221,6 +221,16 @@ def source_label(collection: dict | None) -> str:
         declared = "; пак задан оператором, платформа по выгрузке не подтверждена" if collection.get("declared_pack") else ""
         uploaded = f"; загружена через интерфейс: {collection['uploaded_by']}" if collection.get("uploaded_by") else ""
         return f"Выгрузка конфигурации{when}, не живое устройство{declared}{uploaded}{_file_transfer(collection)}"
+    if collection.get("source") == "manual":
+        skipped = len(collection.get("unanswered") or [])
+        unanswered = f"; без ответа вопросов: {skipped}" if skipped else ""
+        when = ""
+        try:
+            when = " " + _local(datetime.fromisoformat(collection["answered_at"].replace("Z", "+00:00")), "%Y-%m-%d %H:%M", "")
+        except (KeyError, TypeError, ValueError):
+            when = ""
+        return (f"Опрос аудитора по экранам системы управления, не чтение конфигурации устройства; ответил "
+                f"{collection.get('answered_by', '—')}{when}{unanswered}")
     if collection.get("source") == "agent-report":
         return f"Живой хост (агент){_file_transfer(collection)}; загрузил {collection.get('uploaded_by', '—')}"
     return str(collection.get("source"))

@@ -40,7 +40,9 @@ def list_manifests(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Ключ подписи паков не настроен (PACK_SIGNING_ED25519_KEY или PACK_SIGNING_KEY)",
         )
-    return {"manifests": signed_manifests(registry.latest(transport), settings.PACK_SIGNING_KEY, settings.PACK_SIGNING_ED25519_KEY)}
+    # Паки проверки по опросу (manual) агент не выполняет: на них отвечает аудитор в интерфейсе.
+    packs = [p for p in registry.latest(transport) if p.transport != "manual"]
+    return {"manifests": signed_manifests(packs, settings.PACK_SIGNING_KEY, settings.PACK_SIGNING_ED25519_KEY)}
 
 
 class EnrollRequest(BaseModel):
