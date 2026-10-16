@@ -461,6 +461,7 @@ def test_shipped_packs_and_their_maturity():
         "vipnet-coordinator": "draft", "s-terra-gate": "draft", "usergate-ngfw": "draft",
         "pt-ngfw": "inventory",  # CLI только операционный: распознавание и версия для БДУ, без проверок
         "kontinent-4": "draft",  # проверка по опросу: конфигурация только в графическом Менеджере конфигурации
+        "infowatch-arma-ngfw": "draft",
     }
     assert packs["cisco-ios"].verified_on == []
     assert all(p.verified_on for p in packs.values() if p.maturity == "baseline")  # baseline = подтверждено на оборудовании

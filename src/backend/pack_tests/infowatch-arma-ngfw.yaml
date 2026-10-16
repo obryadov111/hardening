@@ -1,0 +1,121 @@
+# Образцы для пака infowatch-arma-ngfw (transport: ssh). Пак draft: на живом устройстве не запускался.
+# show version — пример из документации ARMA Стена; конфигурация собрана из примеров команд документации
+# (политика паролей, блокировка, SNMPv3 «arma», syslog по TLS, NTP) в формате VyOS (значения в кавычках).
+pack: infowatch-arma-ngfw
+
+base:
+  cli:
+    show version: |
+      Version: NGFWOS 4.9
+      Release flavor: iso
+      Built by: IW ARMA CICD
+      Architecture: x86_64
+      System type: KVM guest
+    show configuration commands: |
+      set interfaces ethernet eth0 address 'dhcp'
+      set service ntp server '192.168.1.1'
+      set service snmp listen-address '10.10.10.100'
+      set service snmp v3 group default mode 'ro'
+      set service snmp v3 user arma auth encrypted-password '0x7d1c1a9b5e'
+      set service snmp v3 user arma auth type 'sha'
+      set service snmp v3 user arma group 'default'
+      set service snmp v3 user arma privacy encrypted-password '0x7d1c1a9b5e'
+      set service snmp v3 user arma privacy type 'aes'
+      set service ssh port '22'
+      set system host-name 'ngfwos'
+      set system logging host 192.168.1.27 encryption 'yes'
+      set system logging host 192.168.1.27 port '6514'
+      set system logging host 192.168.1.27 protocol 'tcp'
+      set system login password minimum-length '12'
+      set system login retry-options attemps-before-block '5'
+      set system login user admin authentication encrypted-password '$6$REDACTED'
+    show configuration: |
+      interfaces {
+          ethernet eth0 {
+              address dhcp
+          }
+      }
+      service {
+          snmp {
+              v3 {
+                  user arma {
+                      auth {
+                          encrypted-password 0x7d1c1a9b5e
+                          type sha
+                      }
+                      group default
+                      privacy {
+                          encrypted-password 0x7d1c1a9b5e
+                          type aes
+                      }
+                  }
+              }
+          }
+      }
+      system {
+          host-name ngfwos
+      }
+
+cases:
+  - name: настроенная ARMA Стена — всё соблюдено
+    detect: true
+    firmware: { name: программный комплекс «infowatch arma стена», version: "4.9" }
+    expect:
+      arma_ngfw.password_min_length: pass
+      arma_ngfw.lockout_attempts: pass
+      arma_ngfw.snmp_community_absent: pass
+      arma_ngfw.snmpv3_auth_sha: pass
+      arma_ngfw.snmpv3_privacy_aes: pass
+      arma_ngfw.remote_syslog: pass
+      arma_ngfw.ntp_server: pass
+
+  - name: умолчания — длина пароля 1, 10 попыток, community, SNMPv3 на MD5/DES, нет syslog и NTP
+    cli:
+      show configuration commands: |
+        set interfaces ethernet eth0 address 'dhcp'
+        set service snmp community public authorization 'ro'
+        set service snmp v3 user mon auth encrypted-password '0x11'
+        set service snmp v3 user mon privacy encrypted-password '0x22'
+        set system login retry-options attemps-before-block '10'
+        set system login user admin authentication encrypted-password '$6$REDACTED'
+      show configuration: |
+        service {
+            snmp {
+                community public {
+                    authorization ro
+                }
+                v3 {
+                    user mon {
+                        auth {
+                            encrypted-password 0x11
+                        }
+                        privacy {
+                            encrypted-password 0x22
+                        }
+                    }
+                }
+            }
+        }
+        system {
+            host-name ngfwos
+        }
+    expect:
+      arma_ngfw.password_min_length: fail
+      arma_ngfw.lockout_attempts: fail
+      arma_ngfw.snmp_community_absent: fail
+      arma_ngfw.snmpv3_auth_sha: fail
+      arma_ngfw.snmpv3_privacy_aes: fail
+      arma_ngfw.remote_syslog: fail
+      arma_ngfw.ntp_server: fail
+
+  - name: выгрузка обрезана (нет команд set) — проверки не выполняются
+    cli:
+      show configuration commands: "Invalid command\n"
+    expect:
+      arma_ngfw.password_min_length: error
+
+  - name: VyOS без NGFWOS — пак не применяется
+    cli:
+      show version: |
+        Version:          VyOS 1.4.0
+    detect: false

@@ -173,6 +173,7 @@ firmware:
 | `docker` | 1.2.0 | local | baseline | 11 | Подтверждён на реальном Docker; применяется вместе с паком ОС |
 | `eltex-esr` | 1.0.0 | ssh | draft | 16 | Eltex ESR/vESR; ESR Hardening Guide, справочник CLI 1.5.10 (FSTEC); прошивка → БДУ |
 | `eltex-mes` | 1.0.0 | ssh | draft | 10 | Eltex MES23xx/33xx/53xx (ПО 4.x–6.x); прошивка → БДУ |
+| `infowatch-arma-ngfw` | 1.0.0 | ssh | draft | 7 | InfoWatch ARMA Стена (NGFWOS на VyOS): пароли, блокировка, SNMPv3 (умолчания MD5/DES), syslog; прошивка → БДУ |
 | `kontinent-4` | 1.0.0 | manual | draft | 9 | Континент 4 (Код Безопасности): **проверка по опросу** — настройки только в Менеджере конфигурации |
 | `postgresql` | 1.1.0 | local | draft | 9 | Раздел СУБД методики ФСТЭК |
 | `pt-ngfw` | 1.0.0 | ssh | inventory | 0 | PT NGFW: CLI только операционный — распознавание и версия для БДУ; проверки после доступа к API |

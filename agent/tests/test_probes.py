@@ -323,6 +323,13 @@ def test_redact_does_not_mangle_harmless_directives():
     assert redact("Enable  PASSWORD 7 0822455D0A16") == "Enable  PASSWORD ***"
     assert redact("enable password 7 0822455D0A16") == "enable password ***"
     assert redact("radius-server key MySecret") == "radius-server key MySecret"  # 'key' отдельно не маскируется
+    # параметр политики паролей — не секрет; сам пароль рядом — секрет
+    assert redact("set system login password minimum-length '12'") == "set system login password minimum-length '12'"
+    assert redact("set system login user admin authentication plaintext-password 'x'") == \
+        "set system login user admin authentication plaintext-password ***"
+    assert redact("set service snmp v3 user arma auth encrypted-password '0x7d1c'") == \
+        "set service snmp v3 user arma auth encrypted-password ***"
+    assert redact("set system login password 'S3cr3t'") == "set system login password ***"
     assert redact("x" * 500) == "x" * 300
 
 

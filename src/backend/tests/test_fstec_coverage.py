@@ -105,7 +105,8 @@ def test_usi1_covers_russian_network_device_firmware():
 
     usi1 = next(item for section in CATALOG for item in section.items if item.code == "УСИ.1")
     for product in ("cisco ios", "esr-200", "vesr", "mes3124", "qsw-2800-28t-ac", "snr-s2985g-24t",
-                    "vipnet coordinator hw1000", "pt ngfw", "usergate next-generation firewall (ngfw)"):
+                    "vipnet coordinator hw1000", "pt ngfw", "usergate next-generation firewall (ngfw)",
+                    "программный комплекс «infowatch arma стена»", "комплекс безопасности «континент». версия 4"):
         assert _item_product(usi1, product), product
     for product in ("openssh", "mesa", "esr", "postgresql"):
         assert not _item_product(usi1, product), product

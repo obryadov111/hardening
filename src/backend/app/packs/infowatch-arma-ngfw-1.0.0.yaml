@@ -1,0 +1,117 @@
+# Пак «InfoWatch ARMA Стена» (ООО «ИнфоВотч АРМА»): межсетевой экран нового поколения на NGFWOS (основа — VyOS).
+# Сбор — вывод команд эксплуатационного режима: `show version`, `show configuration commands` (конфигурация
+# в виде команд set) и `show configuration` (та же конфигурация блоками — для SNMPv3, где важна вложенность) —
+# по SSH или выгрузкой этого вывода в файлы.
+#
+# maturity: draft. Проверки написаны по документации вендора и проверены ТОЛЬКО на образцах вывода
+# (pack_tests/infowatch-arma-ngfw.yaml). На живом устройстве пак не запускался — verified_on пуст.
+#
+# Источник: «ARMA Стена. Руководство по CLI» (docs.iwarma.ru): «Интерфейс командной строки» (show | commands,
+# run show configuration commands), «Управление доступом» (политика паролей, временная блокировка), «SNMP»,
+# «Журналирование», «NTP», «Установка» (вход admin/admin до установки образа, show version).
+#
+# Значения по умолчанию (документация) — в конфигурации не показываются:
+#  * минимальная длина пароля — 1; блокировка — 5 попыток, 10 минут;
+#  * SNMPv3: аутентификация MD5, шифрование DES — если type не задан явно, работают устаревшие алгоритмы.
+# В выводе VyOS значения могут быть в кавычках ('8'), выражения это учитывают.
+#
+# Ограничение: по SSH администратор попадает в оболочку NGFWOS; выполнение одной команды через ssh для
+# эксплуатационных команд VyOS требует обёртки — основной путь сейчас выгрузка (show_configuration_commands.txt).
+
+pack: infowatch-arma-ngfw
+version: 1.0.0
+maturity: draft
+tags: [network-device, firewall, infowatch, arma-ngfw]
+transport: ssh
+asset_type: network-device
+
+detect:
+  - probe: { type: cli_config, cmd: show version, match: '^Version:\s*(NGFWOS.*)' }
+    regex: '^NGFWOS'
+
+# Версия ПО — для сопоставления с БДУ: продукт в БДУ — «программный комплекс «infowatch arma стена»».
+firmware:
+  vendor: ООО «ИнфоВотч АРМА»
+  product: программный комплекс «infowatch arma стена»
+  version_probe: { type: cli_config, cmd: show version, match: '^Version:\s*NGFWOS\s+(\d+(?:\.\d+)*)' }
+
+checks:
+  - id: arma_ngfw.password_min_length
+    title: Минимальная длина пароля учётных записей не меньше 8 символов
+    probe: { type: cli_config, cmd: show configuration commands, require: '(?m)^set ', match: "^set system login password minimum-length '?(\\d+)'?", default: "1" }
+    assert: { op: gte, value: 8 }
+    severity: medium
+    remediation: "`set system login password minimum-length 12`, а также minimum-numerics, minimum-special, minimum-upper-case, minimum-lower-case (по умолчанию длина 1)."
+    refs:
+      - { source: "ARMA Стена. Руководство по CLI", id: "Политика паролей учётных записей" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+
+  - id: arma_ngfw.lockout_attempts
+    title: Блокировка не позже чем после 5 неудачных попыток входа
+    probe: { type: cli_config, cmd: show configuration commands, require: '(?m)^set ', match: "^set system login retry-options attemps-before-block '?(\\d+)'?", default: "5" }
+    assert: { op: between, value: [1, 5] }
+    severity: medium
+    remediation: "`set system login retry-options attemps-before-block 5` (так в синтаксисе ARMA) и lockout-period не меньше 10 минут."
+    refs:
+      - { source: "ARMA Стена. Руководство по CLI", id: "Временная блокировка учётных записей" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.6" }
+
+  - id: arma_ngfw.snmp_community_absent
+    title: Нет SNMP v2c community (только SNMPv3)
+    probe: { type: cli_config, cmd: show configuration commands, require: '(?m)^set ', match: "^set service snmp community '?(\\S+?)'?\\s" }
+    assert: { op: absent }
+    severity: medium
+    remediation: "Удалить `service snmp community`; использовать `service snmp v3 user` с auth type sha и privacy type aes."
+    refs:
+      - { source: "ARMA Стена. Руководство по CLI", id: "SNMP" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.8" }
+
+  - id: arma_ngfw.snmpv3_auth_sha
+    title: Аутентификация пользователей SNMPv3 — SHA, а не MD5 по умолчанию
+    probe:
+      type: cli_blocks
+      cmd: show configuration
+      require: '(?m)^\s*system \{'
+      within: '^v3 \{$'
+      block: '^auth \{$'
+      lacks: ['^type sha']
+    assert: { op: eq, value: 0 }
+    severity: medium
+    remediation: "`set service snmp v3 user <имя> auth type sha` для каждого пользователя (по умолчанию md5)."
+    refs:
+      - { source: "ARMA Стена. Руководство по CLI", id: "SNMP: v3 user auth type" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.8" }
+
+  - id: arma_ngfw.snmpv3_privacy_aes
+    title: Шифрование SNMPv3 — AES, а не DES по умолчанию
+    probe:
+      type: cli_blocks
+      cmd: show configuration
+      require: '(?m)^\s*system \{'
+      within: '^v3 \{$'
+      block: '^privacy \{$'
+      lacks: ['^type aes']
+    assert: { op: eq, value: 0 }
+    severity: medium
+    remediation: "`set service snmp v3 user <имя> privacy type aes` для каждого пользователя (по умолчанию des)."
+    refs:
+      - { source: "ARMA Стена. Руководство по CLI", id: "SNMP: v3 user privacy type" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.8" }
+
+  - id: arma_ngfw.remote_syslog
+    title: События отправляются на внешний syslog-сервер
+    probe: { type: cli_config, cmd: show configuration commands, require: '(?m)^set ', match: "^set system logging host '?([^'\\s]+)'?" }
+    assert: { op: exists }
+    severity: low
+    remediation: "`set system logging host <адрес> log <сервис>`; для передачи по TLS — protocol tcp, port 6514, encryption yes."
+    refs:
+      - { source: "ARMA Стена. Руководство по CLI", id: "Журналирование: удалённый сервер" }
+
+  - id: arma_ngfw.ntp_server
+    title: Время синхронизируется с заданным NTP-сервером
+    probe: { type: cli_config, cmd: show configuration commands, require: '(?m)^set ', match: "^set service ntp server '?([^'\\s]+)'?" }
+    assert: { op: exists }
+    severity: low
+    remediation: "`set service ntp server <адрес>`."
+    refs:
+      - { source: "ARMA Стена. Руководство по CLI", id: "NTP" }

@@ -424,8 +424,14 @@ _CLI_READONLY = re.compile(
     r"|^iplir option get [a-z-]+$"
     r"|^version( full)?$"
 )
-# Слово-секрет — отдельное слово: не часть составного (prohibit-password, password-encryption, PasswordAuthentication).
-_SECRET_WORDS = re.compile(r"(?i)(?<![\w-])(password|passwd|secret|community|token|hash|psk|pre-shared-key|private-key)(?![\w-]).*$")
+# Слово-секрет — отдельное слово: не часть составного (prohibit-password, password-encryption, PasswordAuthentication),
+# кроме паролей VyOS/ARMA (plaintext-password, encrypted-password), и не параметр политики паролей
+# («login password minimum-length 12» — это длина, а не пароль).
+_SECRET_WORDS = re.compile(
+    r"(?i)(?<![\w-])(plaintext-password|encrypted-password|password|passwd|secret|community|token|hash|psk|pre-shared-key"
+    r"|private-key)(?![\w-])"
+    r"(?!\s+'?(?:minimum|maximum)-)(?=.*$).*$"
+)
 _HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
 _USER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 
