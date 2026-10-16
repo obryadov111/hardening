@@ -871,6 +871,13 @@ def probe_cli_config(t, p: dict) -> dict:
             elif inside:
                 scoped.append(line)
         lines = scoped
+    if p.get("multiline"):
+        # Запись из нескольких строк (UserGate: service / allowed-addresses / enabled) — выражение по всему выводу.
+        m = re.search(p["match"], "\n".join(lines), re.MULTILINE)
+        if m:
+            found = " ".join(m.group(0).split())
+            return _ok(_cli_value(m, found), found)
+        lines = []
     for line in lines:
         m = re.search(p["match"], line)
         if m:
@@ -1142,6 +1149,26 @@ def _detect_unavailable(transport, detect_rules: "list[dict]") -> bool:
         if rule["probe"].get("cmd") not in missing:
             return False
     return True
+
+
+def collect_firmware(transport, manifest: dict) -> "dict | None":
+    """Модель и версия ПО сетевого устройства (поле firmware пака) — запись ПО актива для сопоставления с БДУ.
+    Не нашлась версия или имя продукта — None: без версии сопоставлять нечего."""
+    firmware = manifest.get("firmware")
+    if not firmware:
+        return None
+    version = run_probe(transport, firmware["version_probe"])
+    if not version["found"] or not version["value"]:
+        return None
+    product = firmware.get("product")
+    if firmware.get("product_probe"):
+        model = run_probe(transport, firmware["product_probe"])
+        if model["found"] and model["value"]:
+            product = model["value"]
+    if not product:
+        return None
+    return {"name": str(product).strip().lower(), "version": str(version["value"]).strip(),
+            "vendor": firmware.get("vendor"), "category": "firmware"}
 
 
 def run_manifest(transport, manifest: dict, log=None) -> dict:

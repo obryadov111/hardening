@@ -118,6 +118,7 @@ base:
 cases:
   - name: укреплённый маршрутизатор по ESR Hardening Guide — всё соблюдено
     detect: true
+    firmware: { name: esr-30, version: 1.5.10 }
     expect:
       eltex_esr.admin_password_changed: pass
       eltex_esr.default_password_expired: pass
@@ -257,6 +258,7 @@ cases:
         ntp enable
         ntp broadcast-client enable
     detect: true
+    firmware: { name: vesr, version: 1.24.0 }
     expect:
       eltex_esr.admin_password_changed: fail
       eltex_esr.untrusted_to_self_tcp_restricted: fail

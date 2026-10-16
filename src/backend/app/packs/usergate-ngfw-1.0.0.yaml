@@ -1,0 +1,95 @@
+# Пак «UserGate NGFW» (ООО «Юзергейт»): межсетевой экран нового поколения, UGOS 7.x. Сбор — вывод команд show
+# режима конфигурации CLI (SSH на порт 2200) или выгрузка этого вывода в файлы.
+#
+# maturity: draft. Проверки написаны по документации вендора и проверены ТОЛЬКО на образцах вывода
+# (pack_tests/usergate-ngfw.yaml), собранных по примерам из руководства. На живом UserGate пак не запускался.
+#
+# Источник: «UserGate NGFW 7.1.x. Руководство администратора» (Document version 7.1.0 build 141 от 2024/07/25),
+# разделы «Интерфейс командной строки (CLI)»: settings administrators general, network zone.
+#
+# Как собирать. CLI UserGate интерактивный (вход по SSH на порт 2200, сервис зоны «CLI over SSH»), выполнение
+# одной команды через ssh не документировано. Основной путь — выгрузка: администратор сохраняет вывод команд в файлы
+# show_settings_administrators_general.txt и show_network_zone_Untrusted.txt (имена — по команде, пробелы → «_»)
+# и загружает их на странице «Проверка по выгрузке».
+#
+# Зона Untrusted — заводское имя внешней зоны. Если внешняя зона названа иначе, проверки зоны дадут error
+# «нет выгрузки» — это ограничение пака, а не pass.
+#
+# Порядок полей записи services-access (service, allowed-addresses, enabled) взят из примера руководства; если
+# в выгрузке он другой, проверка доступа к управлению не найдёт запись — пак остаётся draft до сверки на устройстве.
+
+pack: usergate-ngfw
+version: 1.0.0
+maturity: draft
+tags: [network-device, firewall, usergate, usergate-ngfw]
+transport: ssh
+asset_type: network-device
+
+detect:
+  - probe: { type: cli_config, cmd: show settings administrators general, match: '^\s*(num-auth-attempts)\s*:' }
+    equals: num-auth-attempts
+
+checks:
+  - id: usergate_ngfw.admin_strong_password
+    title: Для администраторов включено требование сложного пароля (strong-password)
+    probe: { type: cli_config, cmd: show settings administrators general, require: '(?m)^\s*strong-password\s*:', match: '^\s*strong-password\s*:\s*(\S+)' }
+    assert: { op: eq, value: "on" }
+    severity: medium
+    remediation: "`set settings administrators general strong-password on`, затем задать min-length, min-uppercase, min-digits, spec-characters."
+    refs:
+      - { source: "UserGate NGFW 7.1. Руководство администратора", id: "CLI: settings administrators general" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+
+  - id: usergate_ngfw.admin_password_min_length
+    title: Минимальная длина пароля администратора не меньше 8 символов
+    probe: { type: cli_config, cmd: show settings administrators general, require: '(?m)^\s*strong-password\s*:', match: '^\s*min-length\s*:\s*(\d+)' }
+    assert: { op: gte, value: 8 }
+    severity: medium
+    remediation: "`set settings administrators general min-length 12` (действует при strong-password on)."
+    refs:
+      - { source: "UserGate NGFW 7.1. Руководство администратора", id: "CLI: settings administrators general" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+
+  - id: usergate_ngfw.admin_lockout_attempts
+    title: Учётная запись администратора блокируется не позже чем после 5 неверных попыток
+    probe: { type: cli_config, cmd: show settings administrators general, require: '(?m)^\s*strong-password\s*:', match: '^\s*num-auth-attempts\s*:\s*(\d+)' }
+    assert: { op: between, value: [1, 5] }
+    severity: medium
+    remediation: "`set settings administrators general num-auth-attempts 5 block-time 900`."
+    refs:
+      - { source: "UserGate NGFW 7.1. Руководство администратора", id: "CLI: settings administrators general" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.6" }
+
+  - id: usergate_ngfw.untrusted_management_restricted
+    title: Из зоны Untrusted управление (веб-консоль, CLI, XML-RPC, SNMP) не открыто для любых адресов
+    probe:
+      type: cli_config
+      cmd: show network zone Untrusted
+      require: '(?m)^\s*name\s*:'
+      multiline: true
+      match: 'service\s*:\s*"?(Admin Console|CLI over SSH|rpc|SNMP)"?\s*\n\s*allowed-addresses\s*:\s*Any\s*\n\s*enabled\s*:\s*on'
+    assert: { op: absent }
+    severity: critical
+    remediation: "`set network zone Untrusted` — отключить сервисы Admin Console, CLI over SSH, rpc, SNMP или ограничить их allowed-addresses списком адресов администраторов; управление — из зоны Management."
+    refs:
+      - { source: "UserGate NGFW 7.1. Руководство администратора", id: "Зоны: контроль доступа (services-access)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.5" }
+
+  - id: usergate_ngfw.untrusted_antispoofing
+    title: В зоне Untrusted включена защита от IP-спуфинга
+    probe: { type: cli_config, cmd: show network zone Untrusted, require: '(?m)^\s*name\s*:', match: '^\s*antispoof-enabled?\s*:\s*(\S+)' }
+    assert: { op: eq, value: "on" }
+    severity: low
+    remediation: "`set network zone Untrusted antispoof-enable on` и списки адресов, которые не могут приходить из этой зоны."
+    refs:
+      - { source: "UserGate NGFW 7.1. Руководство администратора", id: "Зоны: antispoof-enabled" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.2" }
+
+  - id: usergate_ngfw.untrusted_syn_flood_protection
+    title: В зоне Untrusted включена защита от SYN-флуда
+    probe: { type: cli_config, cmd: show network zone Untrusted, require: '(?m)^\s*name\s*:', multiline: true, match: 'dos-protection-syn\s*:\s*\n\s*enabled\s*:\s*(\S+)' }
+    assert: { op: eq, value: "on" }
+    severity: low
+    remediation: "`set network zone Untrusted dos-protection-syn enabled on`."
+    refs:
+      - { source: "UserGate NGFW 7.1. Руководство администратора", id: "Зоны: dos-protection-syn" }

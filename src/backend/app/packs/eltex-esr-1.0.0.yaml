@@ -34,6 +34,14 @@ detect:
   - probe: { type: cli_config, cmd: show system, match: 'System type:\s+(Eltex v?ESR\S*.*)' }
     regex: '(?i)eltex v?esr'
 
+
+# Модель и версия ПО — для сопоставления с БДУ ФСТЭК (УСИ.1): продукт в БДУ — модель («esr-200»).
+firmware:
+  vendor: Eltex
+  product: esr
+  product_probe: { type: cli_config, cmd: show system, match: 'System type:\s+Eltex (v?ESR-?\S*)' }
+  version_probe: { type: cli_config, cmd: show system, match: 'Software version:\s+(\d+(?:\.\d+)+)' }
+
 checks:
   - id: eltex_esr.admin_password_changed
     title: Пароль встроенной учётной записи admin изменён (не пароль по умолчанию)

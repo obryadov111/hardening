@@ -781,6 +781,12 @@ def build_pack_payload(args: argparse.Namespace, probes_module, conn: "ServerCon
         tags.extend(tag for tag in manifest["tags"] if tag not in tags)
         asset_type = asset_type or manifest.get("asset_type")
     local = transport.name == "local"
+    # Сетевое устройство: модель и версия прошивки из паков (поле firmware) — ПО актива для сопоставления с БДУ.
+    firmware = []
+    for manifest in [] if local else matched:
+        entry = probes_module.collect_firmware(transport, manifest)
+        if entry and entry not in firmware:
+            firmware.append(entry)
     payload = {
         "environment": args.environment,
         "asset": {
@@ -790,7 +796,7 @@ def build_pack_payload(args: argparse.Namespace, probes_module, conn: "ServerCon
             "asset_type": asset_type or args.asset_type,
             "criticality": args.criticality,
         },
-        "software": collect_software() if local else [],
+        "software": collect_software() if local else firmware,
         "platform_tags": tags,
         "packs": runs,
         "scan_label": args.scan_label,

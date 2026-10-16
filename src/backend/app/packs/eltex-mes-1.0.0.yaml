@@ -29,6 +29,14 @@ detect:
   - probe: { type: cli_config, cmd: show system, match: 'System Description:\s+(MES\S*.*)' }
     regex: '^MES'
 
+
+# Модель и версия ПО — для сопоставления с БДУ ФСТЭК (УСИ.1): продукт в БДУ — модель («mes3124»).
+# Версия — из show version: «SW version 4.0.7.1» (ПО 4.x) или «Active-image: …» и « Version: 6.6.12.1» (ПО 6.x).
+firmware:
+  vendor: Eltex
+  product_probe: { type: cli_config, cmd: show system, match: 'System Description:\s+(MES\S+)' }
+  version_probe: { type: cli_config, cmd: show version, match: '^(?:SW version|\s+Version:)\s+(\d+(?:\.\d+)+)' }
+
 checks:
   - id: eltex_mes.telnet_disabled
     title: Telnet-сервер выключен (по умолчанию на MES он включён)

@@ -152,6 +152,7 @@ class CliConfigProbe(StrictModel):
     section: str | None = None
     require: str | None = None  # признак настоящего вывода; нет в ответе — проба не выполнилась (нет прав и т. п.)
     default: str | None = None  # значение, когда строки нет: устройство не показывает умолчания в running-config
+    multiline: bool | None = None  # true — match по всему выводу (запись из нескольких строк), а не построчно
 
     _match = field_validator("match")(_validate_regex)
 
@@ -416,6 +417,23 @@ class DetectRule(StrictModel):
         return self
 
 
+class Firmware(StrictModel):
+    """Модель и версия ПО сетевого устройства — для сопоставления с БДУ ФСТЭК (методика, УСИ.1). Агент передаёт их
+    как ПО актива: имя продукта в нижнем регистре должно совпасть с продуктом БДУ целиком («esr-200», «pt ngfw»).
+    product — постоянное имя; product_probe — модель из вывода устройства (имеет приоритет, если нашлась)."""
+
+    vendor: str
+    product: str | None = None
+    product_probe: CliConfigProbe | None = None
+    version_probe: CliConfigProbe
+
+    @model_validator(mode="after")
+    def _product_source(self) -> "Firmware":
+        if not self.product and self.product_probe is None:
+            raise ValueError("firmware: нужно product или product_probe")
+        return self
+
+
 class Pack(StrictModel):
     pack: str
     version: str
@@ -426,6 +444,7 @@ class Pack(StrictModel):
     asset_type: str | None = None
     detect: list[DetectRule] = Field(min_length=1)
     checks: list[Check] = Field(default_factory=list)
+    firmware: Firmware | None = None  # только сетевые устройства (transport: ssh)
 
     @field_validator("pack")
     @classmethod
@@ -458,6 +477,8 @@ class Pack(StrictModel):
         if self.maturity == "inventory" and self.checks:
             raise ValueError("maturity=inventory — только обнаружение платформы, без проверок (проверки — draft или выше)")
 
+        if self.firmware is not None and self.transport != "ssh":
+            raise ValueError("firmware — для сетевых устройств (transport: ssh); ПО хоста агент собирает сам")
         if self.transport == "ssh":
             probes = [
                 leaf

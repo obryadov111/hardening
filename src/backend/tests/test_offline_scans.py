@@ -149,3 +149,22 @@ def test_too_large_file_is_rejected(client, org, monkeypatch):
     monkeypatch.setattr(route, "MAX_FILE_BYTES", 10)
     resp = upload(client, org, [("show running-config", RUNNING)], pack="cisco-test")
     assert resp.status_code == 413
+
+
+def test_upload_stores_device_firmware_as_software_for_bdu(client, db, org, registry):
+    """Модель и версия прошивки из поля firmware пака сохраняются как ПО актива — по ним работает сопоставление с БДУ."""
+    data = _cisco_pack()
+    data["firmware"] = {
+        "vendor": "Cisco", "product": "ios",
+        "product_probe": {"type": "cli_config", "cmd": "show version", "match": r"^Cisco IOS Software, (C\d+) Software"},
+        "version_probe": {"type": "cli_config", "cmd": "show version", "match": r"Version ([\d.()A-Za-z]+)"},
+    }
+    reg = PackRegistry([Pack.model_validate(data)])
+    app.dependency_overrides[get_pack_registry] = lambda: reg
+    resp = upload(client, org, [("show version", "Cisco IOS Software, C2960 Software, Version 15.2(7)E8"),
+                                ("show running-config", RUNNING)])
+    assert resp.status_code == 200, resp.text
+    rows = db.execute(text(
+        "SELECT s.name, s.version, s.vendor FROM software s JOIN assets a ON a.id = s.asset_id WHERE a.hostname = 'sw-core-01'"
+    )).all()
+    assert [tuple(r) for r in rows] == [("c2960", "15.2(7)E8", "Cisco")]

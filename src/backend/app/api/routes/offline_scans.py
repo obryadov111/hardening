@@ -11,7 +11,14 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db, get_pack_registry, require_org_access, require_org_admin
 from app.api.routes.ingest import ingest_payload
 from app.models.user import User
-from app.schemas.ingest import IngestAssetIn, IngestPackRun, IngestProbeResult, IngestRequest, IngestResponse
+from app.schemas.ingest import (
+    IngestAssetIn,
+    IngestPackRun,
+    IngestProbeResult,
+    IngestRequest,
+    IngestResponse,
+    IngestSoftwareIn,
+)
 from app.services.offline_scan import MAX_FILE_BYTES, MAX_FILES, OfflineScanError, offline_packs, run_offline
 from app.services.packs.registry import PackRegistry
 
@@ -89,6 +96,7 @@ async def upload_offline_scan(
             asset_type=run.asset_type or "network-device", criticality=criticality,
         ),
         platform_tags=run.tags,
+        software=[IngestSoftwareIn(**entry) for entry in run.software],
         packs=[
             IngestPackRun(id=pack_.pack, version=pack_.version,
                           probe_results={k: IngestProbeResult(**v) for k, v in results.items()})

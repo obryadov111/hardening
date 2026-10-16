@@ -25,6 +25,7 @@ base:
 cases:
   - name: настроенный координатор — всё соблюдено
     detect: true
+    firmware: { name: vipnet coordinator hw1000, version: 4.3.2-3456 }
     expect:
       vipnet_coordinator.snmp_default_community_absent: pass
       vipnet_coordinator.antispoofing_enabled: pass

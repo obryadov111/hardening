@@ -1,0 +1,32 @@
+# Пак «PT NGFW» (Positive Technologies): межсетевой экран нового поколения. Уровень inventory — только распознавание
+# устройства и версия ПО для сопоставления с БДУ ФСТЭК (методика, УСИ.1); проверок конфигурации нет.
+#
+# Почему без проверок. CLI PT NGFW (SSH на интерфейс управления) по документации только операционный: show version,
+# show interface, show session, show security-rule (лишь имена правил), ping, traceroute — без просмотра настроек.
+# Конфигурация (правила, учётные записи, журналы, SNMP) задаётся в системе управления и доступна через API
+# https://<система управления>/api/v2 (POST, JSON, авторизация по токену). Полный список методов публикуется только
+# на самой системе управления (/apidoc/v2) — по открытой документации известен один метод (ListLogicalInterfaces),
+# поэтому проверки через API без доступа к продукту были бы догадкой. Как только будет доступ к стенду или
+# apidoc, пак получит транспорт API и проверки (правила any-any, учётка admin/admin, журналы, SNMP).
+#
+# Источник: справочный портал PT NGFW 1.11 (help.ptsecurity.com): «Интерфейс командной строки (CLI)»,
+# «Операционные команды», «Использование API», «Вход в PT NGFW» (первый вход — admin/admin со сменой пароля).
+
+pack: pt-ngfw
+version: 1.0.0
+maturity: inventory
+tags: [network-device, firewall, positive-technologies, pt-ngfw]
+transport: ssh
+asset_type: network-device
+
+detect:
+  - probe: { type: cli_config, cmd: show version, match: '^\s*Model:\s*(\S+)' }
+    regex: '(?i)^pt[-_ ]?ngfw'
+
+# Версия ПО — для сопоставления с БДУ: продукт в БДУ — «pt ngfw».
+firmware:
+  vendor: Positive Technologies
+  product: pt ngfw
+  version_probe: { type: cli_config, cmd: show version, match: '^\s*Product version:\s*(\d+(?:\.\d+)+)' }
+
+checks: []

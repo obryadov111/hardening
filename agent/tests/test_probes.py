@@ -840,3 +840,20 @@ def test_cli_value_does_not_carry_secrets():
     keyword = run_probe(t, {"type": "cli_config", "cmd": "show running-config", "match": r"^enable (secret|password)"})
     assert keyword["value"] == "secret"  # само слово — не секрет, его проверяют утверждения пака
     assert run_probe(t, {"type": "cli_config", "cmd": "show running-config", "match": r"^hostname (\S+)"})["value"] == "sw"
+
+
+# ---------- прошивка сетевого устройства (для БДУ) ----------
+
+def test_collect_firmware_takes_model_from_device_and_falls_back_to_product():
+    show_system = "System type:                Eltex ESR-200 Service Router\nSoftware version:           1.5.3 build 7\n"
+    manifest = {"firmware": {
+        "vendor": "Eltex", "product": "esr",
+        "product_probe": {"type": "cli_config", "cmd": "show system", "match": r"System type:\s+Eltex (v?ESR-?\S*)"},
+        "version_probe": {"type": "cli_config", "cmd": "show system", "match": r"Software version:\s+(\d+(?:\.\d+)+)"},
+    }}
+    assert probes.collect_firmware(FakeTransport("ssh", cli=show_system), manifest) == {
+        "name": "esr-200", "version": "1.5.3", "vendor": "Eltex", "category": "firmware"}
+    no_model = "Software version:           1.5.3 build 7\n"
+    assert probes.collect_firmware(FakeTransport("ssh", cli=no_model), manifest)["name"] == "esr"
+    assert probes.collect_firmware(FakeTransport("ssh", cli="System type: Eltex ESR-200\n"), manifest) is None  # без версии
+    assert probes.collect_firmware(FakeTransport("ssh", cli=show_system), {"pack": "x"}) is None

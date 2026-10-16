@@ -12,6 +12,8 @@
 - out — вне модели проекта (причина — в каталоге).
 Для пунктов «уязвимости ПО» — открытые находки БДУ (без исправленного в дистрибутиве) по продуктам пункта.
 """
+import fnmatch
+
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -22,6 +24,11 @@ from app.services.packs.registry import PackRegistry
 CHECKS_SHOWN = 50
 STATUS_ORDER = ["violated", "accepted", "not_checked", "passed", "not_applied", "no_checks", "out"]
 
+
+
+def _item_product(item, product: str) -> bool:
+    """Продукт БДУ относится к пункту: точное имя или шаблон с * (модели оборудования, «esr-*»)."""
+    return any(fnmatch.fnmatchcase(product, pattern) for pattern in item.products)
 
 def _item_ids(check) -> set[str]:
     return {ref.id for ref in check.refs if ref.id and ref.source == SOURCE}
@@ -70,11 +77,11 @@ def organization_coverage(db: Session, organization_id: str, registry: PackRegis
             entry = {"code": item.code, "title": item.title, "kind": item.kind, "note": item.note, "checks": [], "findings": None}
             if item.kind == "out":
                 entry["status"] = "out"
-            elif item.kind == "bdu" and item.products and not set(item.products) & installed:
+            elif item.kind == "bdu" and item.products and not any(_item_product(item, p) for p in installed):
                 entry["status"] = "not_applied"
                 entry["note"] = "на активах нет этого ПО (" + ", ".join(item.products) + ")"
             elif item.kind == "bdu":
-                related = [(lvl, n) for product, lvl, n in vulnerabilities["open"] if not item.products or product in item.products]
+                related = [(lvl, n) for product, lvl, n in vulnerabilities["open"] if not item.products or _item_product(item, product)]
                 levels = {lvl: sum(n for found, n in related if found == lvl) for lvl in ("critical", "high", "medium", "low")}
                 entry["findings"] = {"total": sum(n for _, n in related), **levels}
                 if vulnerabilities["import"] is None:

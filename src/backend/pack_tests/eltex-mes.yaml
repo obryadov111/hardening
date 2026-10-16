@@ -10,6 +10,14 @@ base:
       System Up Time (days,hour:min:sec):       67,08:57:53
       System Name:                              Eltex3124-3
       System Object ID:                         1.3.6.1.4.1.35265.1.24
+    show version: |
+      Active-image: flash://system/images/image1.bin
+        Version: 6.6.12.1
+        MD5 Digest: 0e2f4a1b3c5d7e9f0a1b2c3d4e5f6a7b
+        Date: 14-Mar-2025
+        Time: 11:02:31
+      Inactive-image: flash://system/images/image2.bin
+        Version: 6.6.10.4
     show running-config: |
       vlan database
        vlan 2-4,100
@@ -55,6 +63,7 @@ base:
 cases:
   - name: укреплённый коммутатор по руководству вендора — всё соблюдено
     detect: true
+    firmware: { name: mes3124, version: 6.6.12.1 }
     expect:
       eltex_mes.telnet_disabled: pass
       eltex_mes.http_disabled: pass
@@ -128,7 +137,12 @@ cases:
         ip default-gateway 10.200.12.65
         !
         end
+      show version: |
+        SW version    4.0.7.1 ( date  08-Apr-2017 time  12:31:17 )
+        Boot version    1.0.0.18 ( date  20-Feb-2015 time  15:29:57 )
+        HW version    01.01.02
     detect: true
+    firmware: { name: mes2324p, version: 4.0.7.1 }
     expect:
       eltex_mes.telnet_disabled: fail
       eltex_mes.http_disabled: pass

@@ -46,5 +46,6 @@ def test_device_output_is_recognised_by_exactly_one_pack(pack, sources):
 
 
 def test_russian_network_vendors_are_covered():
-    expected = {"eltex-esr", "eltex-mes", "qtech-qsw", "snr-switch", "vipnet-coordinator", "s-terra-gate"}
+    expected = {"eltex-esr", "eltex-mes", "qtech-qsw", "snr-switch", "vipnet-coordinator", "s-terra-gate",
+                "usergate-ngfw", "pt-ngfw"}
     assert expected <= SSH_PACKS

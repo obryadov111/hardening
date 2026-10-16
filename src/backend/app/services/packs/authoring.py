@@ -310,6 +310,7 @@ def run_fixture(path: Path, registry: PackRegistry, agent=None) -> FixtureResult
     check_ids = [check.id for check in pack.checks]
     base = spec.get("base") or {}
     covered: dict[str, set[str]] = {cid: set() for cid in check_ids}
+    firmware_shown = False
 
     results = []
     for i, case in enumerate(spec["cases"]):
@@ -320,6 +321,15 @@ def run_fixture(path: Path, registry: PackRegistry, agent=None) -> FixtureResult
             detected = agent.matches_detect(host, manifest["detect"])
             if detected != bool(case["detect"]):
                 result.problems.append(f"detect: ожидалось {bool(case['detect'])}, получено {detected}")
+
+        if "firmware" in case:
+            # Модель и версия ПО устройства для БДУ: {name, version} или null — «прошивку не извлечь».
+            got = agent.collect_firmware(host, manifest)
+            got = {"name": got["name"], "version": got["version"]} if got else None
+            if got != case["firmware"]:
+                result.problems.append(f"firmware: ожидалось {case['firmware']!r}, получено {got!r}")
+            elif got:
+                firmware_shown = True
 
         expect = case.get("expect") or {}
         unknown = sorted(set(expect) - set(check_ids))
@@ -345,6 +355,8 @@ def run_fixture(path: Path, registry: PackRegistry, agent=None) -> FixtureResult
     # Проверка «покрыта», только если образцы показывают и нарушение, и соблюдение: одно pass
     # ничего не говорит о том, что проверка вообще умеет ловить нарушение.
     uncovered = [cid for cid in check_ids if not {"pass", "fail"} <= covered[cid]]
+    if pack.firmware is not None and not firmware_shown:
+        uncovered.append("firmware (нет сценария, где модель и версия извлекаются)")
     return FixtureResult(path.name, pack.pack, pack.version, results, uncovered)
 
 

@@ -1,0 +1,109 @@
+# Образцы для пака usergate-ngfw (transport: ssh). Пак draft: на живом UserGate не запускался.
+# Формат вывода — по примерам «UserGate NGFW 7.1.x. Руководство администратора» (show settings administrators general,
+# show network zone "VPN for Site-to-Site"); значения изменены под сценарии.
+pack: usergate-ngfw
+
+base:
+  cli:
+    show settings administrators general: |
+      strong-password      : on
+      block-time           : 900
+      min-length           : 12
+      min-uppercase        : 1
+      min-lowercase        : 1
+      min-digits           : 1
+      spec-characters      : 1
+      char-repetition      : 2
+      num-auth-attempts    : 5
+    show network zone Untrusted: |
+      name                           : Untrusted
+      antispoof-enable               : on
+      antispoof-negate               : off
+      dos-protection-syn             :
+            enabled           : on
+            aggregate         : off
+            alert-threshold   : 3000
+            drop-threshold    : 6000
+      dos-protection-udp             :
+            enabled           : on
+            aggregate         : off
+            alert-threshold   : 3000
+            drop-threshold    : 6000
+      services-access               :
+           service                : Any ICMP
+           allowed-addresses      : Any
+           enabled                : on
+           service                : VPN
+           allowed-addresses      : Any
+           enabled                : on
+
+cases:
+  - name: внешняя зона закрыта для управления, политика паролей включена — всё соблюдено
+    detect: true
+    expect:
+      usergate_ngfw.admin_strong_password: pass
+      usergate_ngfw.admin_password_min_length: pass
+      usergate_ngfw.admin_lockout_attempts: pass
+      usergate_ngfw.untrusted_management_restricted: pass
+      usergate_ngfw.untrusted_antispoofing: pass
+      usergate_ngfw.untrusted_syn_flood_protection: pass
+
+  - name: пример из руководства — сложный пароль выключен, 10 попыток, длина 7
+    cli:
+      show settings administrators general: |
+        strong-password      : off
+        block-time           : 400
+        min-length           : 7
+        min-uppercase        : 1
+        min-lowercase        : 1
+        min-digits           : 1
+        spec-characters      : 1
+        char-repetition      : 2
+        num-auth-attempts    : 10
+    expect:
+      usergate_ngfw.admin_strong_password: fail
+      usergate_ngfw.admin_password_min_length: fail
+      usergate_ngfw.admin_lockout_attempts: fail
+
+  - name: веб-консоль открыта из Untrusted для всех, антиспуфинг и защита от SYN-флуда выключены
+    cli:
+      show network zone Untrusted: |
+        name                           : Untrusted
+        antispoof-enable               : off
+        dos-protection-syn             :
+              enabled           : off
+              aggregate         : off
+        services-access               :
+             service                : Any ICMP
+             allowed-addresses      : Any
+             enabled                : on
+             service                : Admin Console
+             allowed-addresses      : Any
+             enabled                : on
+    expect:
+      usergate_ngfw.untrusted_management_restricted: fail
+      usergate_ngfw.untrusted_antispoofing: fail
+      usergate_ngfw.untrusted_syn_flood_protection: fail
+
+  - name: CLI по SSH из Untrusted разрешён только с адресов администраторов — не нарушение
+    cli:
+      show network zone Untrusted: |
+        name                           : Untrusted
+        antispoof-enable               : on
+        services-access               :
+             service                : CLI over SSH
+             allowed-addresses      : admins-ip-list
+             enabled                : on
+    expect:
+      usergate_ngfw.untrusted_management_restricted: pass
+
+  - name: выгрузки зоны Untrusted нет (зона названа иначе) — проверки зоны не выполняются
+    cli:
+      show network zone Untrusted: "% Wrong zone name\n"
+    expect:
+      usergate_ngfw.untrusted_management_restricted: error
+
+  - name: не UserGate — пак не применяется
+    cli:
+      show settings administrators general: "% Unrecognized command\n"
+    detect: false

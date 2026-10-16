@@ -96,3 +96,16 @@ def test_many_hosts_give_counts_and_first_checks_with_violations_first(client, m
     assert counts["total"] == counts["fail"] + counts["pass"] + counts["accepted"] + counts["error"]
     assert counts["fail"] == 1 and counts["total"] > 2
     assert len(item["checks"]) == 2 and item["checks"][0]["status"] == "fail"
+
+
+def test_usi1_covers_russian_network_device_firmware():
+    """УСИ.1 (уязвимости ПО телекоммуникационного оборудования и МЭ) — по моделям и прошивкам из паков (поле firmware)."""
+    from app.services.fstec.catalog import CATALOG
+    from app.services.fstec.coverage import _item_product
+
+    usi1 = next(item for section in CATALOG for item in section.items if item.code == "УСИ.1")
+    for product in ("cisco ios", "esr-200", "vesr", "mes3124", "qsw-2800-28t-ac", "snr-s2985g-24t",
+                    "vipnet coordinator hw1000", "pt ngfw", "usergate next-generation firewall (ngfw)"):
+        assert _item_product(usi1, product), product
+    for product in ("openssh", "mesa", "esr", "postgresql"):
+        assert not _item_product(usi1, product), product

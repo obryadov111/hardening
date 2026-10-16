@@ -1,0 +1,31 @@
+# Образцы для пака pt-ngfw (transport: ssh, inventory). Вывод show version — пример из справочного портала
+# PT NGFW («Операционные команды»), версия изменена.
+pack: pt-ngfw
+
+base:
+  cli:
+    show version: |
+      Model: pt-ngfw-virt
+      Serial number: pt-ngfw-virt
+      Product version: 1.8.1
+      Core version: 3.0.0(1310)
+      NGFW protocol version: 3.0.15
+      DPDK version: 21.11.9-ptngfw
+
+cases:
+  - name: виртуальный PT NGFW — распознан, версия для БДУ извлечена
+    detect: true
+    firmware: { name: pt ngfw, version: 1.8.1 }
+
+  - name: вывод без строки версии — устройство распознаётся, прошивку не извлечь
+    cli:
+      show version: |
+        Model: pt-ngfw-1010
+    detect: true
+    firmware: null
+
+  - name: другое устройство — пак не применяется
+    cli:
+      show version: |
+        Cisco IOS Software, C2960 Software (C2960-LANBASEK9-M), Version 15.0(2)SE11, RELEASE SOFTWARE (fc3)
+    detect: false

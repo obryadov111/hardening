@@ -458,7 +458,8 @@ def test_shipped_packs_and_their_maturity():
         "rhel-family": "draft", "debian-server": "draft", "alt-linux": "draft", "windows-dc": "draft",
         # российское сетевое оборудование и средства защиты — по документации вендоров, на устройствах не запускались
         "eltex-esr": "draft", "eltex-mes": "draft", "qtech-qsw": "draft", "snr-switch": "draft",
-        "vipnet-coordinator": "draft", "s-terra-gate": "draft",
+        "vipnet-coordinator": "draft", "s-terra-gate": "draft", "usergate-ngfw": "draft",
+        "pt-ngfw": "inventory",  # CLI только операционный: распознавание и версия для БДУ, без проверок
     }
     assert packs["cisco-ios"].verified_on == []
     assert all(p.verified_on for p in packs.values() if p.maturity == "baseline")  # baseline = подтверждено на оборудовании
@@ -494,3 +495,18 @@ def test_vipnet_readonly_commands(command, allowed):
     else:
         with pytest.raises(ValueError, match="только команды на чтение"):
             Pack.model_validate(data)
+
+
+def test_firmware_is_only_for_network_packs_and_reaches_the_manifest():
+    from app.services.packs.manifest import build_manifest
+
+    version = {"type": "cli_config", "cmd": "show version", "match": r"Version (\S+)"}
+    data = {**_ssh_pack_with({"type": "cli_config", "cmd": "show running-config", "match": "x"}),
+            "firmware": {"vendor": "Eltex", "product": "esr-200", "version_probe": version}}
+    manifest = build_manifest(Pack.model_validate(data))
+    assert manifest["firmware"] == {"vendor": "Eltex", "product": "esr-200", "version_probe": version}
+    assert "firmware" not in build_manifest(Pack.model_validate(make_pack()))  # манифесты без прошивки не меняются
+    with pytest.raises(ValueError, match="product или product_probe"):
+        Pack.model_validate({**data, "firmware": {"vendor": "Eltex", "version_probe": version}})
+    with pytest.raises(ValueError, match="для сетевых устройств"):
+        Pack.model_validate({**make_pack(), "firmware": data["firmware"]})

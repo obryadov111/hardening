@@ -29,6 +29,13 @@ detect:
   - probe: { type: cli_config, cmd: show version, match: '^\s*(QSW-\S+) Device, Compiled' }
     regex: '^QSW-'
 
+
+# Модель и версия ПО — для сопоставления с БДУ ФСТЭК (УСИ.1): продукт в БДУ — модель («qsw-2800-28t-ac»).
+firmware:
+  vendor: Qtech
+  product_probe: { type: cli_config, cmd: show version, match: '^\s*(QSW-\S+) Device, Compiled' }
+  version_probe: { type: cli_config, cmd: show version, match: '^\s*SoftWare(?: Package)? Version\s+(\S+)' }
+
 checks:
   - id: qtech_qsw.telnet_disabled
     title: Telnet-сервер выключен (по умолчанию включён)

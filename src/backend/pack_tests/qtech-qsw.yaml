@@ -57,6 +57,7 @@ base:
 cases:
   - name: укреплённый коммутатор — всё соблюдено
     detect: true
+    firmware: { name: qsw-3470-28t-ac, version: "7.2.3.01(R0005.0067)" }
     expect:
       qtech_qsw.telnet_disabled: pass
       qtech_qsw.http_disabled: pass

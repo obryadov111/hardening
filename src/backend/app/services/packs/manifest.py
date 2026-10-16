@@ -26,7 +26,7 @@ MANIFEST_SCHEMA_VERSION = 1
 
 
 def build_manifest(pack: Pack) -> dict:
-    return {
+    manifest = {
         "schema": MANIFEST_SCHEMA_VERSION,
         "pack": pack.pack,
         "version": pack.version,
@@ -40,6 +40,10 @@ def build_manifest(pack: Pack) -> dict:
             for check in pack.checks
         ],
     }
+    if pack.firmware is not None:
+        # Только у паков с прошивкой: манифесты остальных паков (и их подписи) не меняются.
+        manifest["firmware"] = pack.firmware.model_dump(mode="json", exclude_none=True)
+    return manifest
 
 
 def canonical_json(manifest: dict) -> bytes:

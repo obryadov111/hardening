@@ -29,6 +29,13 @@ detect:
   - probe: { type: cli_config, cmd: show version, match: '^\s*(SNR-\S+) Device, Compiled' }
     regex: '^SNR-'
 
+
+# Модель и версия ПО — для сопоставления с БДУ ФСТЭК (УСИ.1).
+firmware:
+  vendor: NAG
+  product_probe: { type: cli_config, cmd: show version, match: '^\s*(SNR-\S+) Device, Compiled' }
+  version_probe: { type: cli_config, cmd: show version, match: '^\s*Soft[Ww]are(?: Package)? Version\s+(\S+)' }
+
 checks:
   - id: snr.telnet_disabled
     title: Telnet-сервер выключен (по умолчанию включён)

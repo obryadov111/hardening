@@ -7,7 +7,7 @@
 """
 import functools
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.services.packs.authoring import load_agent_probes
@@ -45,7 +45,8 @@ def offline_packs(registry: PackRegistry) -> list[dict]:
     result = []
     for pack in registry.latest("ssh"):
         detect = _commands(rule.probe for rule in pack.detect)
-        checks = _commands(check.probe for check in pack.checks)
+        firmware = [pack.firmware.version_probe, pack.firmware.product_probe] if pack.firmware else []
+        checks = _commands([check.probe for check in pack.checks] + [p for p in firmware if p is not None])
         result.append({
             "pack": pack.pack, "version": pack.version, "maturity": pack.maturity, "tags": list(pack.tags),
             "asset_type": pack.asset_type,
@@ -63,6 +64,7 @@ class OfflineRun:
     tags: list[str]
     asset_type: str | None
     collection: dict
+    software: list[dict] = field(default_factory=list)  # модель и версия прошивки (поле firmware пака) — для БДУ
 
 
 def run_offline(registry: PackRegistry, files: dict[str, bytes], declared_pack: str | None) -> OfflineRun:
@@ -98,6 +100,11 @@ def run_offline(registry: PackRegistry, files: dict[str, bytes], declared_pack: 
         runs = [(pack_by_id, agent.run_manifest(transport, manifests[pack_by_id.pack]))
                 for pack_by_id in packs if manifests[pack_by_id.pack] in matched]
         declared = any(not agent.matches_detect(transport, m["detect"]) for m in matched)
+        software = []
+        for manifest in matched:
+            entry = agent.collect_firmware(transport, manifest)
+            if entry and entry not in software:
+                software.append(entry)
         collection = transport.describe()
 
     tags: list[str] = []
@@ -105,4 +112,4 @@ def run_offline(registry: PackRegistry, files: dict[str, bytes], declared_pack: 
         tags.extend(t for t in pack.tags if t not in tags)
     collection["declared_pack"] = declared
     return OfflineRun(packs=runs, tags=tags, asset_type=next((p.asset_type for p, _ in runs if p.asset_type), None),
-                      collection=collection)
+                      collection=collection, software=software)

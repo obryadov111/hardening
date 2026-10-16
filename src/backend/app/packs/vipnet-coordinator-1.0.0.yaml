@@ -31,6 +31,13 @@ detect:
   - probe: { type: cli_config, cmd: version, match: '^Product:\s*(ViPNet.*)' }
     regex: '^ViPNet'
 
+
+# Модель и версия ПО — для сопоставления с БДУ ФСТЭК (УСИ.1): продукт в БДУ — «vipnet coordinator hw1000» и т. п.
+firmware:
+  vendor: ИнфоТеКС
+  product_probe: { type: cli_config, cmd: version, match: '^Product:\s*(ViPNet.*\S)\s*$' }
+  version_probe: { type: cli_config, cmd: version, match: '^Software version:\s*(\S+)' }
+
 checks:
   - id: vipnet_coordinator.snmp_default_community_absent
     title: SNMP-пароли (community ro и trap) не заводские public / private
