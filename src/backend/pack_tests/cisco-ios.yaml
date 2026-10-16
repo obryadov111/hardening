@@ -138,3 +138,10 @@ cases:
     cli:
       show version: "Huawei Versatile Routing Platform Software\n"
     detect: false
+
+  - name: криптошлюз С-Терра эмулирует Cisco IOS — пак cisco-ios не применяется (пак s-terra-gate)
+    cli:
+      show version: |
+        S-Terra GATE build 4.2.24123. Emulates:
+        Cisco IOS Software, 2800 Software (C2800NM-ADVIPSERVICESK9-M), Version 12.4(13a), RELEASE SOFTWARE (fc1)
+    detect: false

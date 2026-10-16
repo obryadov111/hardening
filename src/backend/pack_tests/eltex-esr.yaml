@@ -1,0 +1,327 @@
+# Образцы для пака eltex-esr (transport: ssh). Пак draft: на живом устройстве не запускался.
+# «Укреплённый» маршрутизатор собран из примеров ESR Hardening Guide; «заводская» и «учебный vESR» —
+# настоящие конфигурации из открытых репозиториев (KrayMakso68/Conf_net_equipment ESR_base.txt,
+# ptah57/Book configs/vesr124-2-1.txt), хэши и адреса заменены. Вывод show system — пример из справочника CLI 1.5.10.
+pack: eltex-esr
+
+base:
+  cli:
+    show system: |
+      System type:                Eltex ESR-30 Service Router
+      System name:                esr-30
+      Software version:           1.5.10(FSTEC) build 11[44596aa294] (2025-05-23 18:05:11)
+      Hardware version:           1v3
+      System uptime (d,h:m:s):    00,00:01:06
+      System MAC address:         CC:9D:A2:70:B9:1A
+      System serial number:       NP18000041
+    show running-config: |
+      #!/usr/bin/clish
+      #1.5.10
+      hostname esr-core-01
+
+      object-group network MGMT
+        ip address-range 192.168.0.2-192.168.0.3
+      exit
+      object-group network SYSLOG
+        ip address-range 192.168.52.41
+      exit
+
+      syslog file tmpsys:syslog/default info
+      syslog max-files 3
+      syslog file-size 512
+      syslog host SIEM
+        remote-address 192.168.52.41
+        severity info
+      exit
+      syslog sequence-numbers
+      syslog timestamp msec
+      syslog cli-commands
+
+      username admin
+        password encrypted $6$8Uy1vJ3h$REDACTEDhashREDACTEDhashREDACTEDhash
+        privilege 1
+      exit
+      username netops
+        password encrypted $6$Qm5aT0kz$REDACTEDhashREDACTEDhashREDACTEDhash
+        privilege 15
+      exit
+
+      security passwords default-expired
+      security passwords lifetime 30
+      security passwords history 12
+      security passwords min-length 16
+
+      tacacs-server host 192.168.0.10
+        key ascii-text encrypted 8CB5107EA7005AFF
+      exit
+      aaa authentication login default tacacs local
+      aaa accounting commands stop-only tacacs
+
+      security zone trusted
+      exit
+      security zone untrusted
+      exit
+
+      interface gigabitethernet 1/0/1
+        security-zone untrusted
+        ip address 203.0.113.2/30
+      exit
+      interface gigabitethernet 1/0/2
+        security-zone trusted
+        ip address 192.168.0.1/24
+      exit
+
+      security zone-pair trusted self
+        rule 10
+          action permit
+          match protocol tcp
+          match source-address MGMT
+          match destination-port object-group ssh
+          enable
+        exit
+      exit
+      security zone-pair untrusted self
+        rule 1
+          action deny
+          match protocol icmp
+          enable
+        exit
+        rule 10
+          action permit
+          match protocol udp
+          match destination-port object-group ipsec
+          enable
+        exit
+      exit
+
+      ip firewall screen spy-blocking spoofing
+      logging firewall screen spy-blocking spoofing
+
+      ip ssh server
+      ip ssh access-addresses MGMT
+      ip ssh key-exchange algorithm dh-group1-sha1 disable
+      ip ssh key-exchange algorithm dh-group14-sha1 disable
+      ip ssh encryption algorithm 3des disable
+
+      snmp-server user monitor
+        authentication algorithm sha
+        authentication key ascii-text encrypted 9DA117658F044DE2
+        privacy algorithm aes256
+        privacy key ascii-text encrypted 8CA60A7B8F044DE2
+        enable
+      exit
+
+      ntp enable
+      ntp server 192.168.0.1
+      exit
+
+cases:
+  - name: укреплённый маршрутизатор по ESR Hardening Guide — всё соблюдено
+    detect: true
+    expect:
+      eltex_esr.admin_password_changed: pass
+      eltex_esr.default_password_expired: pass
+      eltex_esr.password_min_length: pass
+      eltex_esr.password_lifetime: pass
+      eltex_esr.telnet_disabled: pass
+      eltex_esr.ssh_access_addresses: pass
+      eltex_esr.untrusted_to_self_tcp_restricted: pass
+      eltex_esr.firewall_not_disabled: pass
+      eltex_esr.aaa_remote_login: pass
+      eltex_esr.cli_commands_logged: pass
+      eltex_esr.remote_syslog: pass
+      eltex_esr.ntp_server: pass
+      eltex_esr.ntp_broadcast_client_disabled: pass
+      eltex_esr.snmp_community_absent: pass
+      eltex_esr.ssh_kex_group1_disabled: pass
+      eltex_esr.anti_spoofing: pass
+
+  - name: настоящая конфигурация ESR близко к заводской (ESR_base.txt)
+    cli:
+      show running-config: |
+        #!/usr/bin/clish
+        #232
+        #1.23.6
+        hostname esr-2
+        object-group service ssh
+          port-range 22
+        exit
+        syslog max-files 3
+        syslog file-size 512
+        syslog file tmpsys:syslog/default
+          severity info
+        exit
+        username admin
+          password encrypted $6$oKulhSsjU1G5iJ3w$REDACTEDhashREDACTEDhashREDACTEDhash
+        exit
+        security zone trusted
+        exit
+        security zone untrusted
+        exit
+        bridge 2
+          vlan 2
+          security-zone untrusted
+          ip address dhcp
+          enable
+        exit
+        interface gigabitethernet 1/0/2
+          mode routerport
+          ip firewall disable
+          ip address 192.168.2.2/24
+        exit
+        security zone-pair trusted self
+          rule 10
+            action permit
+            match protocol tcp
+            match destination-port object-group ssh
+            enable
+          exit
+        exit
+        security zone-pair untrusted self
+          rule 1
+            action permit
+            match protocol udp
+            match source-port object-group dhcp_server
+            match destination-port object-group dhcp_client
+            enable
+          exit
+        exit
+        security passwords default-expired
+        ip ssh server
+        ntp enable
+        ntp broadcast-client enable
+    expect:
+      eltex_esr.admin_password_changed: pass
+      eltex_esr.default_password_expired: pass
+      eltex_esr.password_min_length: fail
+      eltex_esr.password_lifetime: fail
+      eltex_esr.telnet_disabled: pass
+      eltex_esr.ssh_access_addresses: fail
+      eltex_esr.untrusted_to_self_tcp_restricted: pass
+      eltex_esr.firewall_not_disabled: fail
+      eltex_esr.aaa_remote_login: fail
+      eltex_esr.cli_commands_logged: fail
+      eltex_esr.remote_syslog: fail
+      eltex_esr.ntp_server: fail
+      eltex_esr.ntp_broadcast_client_disabled: fail
+      eltex_esr.snmp_community_absent: pass
+      eltex_esr.ssh_kex_group1_disabled: fail
+      eltex_esr.anti_spoofing: fail
+
+  - name: настоящая конфигурация учебного vESR — SSH из untrusted открыт всем, у admin пароль по умолчанию
+    cli:
+      show system: |
+        System type:                Eltex vESR Virtual Service Router
+        System name:                vesr-1
+        Software version:           1.24.0 build 12[c2f9a01] (2024-08-01 12:00:00)
+      show running-config: |
+        hostname vesr-1
+        object-group service SSH
+          description "SSH"
+          port-range 22
+        exit
+        syslog max-files 3
+        syslog file-size 512
+        security zone trusted
+        exit
+        security zone untrusted
+        exit
+        interface gigabitethernet 1/0/1
+          description "WAN"
+          security-zone untrusted
+          ip address 192.168.222.100/24
+        exit
+        security zone-pair untrusted self
+          rule 1
+            description "ICMP"
+            action permit
+            match protocol icmp
+            enable
+          exit
+          rule 2
+            description "GRE"
+            action permit
+            match protocol gre
+            enable
+          exit
+          rule 22
+            description "SSH"
+            action permit
+            match protocol tcp
+            match destination-port SSH
+            enable
+          exit
+        exit
+        security passwords default-expired
+        ip ssh server
+        ntp enable
+        ntp broadcast-client enable
+    detect: true
+    expect:
+      eltex_esr.admin_password_changed: fail
+      eltex_esr.untrusted_to_self_tcp_restricted: fail
+      eltex_esr.firewall_not_disabled: pass
+      eltex_esr.telnet_disabled: pass
+
+  - name: слабый маршрутизатор — Telnet, SNMP community, правило «любой протокол» из untrusted, короткий пароль
+    cli:
+      show running-config: |
+        hostname esr-edge
+        username admin
+          password encrypted $6$x$REDACTEDhash
+        exit
+        security passwords min-length 6
+        security passwords lifetime 365
+        security zone untrusted
+        exit
+        security zone-pair untrusted self
+          rule 1
+            action permit
+            enable
+          exit
+        exit
+        ip telnet server
+        ip ssh server
+        snmp-server
+        snmp-server community public ro
+    expect:
+      eltex_esr.default_password_expired: fail
+      eltex_esr.password_min_length: fail
+      eltex_esr.password_lifetime: fail
+      eltex_esr.telnet_disabled: fail
+      eltex_esr.untrusted_to_self_tcp_restricted: fail
+      eltex_esr.snmp_community_absent: fail
+
+  - name: правило из untrusted отключено (нет enable) или ограничено источником — не нарушение
+    cli:
+      show running-config: |
+        hostname esr-edge
+        security zone-pair untrusted self
+          rule 1
+            action permit
+            match protocol tcp
+          exit
+          rule 2
+            action permit
+            match protocol tcp
+            match source-address MGMT
+            enable
+          exit
+        exit
+    expect:
+      eltex_esr.untrusted_to_self_tcp_restricted: pass
+
+  - name: учётка без прав — ESR отвечает ошибкой, проверки не выполняются
+    cli:
+      show running-config: "% Unrecognized command\n"
+    expect:
+      eltex_esr.telnet_disabled: error
+      eltex_esr.admin_password_changed: error
+      eltex_esr.password_min_length: error
+
+  - name: не ESR (коммутатор MES) — пак не применяется
+    cli:
+      show system: |
+        System Description:                       MES2324 28-port 1G/10G Managed Switch
+        System Object ID:                         1.3.6.1.4.1.35265.1.24
+    detect: false

@@ -1,0 +1,90 @@
+# Пак «ViPNet Coordinator» (ИнфоТеКС): программно-аппаратные комплексы ViPNet Coordinator HW/KB версии 4.x —
+# криптошлюз и межсетевой экран сети ViPNet. Сбор по SSH в командный интерпретатор комплекса или по выгрузке
+# вывода команд в файлы.
+#
+# maturity: draft. Проверки написаны по документации ИнфоТеКС и проверены ТОЛЬКО на образцах вывода
+# (pack_tests/vipnet-coordinator.yaml), составленных по примерам из справочника команд. На живом комплексе
+# пак не запускался — verified_on пуст.
+#
+# Источник: «ViPNet Coordinator KB 4. Справочник команд и конфигурационных файлов», ФРКЕ.465614.001РЭ3,
+# версия продукта 4.2.0 (командный интерпретатор тот же, что у ViPNet Coordinator HW 4).
+#
+# Команды — только просмотр: `version`, `iplir option get …`, `machine show …`, `inet show …` (белый список агента).
+# Ограничения:
+#  * `inet show snmp community` выполняется только в режиме управления (после `enable` с паролем администратора);
+#    в режиме наблюдения комплекс откажет — проверка получит error, а не ложный pass.
+#  * ViPNet Coordinator HW 5 работает на другой ОС с другим интерфейсом командной строки — этим паком не охвачен.
+#  * Параметры защищённого взаимодействия (iplir.conf, секции [protection], [packet-settings]) и правила фильтрации
+#    задаются из ViPNet Администратор (ЦУС) и здесь не проверяются.
+#
+# Значения по умолчанию (справочник): антиспуфинг и блокирование не-IP протоколов ВЫКЛЮЧЕНЫ; SNMP community ro —
+# `public`; журнал событий хранится локально (`local`), `null` — протоколирование выключено.
+
+pack: vipnet-coordinator
+version: 1.0.0
+maturity: draft
+tags: [network-device, security-gateway, infotecs, vipnet-coordinator]
+transport: ssh
+asset_type: network-device
+
+detect:
+  - probe: { type: cli_config, cmd: version, match: '^Product:\s*(ViPNet.*)' }
+    regex: '^ViPNet'
+
+checks:
+  - id: vipnet_coordinator.snmp_default_community_absent
+    title: SNMP-пароли (community ro и trap) не заводские public / private
+    probe: { type: cli_config, cmd: inet show snmp community, require: '(?m)^community ro\s*=', match: '^community (?:ro|trap)\s*=\s*(public|private)\s*$' }
+    assert: { op: absent }
+    severity: high
+    remediation: "`inet snmp community ro <пароль>` и `inet snmp community trap <пароль>` (6–18 символов); если SNMP не нужен — `inet snmp mode off`."
+    refs:
+      - { source: "ViPNet Coordinator KB 4. Справочник команд", id: "inet snmp community ro" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.3" }
+
+  - id: vipnet_coordinator.antispoofing_enabled
+    title: Антиспуфинг межсетевого экрана включён (по умолчанию выключен)
+    probe: { type: cli_config, cmd: iplir option get antispoofing, require: '(?mi)^Option:\s*Antispoofing', match: 'State:\s*(\S+)' }
+    assert: { op: regex, value: '(?i)^on$' }
+    severity: medium
+    remediation: "`iplir option set antispoofing on` (в режиме управления)."
+    refs:
+      - { source: "ViPNet Coordinator KB 4. Справочник команд", id: "iplir option set antispoofing" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.2" }
+
+  - id: vipnet_coordinator.block_other_protocols
+    title: Блокируются пакеты протоколов, отличных от IP, ARP и RARP (по умолчанию не блокируются)
+    probe: { type: cli_config, cmd: iplir option get block-other-protocols, require: '(?mi)^Option:\s*Block-other-protocols', match: 'State:\s*(\S+)' }
+    assert: { op: regex, value: '(?i)^on$' }
+    severity: low
+    remediation: "`iplir option set block-other-protocols on`."
+    refs:
+      - { source: "ViPNet Coordinator KB 4. Справочник команд", id: "iplir option set block-other-protocols" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.2" }
+
+  - id: vipnet_coordinator.event_log_enabled
+    title: Журнал событий ведётся (протоколирование не выключено)
+    probe: { type: cli_config, cmd: machine show loghost, require: '(?mi)log host set to', match: 'set to\s*[`''"]?([^`''"\s]+)' }
+    assert: { op: ne, value: "null" }
+    severity: high
+    remediation: "`machine set loghost <IP-адрес syslog-сервера>` (или вернуть локальное протоколирование)."
+    refs:
+      - { source: "ViPNet Coordinator KB 4. Справочник команд", id: "machine set loghost" }
+
+  - id: vipnet_coordinator.remote_log
+    title: Журнал событий отправляется на удалённый узел (централизованное хранение)
+    probe: { type: cli_config, cmd: machine show loghost, require: '(?mi)log host set to', match: 'set to\s*[`''"]?([^`''"\s]+)' }
+    assert: { op: regex, value: '^\d{1,3}(\.\d{1,3}){3}$' }
+    severity: low
+    remediation: "`machine set loghost <IP-адрес>`; для открытого узла — фильтр открытой сети на UDP 514. В кластере горячего резервирования — на обоих серверах."
+    refs:
+      - { source: "ViPNet Coordinator KB 4. Справочник команд", id: "machine set loghost" }
+
+  - id: vipnet_coordinator.session_timeout
+    title: Сеанс командного интерпретатора завершается при бездействии (не дольше 30 минут)
+    probe: { type: cli_config, cmd: machine show session-timeout, require: '(?mi)session timeout', match: 'timeout:\s*(\d+)\s*minute' }
+    assert: { op: between, value: [1, 30] }
+    severity: low
+    remediation: "Задать допустимое время неактивности сессии не больше 30 минут."
+    refs:
+      - { source: "ViPNet Coordinator KB 4. Справочник команд", id: "machine show session-timeout" }

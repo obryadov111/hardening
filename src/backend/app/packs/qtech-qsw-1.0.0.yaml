@@ -1,0 +1,128 @@
+# Пак «Qtech QSW»: коммутаторы QSW-2800, QSW-2850, QSW-3450, QSW-3470, QSW-3500, QSW-3580, QSW-3750, QSW-4610 и другие QSW на ПО семейства DCN.
+# Сбор по SSH (внешний коллектор) или по выгрузке конфигурации.
+#
+# maturity: draft. Проверки написаны по документации и проверены ТОЛЬКО на синтетических образцах вывода
+# (pack_tests/qtech-qsw.yaml). Настоящей выгрузки show running-config этого семейства в открытых источниках найти не удалось:
+# синтаксис строк взят из таблиц команд руководств и из нормализатора конфигурации NOC Project (профиль
+# Qtech.QSW2800: `no ip http server`, `username … privilege … password …`, `snmp-server community ro 0 …`).
+# Первая же реальная выгрузка заказчика — повод сверить пак и поднять зрелость до verified-sample.
+#
+# Источники:
+#  * Qtech: Руководство пользователя QSW-2800/2850/3470/3580;
+#  * SNR: Руководство по настройке коммутаторов S2985G, S2965 (то же ПО семейства DCN).
+#
+# Значения по умолчанию (в show running-config не показываются):
+#  * Telnet- и HTTP-серверы ВКЛЮЧЕНЫ: «выключен» — это строки `no telnet-server enable` и `no ip http server`;
+#  * учётная запись admin/admin.
+# Пароль в виде `password 0 <пароль>` хранится в конфигурации открытым текстом (0 — без шифрования, 7 — зашифрован).
+#
+# Не охвачены: QSW-6900, QSW-6910, QSW-8113 и другие на ПО другого семейства (иной CLI) — нужен свой пак.
+
+pack: qtech-qsw
+version: 1.0.0
+maturity: draft
+tags: [network-device, dcn-family, qtech]
+transport: ssh
+asset_type: network-device
+
+detect:
+  - probe: { type: cli_config, cmd: show version, match: '^\s*(QSW-\S+) Device, Compiled' }
+    regex: '^QSW-'
+
+checks:
+  - id: qtech_qsw.telnet_disabled
+    title: Telnet-сервер выключен (по умолчанию включён)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^!\s*$', match: '(?i)^no telnet-server enable' }
+    assert: { op: exists }
+    severity: high
+    remediation: "`ssh-server enable`, затем `no telnet-server enable`."
+    refs:
+      - { source: "Qtech: Руководство пользователя QSW-2800/2850/3470/3580", id: "Telnet, SSH" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.7" }
+
+  - id: qtech_qsw.http_disabled
+    title: Веб-интерфейс по HTTP выключен (по умолчанию включён)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^!\s*$', match: '(?i)^no ip http server' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "`no ip http server`; веб-управление при необходимости — только HTTPS (`ip http secure-server`)."
+    refs:
+      - { source: "SNR: Руководство по настройке коммутаторов S2985G, S2965 (то же ПО семейства DCN)", id: "Доступ к коммутатору" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+
+  - id: qtech_qsw.default_admin_password_absent
+    title: У учётной записи admin не заводской пароль admin
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^!\s*$', match: '^username admin\b.*\bpassword 0 admin\s*$' }
+    assert: { op: absent }
+    severity: critical
+    remediation: "Создать персональную учётку `username <имя> privilege 15 password <пароль>` и удалить admin (`no username admin`) или сменить его пароль."
+    refs:
+      - { source: "SNR: Руководство по настройке коммутаторов S2985G, S2965 (то же ПО семейства DCN)", id: "Добавить нового пользователя, удалить старого" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.3" }
+
+  - id: qtech_qsw.cleartext_passwords_absent
+    title: Пароли пользователей не хранятся в конфигурации открытым текстом (password 0)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^!\s*$', match: '^username \S+ .*\bpassword 0 ' }
+    assert: { op: absent }
+    severity: medium
+    remediation: "Переустановить пароли так, чтобы в конфигурации был вид `password 7 …`, или перейти на RADIUS/TACACS+."
+    refs:
+      - { source: "Qtech: Руководство пользователя QSW-2800/2850/3470/3580", id: "username … password [0 | 7]" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+
+  - id: qtech_qsw.snmp_default_community_absent
+    title: Нет SNMP community со значениями по умолчанию (public / private)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^!\s*$', match: '^snmp-server community\s+(?:(?:ro|rw)\s+(?:\d\s+)?)?"?(?:public|private)"?(?:\s|$)' }
+    assert: { op: absent }
+    severity: high
+    remediation: "Удалить community public/private; задать уникальную строку и `snmp-server securityip <адрес станции>` или перейти на SNMPv3."
+    refs:
+      - { source: "Qtech: Руководство пользователя QSW-2800/2850/3470/3580", id: "SNMP" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.3" }
+
+  - id: qtech_qsw.management_access_restricted
+    title: Вход по Telnet/SSH/Web ограничен доверенными адресами (authentication securityip или access-class)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^!\s*$', match: '^authentication (?:securityip|securityipv6|ip access-class|ipv6 access-class)\b' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "`authentication securityip <адрес администратора>` или `authentication ip access-class <ACL>`."
+    refs:
+      - { source: "Qtech: Руководство пользователя QSW-2800/2850/3470/3580", id: "Telnet: authentication securityip, ip access-class" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.5" }
+
+  - id: qtech_qsw.aaa_remote_login
+    title: Вход администраторов через RADIUS или TACACS+
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^!\s*$', match: '^authentication line (?:vty|web|console) login .*\b(radius|tacacs)\b' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "`aaa enable`, `radius-server authentication host <адрес>` / `tacacs-server authentication host <адрес>`, `authentication line vty login radius local`."
+    refs:
+      - { source: "Qtech: Руководство пользователя QSW-2800/2850/3470/3580", id: "authentication line" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+
+  - id: qtech_qsw.commands_logged
+    title: Выполняемые команды регистрируются (logging executed-commands enable)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^!\s*$', match: '^logging executed-commands enable' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "`logging executed-commands enable` и отправка журнала на syslog-сервер."
+    refs:
+      - { source: "Qtech: Руководство пользователя QSW-2800/2850/3470/3580", id: "Журналирование" }
+
+  - id: qtech_qsw.remote_syslog
+    title: События отправляются на внешний syslog-сервер
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^!\s*$', match: '^logging ((?:\d{1,3}\.){3}\d{1,3}|[0-9A-Fa-f]*:[0-9A-Fa-f:]+)\b' }
+    assert: { op: exists }
+    severity: low
+    remediation: "`logging <адрес> facility local0 level informational`."
+    refs:
+      - { source: "Qtech: Руководство пользователя QSW-2800/2850/3470/3580", id: "Журналирование" }
+
+  - id: qtech_qsw.time_sync
+    title: Время синхронизируется с заданным сервером (ntp/sntp server)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^!\s*$', match: '^(?:ntp|sntp) server (\S+)' }
+    assert: { op: exists }
+    severity: low
+    remediation: "`ntp enable`, `ntp server <адрес>` (или `sntp server <адрес>`)."
+    refs:
+      - { source: "Qtech: Руководство пользователя QSW-2800/2850/3470/3580", id: "NTP/SNTP" }

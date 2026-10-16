@@ -1,0 +1,179 @@
+# Образцы для пака eltex-mes (transport: ssh). Пак draft: на живом коммутаторе не запускался.
+# «Настоящий MES2324» — конфигурация из открытого репозитория nikitamishagin/eltex_mes (example-config.mes2300),
+# секреты в ней уже скрыты автором (XXXXX). Вывод show system — из тестов ntc-templates (eltex/show_system).
+pack: eltex-mes
+
+base:
+  cli:
+    show system: |
+      System Description:                       MES3124 28-port 1G/10G Managed Switch
+      System Up Time (days,hour:min:sec):       67,08:57:53
+      System Name:                              Eltex3124-3
+      System Object ID:                         1.3.6.1.4.1.35265.1.24
+    show running-config: |
+      vlan database
+       vlan 2-4,100
+      exit
+      !
+      hostname mes-acc-01
+      !
+      passwords complexity enable
+      passwords lockout 5
+      passwords time block 900
+      !
+      management access-list MGMT
+       permit ip-source 192.168.1.0 mask 255.255.255.0 service ssh
+      exit
+      !
+      management access-class MGMT
+      !
+      logging host 192.168.1.222 severity informational
+      logging cli-commands
+      !
+      username netops password encrypted XXXXX privilege 15
+      !
+      no ip telnet server
+      no ip http server
+      ip ssh server
+      !
+      encrypted tacacs-server host 192.168.1.10 key XXXXXXXX
+      aaa authentication login authorization default tacacs local
+      aaa authentication enable authorization default tacacs enable
+      aaa accounting commands stop-only group tacacs+
+      !
+      clock source sntp
+      sntp unicast client enable
+      sntp server 192.168.1.155
+      !
+      interface vlan 27
+       name MGT
+       ip address 10.200.12.66 255.255.255.248
+      exit
+      !
+      end
+
+cases:
+  - name: укреплённый коммутатор по руководству вендора — всё соблюдено
+    detect: true
+    expect:
+      eltex_mes.telnet_disabled: pass
+      eltex_mes.http_disabled: pass
+      eltex_mes.management_acl: pass
+      eltex_mes.password_complexity: pass
+      eltex_mes.password_lockout: pass
+      eltex_mes.snmp_default_community_absent: pass
+      eltex_mes.aaa_remote_login: pass
+      eltex_mes.commands_audited: pass
+      eltex_mes.remote_syslog: pass
+      eltex_mes.time_sync: pass
+
+  - name: настоящая конфигурация MES2324 — Telnet включён (нет no ip telnet server), нет политики паролей
+    cli:
+      show system: |
+        System Description:                       MES2324P AC 28-port 1G/10G Managed Switch with 24 POE+ ports
+        System Object ID:                         1.3.6.1.4.1.35265.1.92
+      show running-config: |
+        vlan database
+         vlan 2-4,6,8,11,27,100,200,2313,2335
+        exit
+        !
+        hostname mes2324
+        !
+        management access-list MGMT
+         permit ip-source 192.168.1.0 mask 255.255.255.0
+         permit ip-source 10.200.12.64 mask 255.255.255.248
+        exit
+        !
+        management access-class MGMT
+        !
+        logging host 192.168.1.222
+        no logging console
+        !
+        aaa authentication mode break
+        !
+        line telnet
+         history size 180
+         exec-timeout 20
+        exit
+        !
+        line ssh
+         exec-timeout 20
+        exit
+        !
+        username iac password encrypted XXXXX privilege 15
+        !
+        ip ssh server
+        !
+        snmp-server server
+        snmp-server contact ooo
+        encrypted snmp-server community XXXXXXX ro 192.168.1.0 mask 255.255.255.0 view Default
+        !
+        aaa authentication login authorization default tacacs local
+        aaa authentication enable authorization default tacacs enable
+        !
+        no ip http server
+        !
+        encrypted tacacs-server host 192.168.1.0 key XXXXXXXX
+        !
+        clock timezone MSK +3
+        clock source sntp
+        sntp unicast client enable
+        sntp server 192.168.1.155
+        !
+        interface vlan 27
+         name MGT
+         ip address 10.200.12.66 255.255.255.248
+        exit
+        !
+        ip default-gateway 10.200.12.65
+        !
+        end
+    detect: true
+    expect:
+      eltex_mes.telnet_disabled: fail
+      eltex_mes.http_disabled: pass
+      eltex_mes.management_acl: pass
+      eltex_mes.password_complexity: fail
+      eltex_mes.password_lockout: fail
+      eltex_mes.snmp_default_community_absent: pass
+      eltex_mes.aaa_remote_login: pass
+      eltex_mes.commands_audited: fail
+      eltex_mes.remote_syslog: pass
+      eltex_mes.time_sync: pass
+
+  - name: коммутатор с заводскими настройками доступа — public, без ACL, без syslog и времени
+    cli:
+      show running-config: |
+        hostname mes-new
+        !
+        snmp-server server
+        snmp-server community public ro
+        !
+        username admin password encrypted XXXXX privilege 15
+        !
+        interface vlan 1
+         ip address 192.168.1.239 255.255.255.0
+        exit
+        !
+        end
+    expect:
+      eltex_mes.telnet_disabled: fail
+      eltex_mes.http_disabled: fail
+      eltex_mes.management_acl: fail
+      eltex_mes.snmp_default_community_absent: fail
+      eltex_mes.aaa_remote_login: fail
+      eltex_mes.remote_syslog: fail
+      eltex_mes.time_sync: fail
+
+  - name: нет прав на просмотр конфигурации — проверки не выполняются
+    cli:
+      show running-config: "% Unrecognized command\n"
+    expect:
+      eltex_mes.telnet_disabled: error
+      eltex_mes.snmp_default_community_absent: error
+
+  - name: не MES (маршрутизатор ESR) — пак не применяется
+    cli:
+      show system: |
+        System type:                Eltex ESR-30 Service Router
+    detect: false

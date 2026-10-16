@@ -1,0 +1,77 @@
+# Образцы для пака vipnet-coordinator (transport: ssh). Пак draft: на живом комплексе не запускался.
+# Вывод команд — по примерам из «ViPNet Coordinator KB 4. Справочник команд и конфигурационных файлов» (4.2.0);
+# «настроенный» вариант отличается от примеров только значениями.
+pack: vipnet-coordinator
+
+base:
+  cli:
+    version: |
+      Product: ViPNet Coordinator HW1000
+      Platform: HW1000 Q6
+      License: HW1000
+      Software version: 4.3.2-3456
+    inet show snmp community: |
+      community ro = Mon1t0r-Ro
+      community trap = Tr4p-K3y
+    iplir option get antispoofing: |
+      Option: Antispoofing State: On
+    iplir option get block-other-protocols: |
+      Option: Block-other-protocols State: On
+    machine show loghost: |
+      The log host set to `192.168.10.10`
+    machine show session-timeout: |
+      shell session timeout:   15 minute(s)
+
+cases:
+  - name: настроенный координатор — всё соблюдено
+    detect: true
+    expect:
+      vipnet_coordinator.snmp_default_community_absent: pass
+      vipnet_coordinator.antispoofing_enabled: pass
+      vipnet_coordinator.block_other_protocols: pass
+      vipnet_coordinator.event_log_enabled: pass
+      vipnet_coordinator.remote_log: pass
+      vipnet_coordinator.session_timeout: pass
+
+  - name: значения по умолчанию из справочника — public, антиспуфинг выключен, журнал локальный
+    cli:
+      inet show snmp community: |
+        community ro = public
+        community trap = public
+      iplir option get antispoofing: |
+        Option: Antispoofing State: Off
+      iplir option get block-other-protocols: |
+        Option: Block-other-protocols State: Off
+      machine show loghost: |
+        The log host set to `local`
+      machine show session-timeout: |
+        shell session timeout:   30 minute(s)
+    expect:
+      vipnet_coordinator.snmp_default_community_absent: fail
+      vipnet_coordinator.antispoofing_enabled: fail
+      vipnet_coordinator.block_other_protocols: fail
+      vipnet_coordinator.event_log_enabled: pass
+      vipnet_coordinator.remote_log: fail
+      vipnet_coordinator.session_timeout: pass
+
+  - name: протоколирование выключено, сессия без ограничения по времени
+    cli:
+      machine show loghost: |
+        The log host set to `null`
+      machine show session-timeout: |
+        shell session timeout:   120 minute(s)
+    expect:
+      vipnet_coordinator.event_log_enabled: fail
+      vipnet_coordinator.remote_log: fail
+      vipnet_coordinator.session_timeout: fail
+
+  - name: режим наблюдения — пароли SNMP не показываются, проверка не выполняется
+    cli:
+      inet show snmp community: "% Command is available in admin mode only\n"
+    expect:
+      vipnet_coordinator.snmp_default_community_absent: error
+
+  - name: не ViPNet — пак не применяется
+    cli:
+      version: "% Unrecognized command\n"
+    detect: false

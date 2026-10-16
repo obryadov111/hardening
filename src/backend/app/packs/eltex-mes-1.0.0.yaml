@@ -1,0 +1,128 @@
+# Пак «Eltex MES»: коммутаторы Eltex серий MES2300, MES2310, MES3300, MES3500I, MES53xx/54xx/55xx/57xx
+# (ПО 4.x–6.x). Сбор по SSH (внешний коллектор) или по выгрузке конфигурации.
+#
+# maturity: draft. Проверки написаны по документации вендора и проверены ТОЛЬКО на образцах вывода
+# (pack_tests/eltex-mes.yaml), в том числе на настоящей конфигурации MES2324 из открытого репозитория.
+# На живом коммутаторе пак не запускался — verified_on пуст.
+#
+# Источники:
+#  * «Ethernet-коммутаторы MES2300-xx, MES3300-xx, … Руководство по эксплуатации», ПО 6.6.12.1 — таблицы команд
+#    со значениями по умолчанию;
+#  * «Настройки безопасности MES», Eltex Design Guides (AAA через TACACS+, syslog, management ACL).
+#
+# Значения по умолчанию (руководство 6.6.12.1) — в show running-config не показываются:
+#  * Telnet-, HTTP- и HTTPS-серверы ВКЛЮЧЕНЫ, SSH выключен. Поэтому «Telnet выключен» — это наличие строки
+#    `no ip telnet server`, а не отсутствие `ip telnet server`;
+#  * ограничения на формат пароля (`passwords complexity enable`) и блокировка после неверных попыток
+#    (`passwords lockout`) выключены.
+#
+# Не охвачены: коммутаторы MES14xx/MES24xx (другая ОС и другой формат show system) — для них нужен свой пак.
+
+pack: eltex-mes
+version: 1.0.0
+maturity: draft
+tags: [network-device, eltex, eltex-mes]
+transport: ssh
+asset_type: network-device
+
+detect:
+  - probe: { type: cli_config, cmd: show system, match: 'System Description:\s+(MES\S*.*)' }
+    regex: '^MES'
+
+checks:
+  - id: eltex_mes.telnet_disabled
+    title: Telnet-сервер выключен (по умолчанию на MES он включён)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^(end|exit)\s*$', match: '^no ip telnet server' }
+    assert: { op: exists }
+    severity: high
+    remediation: "`no ip telnet server`, `ip ssh server` (после `crypto key generate rsa`)."
+    refs:
+      - { source: "Eltex MES: Руководство по эксплуатации 6.6.12.1", id: "Удалённый доступ: Telnet, SSH, HTTP" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.7" }
+
+  - id: eltex_mes.http_disabled
+    title: Веб-интерфейс по HTTP выключен (по умолчанию включён)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^(end|exit)\s*$', match: '^no ip http server' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "`no ip http server`; при необходимости веб-управления — только HTTPS (`ip http secure-server`) и management ACL."
+    refs:
+      - { source: "Eltex MES: Руководство по эксплуатации 6.6.12.1", id: "Удалённый доступ: Telnet, SSH, HTTP" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+
+  - id: eltex_mes.management_acl
+    title: Управление коммутатором ограничено списком доступа (management access-class)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^(end|exit)\s*$', match: '^management access-class (\S+)' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "`management access-list MGMT` → `permit ip-source <сеть> mask <маска> service ssh`; затем `management access-class MGMT`."
+    refs:
+      - { source: "Eltex: Настройки безопасности MES", id: "Management ACL" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.5" }
+
+  - id: eltex_mes.password_complexity
+    title: Включены требования к сложности пароля (passwords complexity enable)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^(end|exit)\s*$', match: '^passwords complexity enable' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "`passwords complexity enable` (по умолчанию тогда: длина не меньше 8, не меньше 3 классов символов)."
+    refs:
+      - { source: "Eltex MES: Руководство по эксплуатации 6.6.12.1", id: "Таблица 53" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+
+  - id: eltex_mes.password_lockout
+    title: Учётная запись блокируется после неверных попыток входа (passwords lockout)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^(end|exit)\s*$', match: '^passwords lockout (\d+)' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "`passwords lockout 5` и `passwords time block 900` (по умолчанию ограничение выключено)."
+    refs:
+      - { source: "Eltex MES: Руководство по эксплуатации 6.6.12.1", id: "Таблица 53" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.6" }
+
+  - id: eltex_mes.snmp_default_community_absent
+    title: Нет SNMP community со значениями по умолчанию (public / private)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^(end|exit)\s*$', match: '^(?:encrypted )?snmp-server community (?:public|private)\b' }
+    assert: { op: absent }
+    severity: high
+    remediation: "Удалить community public/private; использовать SNMPv3 (`snmp-server user … auth … priv …`) или уникальную строку с адресом станции управления."
+    refs:
+      - { source: "Eltex MES: Руководство по эксплуатации 6.6.12.1", id: "SNMP" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.3" }
+
+  - id: eltex_mes.aaa_remote_login
+    title: Вход администраторов через TACACS+ или RADIUS
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^(end|exit)\s*$', match: '^aaa authentication login (?:authorization )?\S+ .*\b(tacacs|radius)\b' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "`tacacs-server host <адрес> key <ключ>`, `aaa authentication login authorization default tacacs local`."
+    refs:
+      - { source: "Eltex: Настройки безопасности MES", id: "AAA через TACACS+" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+
+  - id: eltex_mes.commands_audited
+    title: Команды администраторов регистрируются (aaa accounting commands или logging cli-commands)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^(end|exit)\s*$', match: '^(aaa accounting commands|logging cli-commands)\b' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "`aaa accounting commands stop-only group tacacs+` или `logging cli-commands` с отправкой на syslog-сервер."
+    refs:
+      - { source: "Eltex: Настройки безопасности MES", id: "AAA через TACACS+" }
+
+  - id: eltex_mes.remote_syslog
+    title: События отправляются на внешний syslog-сервер
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^(end|exit)\s*$', match: '^logging host (\S+)' }
+    assert: { op: exists }
+    severity: low
+    remediation: "`logging host <адрес> severity informational`."
+    refs:
+      - { source: "Eltex: Настройки безопасности MES", id: "Логирование на SYSLOG-сервер" }
+
+  - id: eltex_mes.time_sync
+    title: Время синхронизируется с заданным сервером (sntp/ntp server)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^(end|exit)\s*$', match: '^(?:sntp|ntp) server (\S+)' }
+    assert: { op: exists }
+    severity: low
+    remediation: "`clock source sntp`, `sntp unicast client enable`, `sntp server <адрес>`."
+    refs:
+      - { source: "Eltex MES: Руководство по эксплуатации 6.6.12.1", id: "Настройка системного времени" }

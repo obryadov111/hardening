@@ -1,0 +1,124 @@
+# Образцы для пака snr-switch (transport: ssh). Пак draft. Конфигурации СИНТЕТИЧЕСКИЕ: настоящей выгрузки
+# show running-config семейства DCN в открытых источниках не нашлось; строки собраны по таблицам команд руководств
+# вендора и нормализатору конфигурации NOC Project. Вывод show version — по формату из профиля NOC (get_version).
+pack: snr-switch
+
+base:
+  cli:
+    show version: |
+        SNR-S2985G-24T Device, Compiled on Aug 21 08:57:47 2023
+        sysLocation Moscow, DC-1
+        CPU Mac f8:f0:82:11:22:33
+        Vlan MAC f8:f0:82:11:22:32
+        SoftWare Version 7.0.3.5(R0241.0127)
+        BootRom Version 7.2.25
+        HardWare Version 1.0.2
+        CPLD Version N/A
+        Serial No.:SW053710J825000001
+        Copyright (C) 2001-2023 by Vendor.
+    show running-config: |
+      !
+      hostname sw-acc-01
+      !
+      username netops privilege 15 password 7 3b0fa0d1fb5c8bd7ab3a17e3b4b0c2d1
+      authentication line vty login radius local
+      authentication line web login radius local
+      authentication securityip 192.168.10.5
+      !
+      aaa enable
+      radius-server authentication host 192.168.10.20
+      radius-server key 7 3d1c6ab29e0f
+      !
+      ssh-server enable
+      no telnet-server enable
+      no ip http server
+      !
+      snmp-server enable
+      snmp-server securityip enable
+      snmp-server securityip 192.168.10.30
+      snmp-server community ro 7 b5c1f0a2e8d34c19
+      !
+      logging 192.168.10.40 facility local0 level informational
+      logging executed-commands enable
+      !
+      ntp enable
+      ntp server 192.168.10.1
+      !
+      Interface Ethernet1/0/1
+       switchport access vlan 10
+      !
+      interface Vlan1
+       ip address 192.168.10.2 255.255.255.0
+      !
+      no login
+      !
+      end
+
+cases:
+  - name: укреплённый коммутатор — всё соблюдено
+    detect: true
+    expect:
+      snr.telnet_disabled: pass
+      snr.http_disabled: pass
+      snr.default_admin_password_absent: pass
+      snr.cleartext_passwords_absent: pass
+      snr.snmp_default_community_absent: pass
+      snr.management_access_restricted: pass
+      snr.aaa_remote_login: pass
+      snr.commands_logged: pass
+      snr.remote_syslog: pass
+      snr.time_sync: pass
+
+  - name: заводские настройки доступа — admin/admin открытым текстом, public, Telnet и HTTP включены
+    cli:
+      show running-config: |
+        !
+        hostname switch
+        !
+        username admin privilege 15 password 0 admin
+        !
+        snmp-server enable
+        snmp-server community ro 0 public
+        !
+        interface Vlan1
+         ip address 192.168.1.1 255.255.255.0
+        !
+        end
+    expect:
+      snr.telnet_disabled: fail
+      snr.http_disabled: fail
+      snr.default_admin_password_absent: fail
+      snr.cleartext_passwords_absent: fail
+      snr.snmp_default_community_absent: fail
+      snr.management_access_restricted: fail
+      snr.aaa_remote_login: fail
+      snr.commands_logged: fail
+      snr.remote_syslog: fail
+      snr.time_sync: fail
+
+  - name: пароль сменён, но хранится открытым текстом; community private в кавычках
+    cli:
+      show running-config: |
+        !
+        username admin privilege 15 password 0 Str0ng-Pa55
+        snmp-server community "private" rw encrypted
+        !
+        end
+    expect:
+      snr.default_admin_password_absent: pass
+      snr.cleartext_passwords_absent: fail
+      snr.snmp_default_community_absent: fail
+
+  - name: нет прав на просмотр конфигурации — проверки не выполняются
+    cli:
+      show running-config: "% Unrecognized command, and error detected at '^' marker.\n"
+    expect:
+      snr.telnet_disabled: error
+      snr.default_admin_password_absent: error
+
+  - name: коммутатор другого вендора того же семейства — пак не применяется
+    cli:
+      show version: |
+        QSW-2800-28T-AC Device, Compiled on Aug 21 08:57:47 2023
+        SoftWare Version 7.0.3.5
+    detect: false

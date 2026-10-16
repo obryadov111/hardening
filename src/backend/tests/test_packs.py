@@ -456,6 +456,41 @@ def test_shipped_packs_and_their_maturity():
         "ubuntu-server": "baseline", "docker": "baseline", "cisco-ios": "draft", "astra-linux": "draft",
         "postgresql": "draft", "samba": "draft", "windows-server": "baseline", "windows-client": "draft",
         "rhel-family": "draft", "debian-server": "draft", "alt-linux": "draft", "windows-dc": "draft",
+        # российское сетевое оборудование и средства защиты — по документации вендоров, на устройствах не запускались
+        "eltex-esr": "draft", "eltex-mes": "draft", "qtech-qsw": "draft", "snr-switch": "draft",
+        "vipnet-coordinator": "draft", "s-terra-gate": "draft",
     }
     assert packs["cisco-ios"].verified_on == []
     assert all(p.verified_on for p in packs.values() if p.maturity == "baseline")  # baseline = подтверждено на оборудовании
+
+
+def _ssh_pack_with(probe):
+    return make_pack(transport="ssh", detect=[{"probe": {"type": "cli_config", "cmd": "show version", "match": "x"}, "equals": "x"}],
+                     checks=[{"id": "n.x", "title": "x", "probe": probe, "assert": {"op": "eq", "value": 0}}])
+
+
+def test_cli_blocks_is_an_ssh_probe_with_conditions():
+    probe = {"type": "cli_blocks", "cmd": "show running-config", "within": "^security zone-pair untrusted self$",
+             "block": r"^rule \d+$", "has": ["^action permit$"], "lacks": ["^match source-address "]}
+    pack = Pack.model_validate(_ssh_pack_with(probe))
+    assert pack.checks[0].probe.type == "cli_blocks"
+    with pytest.raises(ValueError, match="has или lacks"):
+        Pack.model_validate(_ssh_pack_with({"type": "cli_blocks", "cmd": "show running-config", "block": "^rule"}))
+    with pytest.raises(ValueError, match="только команды на чтение"):
+        Pack.model_validate(_ssh_pack_with({**probe, "cmd": "configure terminal"}))
+    with pytest.raises(ValueError, match="регулярное выражение"):
+        Pack.model_validate(_ssh_pack_with({**probe, "lacks": ["(unclosed"]}))
+
+
+@pytest.mark.parametrize("command, allowed", [
+    ("iplir show config", True), ("iplir option get antispoofing", True), ("machine show loghost", True),
+    ("inet show snmp community", True), ("version", True),
+    ("iplir option set antispoofing off", False), ("machine set loghost 1.2.3.4", False), ("iplir stop", False),
+])
+def test_vipnet_readonly_commands(command, allowed):
+    data = _ssh_pack_with({"type": "cli_config", "cmd": command, "match": "x"})
+    if allowed:
+        Pack.model_validate(data)
+    else:
+        with pytest.raises(ValueError, match="только команды на чтение"):
+            Pack.model_validate(data)

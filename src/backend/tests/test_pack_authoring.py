@@ -97,8 +97,12 @@ def test_validator_rejects_secret_paths(tmp_path):
     assert any("запрещён агенту" in m for m in messages(tmp_path))
 
 
-def test_validator_rejects_cli_config_in_a_local_pack(tmp_path):
-    check = {**GOOD_CHECK, "probe": {"type": "cli_config", "cmd": "show running-config", "match": "^x"}, "assert": {"op": "absent"}}
+@pytest.mark.parametrize("probe", [
+    {"type": "cli_config", "cmd": "show running-config", "match": "^x"},
+    {"type": "cli_blocks", "cmd": "show running-config", "block": "^rule", "has": ["x"]},
+])
+def test_validator_rejects_cli_probes_in_a_local_pack(tmp_path, probe):
+    check = {**GOOD_CHECK, "probe": probe, "assert": {"op": "absent"}}
     write_pack(tmp_path, "t-pack-1.0.0.yaml", [check])
     assert any("только по SSH" in m for m in messages(tmp_path))
 

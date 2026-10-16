@@ -1,0 +1,99 @@
+# Пак «С-Терра Шлюз» (ООО «С-Терра СиЭсПи»): криптошлюз IPsec на алгоритмах ГОСТ, версия 4.2 и совместимые.
+# Политика безопасности задаётся в Cisco-like консоли cs_console; пак читает её вывод `show running-config`.
+#
+# maturity: draft. Проверки написаны по документации вендора и проверены ТОЛЬКО на образцах вывода
+# (pack_tests/s-terra-gate.yaml). На живом шлюзе пак не запускался — verified_on пуст.
+#
+# Источник: «С-Терра Шлюз 4.2. Руководство администратора. Cisco-like команды» (doc.s-terra.ru): show version,
+# show running-config, encryption/hash (IKE policy), crypto ipsec transform-set, snmp-server community, username.
+#
+# Как собирать. По SSH администратор попадает в оболочку ОС, а не в cs_console, поэтому живой сбор возможен только
+# учёткой, у которой оболочка — cs_console. Основной путь — выгрузка: вывод `show running-config` и `show version`
+# из cs_console в файлы show_running-config.txt и show_version.txt (страница «Проверка по выгрузке» или агент
+# с --offline-dir).
+#
+# По документации: `encr` (encryption) и `hash` в IKE-политике показываются ВСЕГДА, даже при значении по умолчанию
+# (по умолчанию — gost), поэтому слабый алгоритм виден в выгрузке явно.
+#
+# Почему AES отдельно от DES/3DES: DES и 3DES — небезопасные версии (методика ФСТЭК, УСИ.8); AES стойкий, но для
+# защиты информации в ГИС требуются сертифицированные СКЗИ на ГОСТ — это отдельная, менее критичная проверка.
+
+pack: s-terra-gate
+version: 1.0.0
+maturity: draft
+tags: [network-device, security-gateway, s-terra, s-terra-gate]
+transport: ssh
+asset_type: network-device
+
+detect:
+  - probe: { type: cli_config, cmd: show version, match: '^(S-Terra\s+\S+.*)' }
+    regex: '(?i)^s-terra'
+
+checks:
+  - id: s_terra_gate.ike_weak_encryption_absent
+    title: В IKE-политиках нет DES и 3DES
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^crypto isakmp policy ', section: '^crypto isakmp policy ', match: '^\s+encr(?:yption)?\s+(des|3des)\s*$' }
+    assert: { op: absent }
+    severity: high
+    remediation: "В `crypto isakmp policy` задать `encryption gost341215k` (Кузнечик) или `encryption gost`; DES/3DES удалить."
+    refs:
+      - { source: "С-Терра Шлюз 4.2: Cisco-like команды", id: "encryption (IKE policy)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.8" }
+
+  - id: s_terra_gate.ike_gost_encryption_only
+    title: IKE-политики используют только ГОСТ-шифрование (нет AES)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^crypto isakmp policy ', section: '^crypto isakmp policy ', match: '^\s+encr(?:yption)?\s+(aes\b.*)$' }
+    assert: { op: absent }
+    severity: medium
+    remediation: "Для ГИС и защиты ПДн — только ГОСТ (`encryption gost341215k`, `gost`, `tc26-…`); AES допустим лишь для взаимодействия с несертифицированными партнёрами по решению владельца системы."
+    refs:
+      - { source: "С-Терра Шлюз 4.2: Cisco-like команды", id: "encryption (IKE policy)" }
+
+  - id: s_terra_gate.ike_weak_hash_absent
+    title: В IKE-политиках нет хэшей MD5 и SHA-1
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^crypto isakmp policy ', section: '^crypto isakmp policy ', match: '^\s+hash\s+(md5|sha)\s*$' }
+    assert: { op: absent }
+    severity: high
+    remediation: "`hash gost341112-256-tc26` (ГОСТ Р 34.11-2012) или `hash gost341112-512-tc26`."
+    refs:
+      - { source: "С-Терра Шлюз 4.2: Cisco-like команды", id: "hash (IKE policy)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.8" }
+
+  - id: s_terra_gate.ipsec_weak_transform_absent
+    title: Наборы преобразований IPsec без esp-null, DES, 3DES и MD5
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^crypto isakmp policy ', match: '^crypto ipsec transform-set \S+ .*\b(esp-null|esp-des|esp-3des|ah-md5-hmac|esp-md5-hmac)\b' }
+    assert: { op: absent }
+    severity: high
+    remediation: "ГОСТ-преобразования: `crypto ipsec transform-set <имя> esp-gost341215k esp-gost341215k-mac` (Кузнечик) или `esp-gost28147-4m-imit`; esp-null оставляет трафик незашифрованным."
+    refs:
+      - { source: "С-Терра Шлюз 4.2: Cisco-like команды", id: "crypto ipsec transform-set, таблица 17" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.8" }
+
+  - id: s_terra_gate.snmp_default_community_absent
+    title: Нет SNMP community со значениями по умолчанию (public / private)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^crypto isakmp policy ', match: '^snmp-server community (public|private)\b' }
+    assert: { op: absent }
+    severity: high
+    remediation: "`snmp-server community <уникальная строка> ro` или `no snmp-server`, если статистика по SNMP не нужна."
+    refs:
+      - { source: "С-Терра Шлюз 4.2: Cisco-like команды", id: "snmp-server community" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.3" }
+
+  - id: s_terra_gate.username_secret_used
+    title: Пароли пользователей консоли заданы через secret (хэш), а не password
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^crypto isakmp policy ', match: '^username \S+ (?:privilege \d+ )?password\b' }
+    assert: { op: absent }
+    severity: medium
+    remediation: "`username <имя> secret <пароль>` вместо `username <имя> password <пароль>`."
+    refs:
+      - { source: "С-Терра Шлюз 4.2: Cisco-like команды", id: "username secret" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+
+  - id: s_terra_gate.remote_logging
+    title: События отправляются на внешний syslog-сервер
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^crypto isakmp policy ', match: '^logging (?:host )?(\d{1,3}(?:\.\d{1,3}){3})\b' }
+    assert: { op: exists }
+    severity: low
+    remediation: "`logging <адрес syslog-сервера>`, `logging trap informational`."
+    refs:
+      - { source: "С-Терра Шлюз 4.2: Cisco-like команды", id: "logging" }

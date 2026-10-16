@@ -242,6 +242,72 @@ def test_cli_config_line_and_section():
     assert run_probe(t, vty)["value"] == "ssh"  # первый vty-блок, а не второй с telnet
 
 
+def test_cli_config_default_applies_only_when_line_is_absent():
+    probe = {"type": "cli_config", "cmd": "show running-config", "match": r"^security passwords min-length (\d+)", "default": "1"}
+    assert run_probe(FakeTransport("ssh", cli="hostname esr\nexit\n"), probe)["value"] == "1"
+    assert run_probe(FakeTransport("ssh", cli="security passwords min-length 16\n"), probe)["value"] == "16"
+    # Ошибка устройства — не «строки нет»: умолчание не подставляется, проба не выполнилась
+    assert run_probe(FakeTransport("ssh", cli="% Unrecognized command\n"), probe)["found"] is False
+
+
+ESR_CONFIG = """\
+security zone-pair untrusted self
+  rule 1
+    action permit
+    match protocol icmp
+    enable
+  exit
+  rule 10
+    action permit
+    match protocol tcp
+    match destination-port SSH
+    enable
+  exit
+  rule 20
+    action permit
+    match protocol tcp
+    match source-address MGMT
+    enable
+  exit
+  rule 30
+    action permit
+    match protocol tcp
+  exit
+exit
+security zone-pair trusted self
+  rule 1
+    action permit
+    match protocol tcp
+    enable
+  exit
+exit
+"""
+
+
+def test_cli_blocks_counts_blocks_with_and_without_lines_inside_parent():
+    probe = {"type": "cli_blocks", "cmd": "show running-config", "within": r"^security zone-pair untrusted self$",
+             "block": r"^rule \d+$", "has": ["^action permit$", "^enable$"],
+             "lacks": ["^match source-address ", r"^match protocol (?!tcp$)\S+"]}
+    result = run_probe(FakeTransport("ssh", cli=ESR_CONFIG), probe)
+    # rule 1 — ICMP, rule 20 — ограничен источником, rule 30 — без enable; пара trusted self вне within
+    assert result["found"] is True and result["value"] == 1
+    assert result["evidence"] == "rule 10"
+
+
+def test_cli_blocks_without_within_and_zero_matches():
+    probe = {"type": "cli_blocks", "cmd": "show running-config", "block": r"^line vty", "lacks": [r"^transport input "]}
+    cisco = "line vty 0 4\n transport input ssh\nline vty 5 15\n access-class 10 in\n!\nend\n"
+    assert run_probe(FakeTransport("ssh", cli=cisco), probe)["value"] == 1
+    fixed = "line vty 0 4\n transport input ssh\nline vty 5 15\n transport input ssh\n!\nend\n"
+    result = run_probe(FakeTransport("ssh", cli=fixed), probe)
+    assert result["value"] == 0 and "всего блоков: 2" in result["evidence"]
+
+
+def test_cli_blocks_refuses_device_errors():
+    probe = {"type": "cli_blocks", "cmd": "show running-config", "block": r"^rule", "has": ["x"]}
+    assert run_probe(FakeTransport("ssh", cli="% Invalid input detected at '^' marker.\n"), probe)["found"] is False
+
+
 def test_evidence_masks_secrets_but_keeps_context():
     t = FakeTransport("ssh", cli=CISCO_CONFIG)
     for pattern, expected in (("^enable secret", "enable secret ***"), ("^snmp-server community", "snmp-server community ***")):
@@ -279,6 +345,18 @@ def test_redact_does_not_mangle_harmless_directives():
     ("/system reboot", False),
     ("/user add name=x", False),
     ("show " + "a" * 300, False),
+    # ViPNet Coordinator: только просмотр
+    ("iplir show config", True),
+    ("iplir option get antispoofing", True),
+    ("machine show loghost", True),
+    ("inet show snmp community", True),
+    ("version", True),
+    ("iplir option set antispoofing off", False),
+    ("machine set loghost 10.0.0.1", False),
+    ("inet snmp community ro x", False),
+    ("iplir stop", False),
+    ("machine reboot", False),
+    ("version; reboot", False),
 ])
 def test_is_readonly_cli(command, allowed):
     assert is_readonly_cli(command) is allowed

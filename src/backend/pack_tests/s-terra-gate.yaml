@@ -1,0 +1,104 @@
+# Образцы для пака s-terra-gate (transport: ssh). Пак draft: на живом шлюзе не запускался.
+# show version — пример из документации 4.2; политика собрана из примеров команд документации
+# (crypto isakmp policy, crypto ipsec transform-set, snmp-server, username, logging), значения изменены.
+pack: s-terra-gate
+
+base:
+  cli:
+    show version: |
+      S-Terra GATE build 4.2.24123. Emulates:
+      Cisco IOS Software, 2800 Software (C2800NM-ADVIPSERVICESK9-M), Version 12.4(13a), RELEASE SOFTWARE (fc1)
+      Cisco 2811 (revision 53.50) with 249856K/12288K bytes of memory.
+    show running-config: |
+      !
+      version 12.4
+      no service password-encryption
+      !
+      hostname gw-moscow
+      enable secret 5 2Fe034RYzgb7xbt2pYxcpA==
+      !
+      username admin privilege 15 secret 5 Xk2Fe034RYzgb7xbt2pY==
+      aaa new-model
+      !
+      logging 10.0.10.5
+      logging trap informational
+      !
+      crypto isakmp policy 10
+       encr gost341215k
+       hash gost341112-256-tc26
+       authentication gost-sig
+       group vko2
+      !
+      crypto ipsec transform-set TSET esp-gost341215k esp-gost341215k-mac
+      !
+      crypto map CMAP 1 ipsec-isakmp
+       match address LIST
+       set transform-set TSET
+       set peer 203.0.113.10
+      !
+      interface GigabitEthernet0/0
+       ip address 203.0.113.2 255.255.255.0
+       crypto map CMAP
+      !
+      snmp-server community Mon1t0r ro
+      !
+      end
+
+cases:
+  - name: шлюз на ГОСТ (Кузнечик, ГОСТ Р 34.11-2012) — всё соблюдено
+    detect: true
+    expect:
+      s_terra_gate.ike_weak_encryption_absent: pass
+      s_terra_gate.ike_gost_encryption_only: pass
+      s_terra_gate.ike_weak_hash_absent: pass
+      s_terra_gate.ipsec_weak_transform_absent: pass
+      s_terra_gate.snmp_default_community_absent: pass
+      s_terra_gate.username_secret_used: pass
+      s_terra_gate.remote_logging: pass
+
+  - name: устаревшая политика — 3DES и MD5 в IKE, esp-des, public, пароль через password, без syslog
+    cli:
+      show running-config: |
+        !
+        hostname gw-old
+        username admin privilege 15 password 0 admin
+        !
+        crypto isakmp policy 10
+         encr 3des
+         hash md5
+         authentication pre-share
+         group 2
+        crypto isakmp policy 20
+         encr aes
+         hash sha
+         authentication pre-share
+        !
+        crypto ipsec transform-set OLD esp-des esp-md5-hmac
+        !
+        snmp-server community public ro
+        !
+        end
+    expect:
+      s_terra_gate.ike_weak_encryption_absent: fail
+      s_terra_gate.ike_gost_encryption_only: fail
+      s_terra_gate.ike_weak_hash_absent: fail
+      s_terra_gate.ipsec_weak_transform_absent: fail
+      s_terra_gate.snmp_default_community_absent: fail
+      s_terra_gate.username_secret_used: fail
+      s_terra_gate.remote_logging: fail
+
+  - name: выгрузка без IKE-политик (обрезана или не та команда) — проверки не выполняются
+    cli:
+      show running-config: |
+        !
+        hostname gw
+        end
+    expect:
+      s_terra_gate.ike_weak_encryption_absent: error
+      s_terra_gate.snmp_default_community_absent: error
+
+  - name: Cisco IOS, а не С-Терра — пак не применяется
+    cli:
+      show version: |
+        Cisco IOS Software, C2960 Software (C2960-LANBASEK9-M), Version 15.0(2)SE11, RELEASE SOFTWARE (fc3)
+    detect: false

@@ -87,13 +87,13 @@ def _probe_findings(pack: Pack, probe, where: str, agent) -> list[Finding]:
         findings.append(Finding("error", where, f"путь {path} запрещён агенту (секреты) — проба всегда будет error"))
 
     if pack.transport == "ssh":
-        command = probe.cmd if probe.type == "cli_config" else " ".join(probe.cmd) if probe.type == "cmd_regex" else None
+        command = probe.cmd if probe.type in ("cli_config", "cli_blocks") else " ".join(probe.cmd) if probe.type == "cmd_regex" else None
         if command is not None and not agent.is_readonly_cli(command):
             findings.append(Finding("error", where, f"агент не выполнит по SSH команду {command!r}: не «только чтение»"))
         return findings
 
-    if probe.type == "cli_config":
-        findings.append(Finding("error", where, "cli_config выполняется только по SSH, в локальном паке агент её отклонит"))
+    if probe.type in ("cli_config", "cli_blocks"):
+        findings.append(Finding("error", where, f"{probe.type} выполняется только по SSH, в локальном паке агент её отклонит"))
     windows = "windows" in pack.tags
     if windows and probe.type in ("file_kv", "file_regex", "file_stat", "pkg_version"):
         findings.append(Finding("error", where, f"проба {probe.type} рассчитана на Linux, в Windows-паке она не выполнится"))

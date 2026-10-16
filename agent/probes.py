@@ -414,7 +414,16 @@ def parse_ad_facts(stdout: str) -> dict:
 
 CLI_FILTERS = ("include", "exclude", "begin", "section", "count", "match", "except")
 _CLI_SEGMENT = re.compile(r"^[A-Za-z0-9 _./^:\-]+$")
-_CLI_READONLY = re.compile(r"^(show|display) [A-Za-z0-9 _./^:\-]+$|^/export( [A-Za-z0-9 _./=\-]+)?$|^/[a-z0-9/ -]+ print( [A-Za-z0-9 _./=\-]+)?$")
+_CLI_READONLY = re.compile(
+    r"^(show|display) [A-Za-z0-9 _./^:\-]+$"
+    r"|^/export( [A-Za-z0-9 _./=\-]+)?$"
+    r"|^/[a-z0-9/ -]+ print( [A-Za-z0-9 _./=\-]+)?$"
+    # ViPNet Coordinator (командный интерпретатор ИнфоТеКС): просмотр — «<группа> show …», «iplir option get <параметр>»
+    # и «version»; остальные команды групп (set, start, stop, config) меняют состояние и сюда не входят.
+    r"|^(inet|iplir|machine|failover|mftp|ups) show( [A-Za-z0-9 _./:\-]+)?$"
+    r"|^iplir option get [a-z-]+$"
+    r"|^version( full)?$"
+)
 # Слово-секрет — отдельное слово: не часть составного (prohibit-password, password-encryption, PasswordAuthentication).
 _SECRET_WORDS = re.compile(r"(?i)(?<![\w-])(password|passwd|secret|community|token|hash|psk|pre-shared-key|private-key)(?![\w-]).*$")
 _HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
@@ -836,18 +845,23 @@ def probe_cmd_foreach(t, p: dict) -> dict:
     return _ok(matched, f"{matched} из {len(items)}")
 
 
-def probe_cli_config(t, p: dict) -> dict:
-    """Строка/раздел конфигурации устройства. Ответ устройства проверяется ДО разбора: при нехватке прав
-    IOS отвечает `% Invalid input…` вместо конфигурации, и все проверки «параметра нет» ложно прошли бы
-    на пустом выводе. Поэтому строка-ошибка `% …` — отказ пробы, а `require` (необязательно) задаёт признак
-    настоящего вывода (например, завершающий `end` running-config)."""
+def _cli_text(t, p: dict) -> str:
+    """Вывод команды устройства, проверенный ДО разбора: при нехватке прав IOS отвечает `% Invalid input…`
+    вместо конфигурации, и все проверки «параметра нет» ложно прошли бы на пустом выводе. Поэтому строка-ошибка
+    `% …` — отказ пробы, а `require` (необязательно) задаёт признак настоящего вывода (например, завершающий
+    `end` running-config)."""
     text = t.run_cli(p["cmd"]).stdout
     first = next((line for line in text.splitlines() if line.strip()), "")
     if re.match(r"\s*%\s", first):
         raise ProbeError(f"устройство вернуло ошибку: {first.strip()[:120]}")
     if p.get("require") and not re.search(p["require"], text, re.MULTILINE):
         raise ProbeError("вывод команды не похож на ожидаемый (нет прав на просмотр конфигурации или неверная команда)")
-    lines = text.splitlines()
+    return text
+
+
+def probe_cli_config(t, p: dict) -> dict:
+    """Строка/раздел конфигурации устройства (первая строка, совпавшая с match)."""
+    lines = _cli_text(t, p).splitlines()
     section = p.get("section")
     if section is not None:
         scoped, inside = [], False
@@ -861,7 +875,54 @@ def probe_cli_config(t, p: dict) -> dict:
         m = re.search(p["match"], line)
         if m:
             return _ok(_cli_value(m, line), line)
+    if "default" in p:
+        # Значение по умолчанию устройство в running-config не показывает: нет строки — действует умолчание
+        # (минимальная длина пароля 1, срок действия не ограничен и т. п.), а не «нечего сравнивать».
+        return _ok(p["default"], "строки нет — значение по умолчанию")
     return _ok(None)
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" \t"))
+
+
+def _cli_blocks(lines: "list[str]", header: str) -> "list[tuple[str, list[str]]]":
+    """Блоки конфигурации по отступам: заголовок (строка, совпавшая с header) и все следующие строки с большим
+    отступом. Блок кончается на первой непустой строке с отступом не больше, чем у заголовка, — это и `!` у
+    Cisco/Qtech, и `exit` у Eltex. Строки тела — исходные, с отступами (для вложенного поиска)."""
+    found = []
+    for i, line in enumerate(lines):
+        if not line.strip() or not re.search(header, line.strip()):
+            continue
+        level, body = _indent(line), []
+        for nxt in lines[i + 1:]:
+            if not nxt.strip():
+                continue
+            if _indent(nxt) <= level:
+                break
+            body.append(nxt)
+        found.append((line.strip(), body))
+    return found
+
+
+def probe_cli_blocks(t, p: dict) -> dict:
+    """ЧИСЛО блоков конфигурации, удовлетворяющих условиям: в теле есть строка под каждое выражение `has` и нет ни
+    одной строки под выражения `lacks`. `within` — блок-родитель (например, пара зон Eltex ESR), внутри которого
+    ищутся блоки `block` (правила). Так выражается то, что одной строкой не проверить: «правило разрешает доступ
+    и НЕ ограничивает адрес источника», «в каждом блоке line vty задан transport input»."""
+    lines = _cli_text(t, p).splitlines()
+    scopes = [body for _, body in _cli_blocks(lines, p["within"])] if p.get("within") else [lines]
+    total, matched = 0, []
+    for scope in scopes:
+        for header, body in _cli_blocks(scope, p["block"]):
+            total += 1
+            stripped = [line.strip() for line in body]
+            if all(any(re.search(rx, line) for line in stripped) for rx in p.get("has", [])) and not any(
+                re.search(rx, line) for rx in p.get("lacks", []) for line in stripped
+            ):
+                matched.append(header)
+    evidence = "; ".join(matched[:5]) if matched else f"подходящих блоков нет (всего блоков: {total})"
+    return _ok(len(matched), evidence)
 
 
 def _cli_value(m, line: str) -> str:
@@ -1013,6 +1074,7 @@ PROBES = {
     "cmd_regex": probe_cmd_regex,
     "cmd_foreach": probe_cmd_foreach,
     "cli_config": probe_cli_config,
+    "cli_blocks": probe_cli_blocks,
     "service_state": probe_service_state,
     "pkg_version": probe_pkg_version,
     "first_of": probe_first_of,

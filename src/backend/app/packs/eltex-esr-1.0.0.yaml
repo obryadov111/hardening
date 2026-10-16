@@ -1,0 +1,199 @@
+# Пак «Eltex ESR»: сервисные маршрутизаторы и межсетевые экраны Eltex серии ESR (включая исполнение,
+# сертифицированное ФСТЭК, и виртуальный vESR). Сбор по SSH (внешний коллектор) или по выгрузке конфигурации.
+#
+# maturity: draft. Проверки написаны по документации вендора и проверены ТОЛЬКО на образцах вывода
+# (pack_tests/eltex-esr.yaml): настоящих конфигурациях vESR/ESR из открытых источников и синтетических
+# вариантах с нарушениями. На живом устройстве пак не запускался — verified_on пуст.
+#
+# Источники:
+#  * «ESR Hardening Guide», Eltex Design Guides — https://docs.eltex-co.ru/display/dg/ESR+Hardening+Guide
+#  * «Рекомендации по безопасной настройке» (ESR/WLC 1.13–1.39) — пароли, AAA, удалённое управление;
+#  * «ESR-Series. Справочник команд CLI», версия ПО 1.5.10 (FSTEC) — значения по умолчанию.
+#
+# Значения по умолчанию в show running-config не показываются, поэтому:
+#  * Telnet- и SSH-серверы по умолчанию ВЫКЛЮЧЕНЫ (справочник CLI): строка `ip telnet server` — включён;
+#  * минимальная длина пароля по умолчанию 1, срок действия не ограничен — без строки действует умолчание
+#    (проба cli_config с default);
+#  * пароль admin по умолчанию — `password`. Команда `no password` у admin сбрасывает его на `password` и УБИРАЕТ
+#    строку password из конфигурации; значит, блок `username admin` без строки password — пароль по умолчанию.
+#
+# Учётка для сбора: уровень привилегий, достаточный для `show running-config` (по справочнику — 10+).
+# Без прав ESR отвечает строкой `% …` — проба распознаёт это как отказ, а не как «параметра нет».
+#
+# Зоны: проверки межсетевого экрана опираются на заводские имена зон trusted/untrusted. Если в организации
+# зоны названы иначе, проверка доступа из untrusted даст pass «правил нет» — это ограничение пака.
+
+pack: eltex-esr
+version: 1.0.0
+maturity: draft
+tags: [network-device, eltex, eltex-esr]
+transport: ssh
+asset_type: network-device
+
+detect:
+  - probe: { type: cli_config, cmd: show system, match: 'System type:\s+(Eltex v?ESR\S*.*)' }
+    regex: '(?i)eltex v?esr'
+
+checks:
+  - id: eltex_esr.admin_password_changed
+    title: Пароль встроенной учётной записи admin изменён (не пароль по умолчанию)
+    probe: { type: cli_blocks, cmd: show running-config, require: '(?m)^exit\s*$', block: '^username admin$', has: ['^password '] }
+    assert: { op: gte, value: 1 }
+    severity: critical
+    remediation: "Задать пароль admin: `username admin` → `password <пароль>`; лучше заменить admin персональными учётками уровня 15 и понизить admin до privilege 1."
+    refs:
+      - { source: "Eltex ESR Hardening Guide", id: "3.2, 3.4" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.3" }
+
+  - id: eltex_esr.default_password_expired
+    title: Включён запрос смены пароля по умолчанию (security passwords default-expired)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^exit\s*$', match: '^security passwords default-expired' }
+    assert: { op: exists }
+    severity: low
+    remediation: "Выполнить `security passwords default-expired` (по умолчанию запрос выключен)."
+    refs:
+      - { source: "Eltex ESR Hardening Guide", id: "3.2" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.3" }
+
+  - id: eltex_esr.password_min_length
+    title: Минимальная длина пароля локальных пользователей не меньше 8 символов
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^exit\s*$', match: '^security passwords min-length (\d+)', default: "1" }
+    assert: { op: gte, value: 8 }
+    severity: medium
+    remediation: "`security passwords min-length 16` (вендор рекомендует больше 8; по умолчанию 1)."
+    refs:
+      - { source: "Eltex ESR Hardening Guide", id: "3.2" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+
+  - id: eltex_esr.password_lifetime
+    title: Срок действия пароля ограничен (не более 90 дней)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^exit\s*$', match: '^security passwords lifetime (\d+)', default: "0" }
+    assert: { op: between, value: [1, 90] }
+    severity: low
+    remediation: "`security passwords lifetime 30` (по умолчанию срок не ограничен — значение 0 в отчёте)."
+    refs:
+      - { source: "Eltex ESR Hardening Guide", id: "3.2" }
+
+  - id: eltex_esr.telnet_disabled
+    title: Telnet-сервер выключен
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^exit\s*$', match: '^ip telnet server\b' }
+    assert: { op: absent }
+    severity: high
+    remediation: "`no ip telnet server`; управление — только по SSH."
+    refs:
+      - { source: "Eltex ESR Hardening Guide", id: "3.8" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.7" }
+
+  - id: eltex_esr.ssh_access_addresses
+    title: Доступ к SSH-серверу ограничен списком адресов (ip ssh access-addresses)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^exit\s*$', match: '^ip ssh access-addresses (\S+)' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "Создать `object-group network` с адресами администраторов и выполнить `ip ssh access-addresses <группа>`."
+    refs:
+      - { source: "Eltex ESR Hardening Guide", id: "3.7" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.5" }
+
+  - id: eltex_esr.untrusted_to_self_tcp_restricted
+    title: Из зоны untrusted к самому маршрутизатору нет разрешающих правил TCP без ограничения источника
+    probe:
+      type: cli_blocks
+      cmd: show running-config
+      require: '(?m)^exit\s*$'
+      within: '^security zone-pair untrusted self$'
+      block: '^rule \d+$'
+      has: ['^action permit$', '^enable$']
+      lacks: ['^match source-address ', '^match protocol (?!tcp$)\S+']
+    assert: { op: eq, value: 0 }
+    severity: high
+    remediation: "В `security zone-pair untrusted self` у правил с `action permit` для TCP (SSH, веб) задать `match source-address <группа администраторов>` или удалить их; управление — из доверенной зоны или выделенного VRF."
+    refs:
+      - { source: "Eltex ESR Hardening Guide", id: "1.3, 1.4, 3.12" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.5" }
+
+  - id: eltex_esr.firewall_not_disabled
+    title: Межсетевой экран не отключён ни на одном интерфейсе (нет ip firewall disable)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^exit\s*$', match: '^\s+ip firewall disable' }
+    assert: { op: absent }
+    severity: medium
+    remediation: "Убрать `ip firewall disable` с интерфейсов, назначить интерфейсам зоны (`security-zone`) и правила `security zone-pair`. Исключение — интерфейс выделенного VRF управления: тогда принять риск по этой проверке."
+    refs:
+      - { source: "Eltex: Рекомендации по безопасной настройке", id: "Общие рекомендации" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.2" }
+
+  - id: eltex_esr.aaa_remote_login
+    title: Вход администраторов через внешний сервер AAA (TACACS+, RADIUS или LDAP)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^exit\s*$', match: '^aaa authentication login \S+ .*\b(tacacs|radius|ldap)\b' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "Настроить `tacacs-server host`/`radius-server host` и `aaa authentication login default tacacs local` (local — резерв при недоступности сервера)."
+    refs:
+      - { source: "Eltex ESR Hardening Guide", id: "3.1" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+
+  - id: eltex_esr.cli_commands_logged
+    title: Команды администраторов пишутся в журнал (syslog cli-commands)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^exit\s*$', match: '^syslog cli-commands' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "`syslog cli-commands`, `logging userinfo`, `logging aaa configuration`; при TACACS+ — `aaa accounting commands stop-only tacacs`."
+    refs:
+      - { source: "Eltex ESR Hardening Guide", id: "3.6" }
+
+  - id: eltex_esr.remote_syslog
+    title: События отправляются на внешний syslog-сервер
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^exit\s*$', match: '^syslog host (\S+)' }
+    assert: { op: exists }
+    severity: low
+    remediation: "`syslog host <имя>` → `remote-address <адрес>`, `severity info`; `syslog sequence-numbers`, `syslog timestamp msec`."
+    refs:
+      - { source: "Eltex ESR Hardening Guide", id: "3.13" }
+
+  - id: eltex_esr.ntp_server
+    title: Время синхронизируется с заданным NTP-сервером
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^exit\s*$', match: '^ntp server (\S+)' }
+    assert: { op: exists }
+    severity: low
+    remediation: "`ntp enable`, `ntp server <адрес>` с ключом (`ntp authentication enable`)."
+    refs:
+      - { source: "Eltex ESR Hardening Guide", id: "3.10" }
+
+  - id: eltex_esr.ntp_broadcast_client_disabled
+    title: NTP broadcast-клиент выключен (время не принимается от любого узла сегмента)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^exit\s*$', match: '^ntp broadcast-client enable' }
+    assert: { op: absent }
+    severity: low
+    remediation: "`no ntp broadcast-client enable` (в заводской конфигурации включён) и задать доверенные NTP-серверы."
+    refs:
+      - { source: "Eltex: Рекомендации по безопасной настройке", id: "Общие рекомендации" }
+
+  - id: eltex_esr.snmp_community_absent
+    title: Нет SNMP community v1/v2c (только SNMPv3 с аутентификацией и шифрованием)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^exit\s*$', match: '^snmp-server community (\S+)' }
+    assert: { op: absent }
+    severity: medium
+    remediation: "Удалить `snmp-server community`, настроить `snmp-server user` с `authentication` и `privacy` (SNMPv3)."
+    refs:
+      - { source: "Eltex ESR Hardening Guide", id: "3.11" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.8" }
+
+  - id: eltex_esr.ssh_kex_group1_disabled
+    title: Устаревший обмен ключами SSH dh-group1-sha1 отключён
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^exit\s*$', match: '^ip ssh key-exchange algorithm dh-group1-sha1 disable' }
+    assert: { op: exists }
+    severity: medium
+    remediation: "`ip ssh key-exchange algorithm dh-group1-sha1 disable`; по руководству вендора отключить также 3des, arcfour, blowfish, cast128, md5, sha1."
+    refs:
+      - { source: "Eltex ESR Hardening Guide", id: "3.7" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.8" }
+
+  - id: eltex_esr.anti_spoofing
+    title: Включена защита от подмены адреса источника (ip firewall screen spy-blocking spoofing)
+    probe: { type: cli_config, cmd: show running-config, require: '(?m)^exit\s*$', match: '^ip firewall screen spy-blocking spoofing\b' }
+    assert: { op: exists }
+    severity: low
+    remediation: "`ip firewall screen spy-blocking spoofing` и `logging firewall screen spy-blocking spoofing`."
+    refs:
+      - { source: "Eltex ESR Hardening Guide", id: "2.6, 2.7" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.2" }

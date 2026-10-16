@@ -29,6 +29,10 @@ CLI_READONLY_RE = re.compile(
     r"^(show|display) [A-Za-z0-9 _./|^:\-]+$"
     r"|^/export( [A-Za-z0-9 _./=\-]+)?$"
     r"|^/[a-z0-9/ -]+ print( [A-Za-z0-9 _./=\-]+)?$"
+    # ViPNet Coordinator: «<группа> show …», «iplir option get <параметр>», «version» (тот же список, что у агента)
+    r"|^(inet|iplir|machine|failover|mftp|ups) show( [A-Za-z0-9 _./:\-]+)?$"
+    r"|^iplir option get [a-z-]+$"
+    r"|^version( full)?$"
 )
 
 Severity = Literal["critical", "high", "medium", "low", "info"]
@@ -133,6 +137,12 @@ class CmdRegexProbe(StrictModel):
         return cmd
 
 
+def _validate_readonly_cli(cmd: str) -> str:
+    if len(cmd) > 200 or not CLI_READONLY_RE.match(cmd):
+        raise ValueError(f"допустимы только команды на чтение (show/display, /export, … print, просмотр ViPNet): {cmd!r}")
+    return cmd
+
+
 class CliConfigProbe(StrictModel):
     """Строка/раздел конфигурации сетевого устройства, полученные командой только на чтение."""
 
@@ -141,6 +151,7 @@ class CliConfigProbe(StrictModel):
     match: str
     section: str | None = None
     require: str | None = None  # признак настоящего вывода; нет в ответе — проба не выполнилась (нет прав и т. п.)
+    default: str | None = None  # значение, когда строки нет: устройство не показывает умолчания в running-config
 
     _match = field_validator("match")(_validate_regex)
 
@@ -149,17 +160,44 @@ class CliConfigProbe(StrictModel):
     def _require_regex(cls, require: str | None) -> str | None:
         return _validate_regex(require) if require is not None else None
 
-    @field_validator("cmd")
-    @classmethod
-    def _cmd_readonly(cls, cmd: str) -> str:
-        if len(cmd) > 200 or not CLI_READONLY_RE.match(cmd):
-            raise ValueError(f"допустимы только команды на чтение (show/display, /export, … print): {cmd!r}")
-        return cmd
+    _cmd = field_validator("cmd")(_validate_readonly_cli)
 
     @field_validator("section")
     @classmethod
     def _section_regex(cls, section: str | None) -> str | None:
         return _validate_regex(section) if section is not None else None
+
+
+class CliBlocksProbe(StrictModel):
+    """Число блоков конфигурации (по отступам), у которых в теле есть строки под все `has` и нет строк под `lacks`;
+    `within` — блок-родитель, внутри которого ищутся блоки `block`. Значение — число, сравнивается eq/lte/…"""
+
+    type: Literal["cli_blocks"]
+    cmd: str
+    block: str
+    within: str | None = None
+    has: list[str] = Field(default_factory=list, max_length=10)
+    lacks: list[str] = Field(default_factory=list, max_length=10)
+    require: str | None = None
+
+    _block = field_validator("block")(_validate_regex)
+    _cmd = field_validator("cmd")(_validate_readonly_cli)
+
+    @field_validator("within", "require")
+    @classmethod
+    def _optional_regex(cls, value: str | None) -> str | None:
+        return _validate_regex(value) if value is not None else None
+
+    @field_validator("has", "lacks")
+    @classmethod
+    def _regex_list(cls, values: list[str]) -> list[str]:
+        return [_validate_regex(v) for v in values]
+
+    @model_validator(mode="after")
+    def _has_condition(self) -> "CliBlocksProbe":
+        if not self.has and not self.lacks:
+            raise ValueError("cli_blocks: нужно хотя бы одно условие has или lacks")
+        return self
 
 
 class ServiceStateProbe(StrictModel):
@@ -282,7 +320,8 @@ class WinAdProbe(StrictModel):
 
 
 LeafProbe = (
-    FileKvProbe | FileRegexProbe | FileStatProbe | CmdRegexProbe | CmdForeachProbe | CliConfigProbe | ServiceStateProbe
+    FileKvProbe | FileRegexProbe | FileStatProbe | CmdRegexProbe | CmdForeachProbe | CliConfigProbe | CliBlocksProbe
+    | ServiceStateProbe
     | PkgVersionProbe | RegValueProbe | WinSecpolProbe | WinAuditpolProbe | WinAdProbe
 )
 
@@ -302,7 +341,7 @@ def leaf_probes(probe) -> list:
     """Пробы без составной обёртки: для проверок, которые должны видеть каждую реальную пробу."""
     return list(probe.probes) if probe.type == "first_of" else [probe]
 
-SSH_PROBE_TYPES = {"cli_config", "cmd_regex"}
+SSH_PROBE_TYPES = {"cli_config", "cli_blocks", "cmd_regex"}
 
 
 class Assertion(StrictModel):
@@ -427,7 +466,7 @@ class Pack(StrictModel):
             ]
             wrong = sorted({p.type for p in probes if p.type not in SSH_PROBE_TYPES})
             if wrong:
-                raise ValueError(f"транспорт ssh допускает только cli_config и cmd_regex, найдено: {', '.join(wrong)}")
+                raise ValueError(f"транспорт ssh допускает только cli_config, cli_blocks и cmd_regex, найдено: {', '.join(wrong)}")
             for probe in probes:
                 if probe.type == "cmd_regex" and not CLI_READONLY_RE.match(" ".join(probe.cmd)):
                     raise ValueError(f"по ssh допустимы только команды на чтение: {' '.join(probe.cmd)!r}")
