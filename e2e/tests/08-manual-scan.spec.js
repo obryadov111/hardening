@@ -10,6 +10,7 @@ test('опрос: наблюдатель видит вопросы, но не с
   await loginAs(page, 'viewer')
   await page.goto('/manual-scan')
   await expect(page.getByText('Сохранять ответы может только администратор организации.')).toBeVisible()
+  await page.getByRole('button', { name: /^kontinent-4/ }).click()
   await expect(page.getByText(/Пароль доступа к локальному меню/).first()).toBeVisible()
   await expect(page.getByRole('button', { name: 'Сохранить ответы' })).toBeDisabled()
 })
@@ -17,6 +18,7 @@ test('опрос: наблюдатель видит вопросы, но не с
 test('опрос: Континент 4 — ответы, подтверждение и версия, снимок «по опросу»', async ({ page }) => {
   await loginAs(page, 'admin')
   await page.goto('/manual-scan')
+  await page.getByRole('button', { name: /^kontinent-4/ }).click()
   await expect(page.getByRole('button', { name: /^kontinent-4/ })).toHaveAttribute('aria-pressed', 'true')
   const submit = page.getByRole('button', { name: 'Сохранить ответы' })
   await expect(submit).toBeDisabled()  // нет ни ответов, ни имени устройства
@@ -48,6 +50,7 @@ test('опрос: Континент 4 — ответы, подтвержден�
 test('опрос: неверный ответ — ошибка сервера видна', async ({ page }) => {
   await loginAs(page, 'admin')
   await page.goto('/manual-scan')
+  await page.getByRole('button', { name: /^kontinent-4/ }).click()
   await page.getByLabel(/^Ответ: Минимальная длина пароля/).fill('восемь')
   await page.getByPlaceholder('ub-msk-01').fill('ub-e2e-02')
   await page.getByRole('button', { name: 'Сохранить ответы' }).click()

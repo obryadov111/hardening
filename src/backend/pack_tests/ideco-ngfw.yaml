@@ -1,0 +1,37 @@
+# Образцы для пака ideco-ngfw (transport: manual): ответы аудитора вместо вывода команд.
+pack: ideco-ngfw
+
+cases:
+  - name: доступ извне закрыт, учётки персональные и через AD, журналы в SIEM
+    firmware_version: "20.3"
+    firmware: { name: межсетевой экран «ideco utm», version: "20.3" }
+    answers:
+      ideco_ngfw.web_external_access: да
+      ideco_ngfw.ssh_external_access: да
+      ideco_ngfw.ssh_local_access: выключен
+      ideco_ngfw.personal_admins: да
+      ideco_ngfw.central_admin_auth: да
+      ideco_ngfw.remote_syslog: да
+    expect:
+      ideco_ngfw.web_external_access: pass
+      ideco_ngfw.ssh_external_access: pass
+      ideco_ngfw.ssh_local_access: pass
+      ideco_ngfw.personal_admins: pass
+      ideco_ngfw.central_admin_auth: pass
+      ideco_ngfw.remote_syslog: pass
+
+  - name: веб и SSH открыты извне, общий admin
+    answers:
+      ideco_ngfw.web_external_access: нет
+      ideco_ngfw.ssh_external_access: нет
+      ideco_ngfw.ssh_local_access: включён, не используется
+      ideco_ngfw.personal_admins: нет
+      ideco_ngfw.central_admin_auth: нет
+      ideco_ngfw.remote_syslog: нет
+    expect:
+      ideco_ngfw.web_external_access: fail
+      ideco_ngfw.ssh_external_access: fail
+      ideco_ngfw.ssh_local_access: fail
+      ideco_ngfw.personal_admins: fail
+      ideco_ngfw.central_admin_auth: fail
+      ideco_ngfw.remote_syslog: fail

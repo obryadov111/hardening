@@ -1,0 +1,33 @@
+# Образцы для пака pt-ngfw-settings (transport: manual): ответы аудитора вместо вывода команд.
+pack: pt-ngfw-settings
+
+cases:
+  - name: политика без any-any, персональные учётки через LDAP, SNMPv3, сборщики журналов
+    firmware_version: 1.8.1
+    firmware: { name: pt ngfw, version: 1.8.1 }
+    answers:
+      pt_ngfw.no_allow_any_rule: да
+      pt_ngfw.personal_accounts: да
+      pt_ngfw.central_auth: да
+      pt_ngfw.snmp_v3: SNMPv3
+      pt_ngfw.log_collector: да
+    expect:
+      pt_ngfw.no_allow_any_rule: pass
+      pt_ngfw.personal_accounts: pass
+      pt_ngfw.central_auth: pass
+      pt_ngfw.snmp_v3: pass
+      pt_ngfw.log_collector: pass
+
+  - name: правило «Allow any» осталось, работа под admin, SNMPv2c, журналы никуда не уходят
+    answers:
+      pt_ngfw.no_allow_any_rule: нет
+      pt_ngfw.personal_accounts: нет
+      pt_ngfw.central_auth: нет
+      pt_ngfw.snmp_v3: SNMPv2c
+      pt_ngfw.log_collector: нет
+    expect:
+      pt_ngfw.no_allow_any_rule: fail
+      pt_ngfw.personal_accounts: fail
+      pt_ngfw.central_auth: fail
+      pt_ngfw.snmp_v3: fail
+      pt_ngfw.log_collector: fail
