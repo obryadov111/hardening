@@ -30,7 +30,8 @@ else
 fi
 
 echo "==> Загружаю в ${CONTAINER} (около минуты)..."
-docker cp "$ARCHIVE" "${CONTAINER}:/tmp/vulxml.zip"
+# через stdin, а не docker cp: файл создаёт пользователь контейнера (не root), он же его и читает
+docker exec -i "$CONTAINER" sh -c 'cat > /tmp/vulxml.zip' < "$ARCHIVE"
 docker exec "$CONTAINER" python -m app.commands.bdu import /tmp/vulxml.zip
 docker exec "$CONTAINER" rm -f /tmp/vulxml.zip
 
@@ -38,7 +39,7 @@ for release in $OVAL_RELEASES; do
   file="com.ubuntu.${release}.cve.oval.xml.bz2"
   echo "==> Данные Ubuntu ${release}: скачиваю ${file}..."
   curl -fsS --retry 3 -o "$WORK/$file" "https://security-metadata.canonical.com/oval/$file"
-  docker cp "$WORK/$file" "${CONTAINER}:/tmp/$file"
+  docker exec -i "$CONTAINER" sh -c "cat > /tmp/$file" < "$WORK/$file"
   docker exec "$CONTAINER" python -m app.commands.bdu oval "$release" "/tmp/$file"
   docker exec "$CONTAINER" rm -f "/tmp/$file"
 done

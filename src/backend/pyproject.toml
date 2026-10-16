@@ -28,4 +28,10 @@ pythonpath = ["."]
 testpaths = ["tests"]
 # Устаревшее API (datetime.utcnow, модуль crypt в passlib) — ошибка теста, а не строчка в сводке:
 # иначе оно копится до обновления Python или библиотеки, на котором ломается прод.
-filterwarnings = ["error::DeprecationWarning", "error::PendingDeprecationWarning"]
+filterwarnings = [
+    "error::DeprecationWarning",
+    "error::PendingDeprecationWarning",
+    # starlette.testclient (0.47) обращается к anyio.abc.BlockingPortal — с anyio 4.15 это устаревший
+    # псевдоним; чинится обновлением starlette, наш код ни при чём.
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
