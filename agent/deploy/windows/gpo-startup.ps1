@@ -5,6 +5,7 @@
   GPO: Конфигурация компьютера → Политики → Конфигурация Windows → Сценарии → Автозагрузка → PowerShell:
   этот файл, параметры (одной строкой):
     -Server https://audit.example.ru -SiteKey yak_... -PackPublicKey ... -Pin sha256//... -Share \\corp.local\NETLOGON\Hardening
+  -Schedule Weekly — прогон раз в неделю (понедельник) вместо ежедневного: для аудита как проекта.
 
 Что делает:
   1. Берёт hardening-agent.exe из общей папки (-Share: тысяча ПК не качает файл из интернета) или с сервера и
@@ -12,7 +13,8 @@
   2. Кладёт его в C:\Program Files\Hardening, если версия другая.
   3. Регистрирует хост ключом площадки (--enroll), если он ещё не зарегистрирован: ключ хоста —
      C:\ProgramData\HardeningAgent\host.json (доступ только SYSTEM и «Администраторы»).
-  4. Создаёт ежедневную задачу от SYSTEM с разбросом запуска до часа.
+  4. Создаёт задачу от SYSTEM (ежедневно или еженедельно, 03:00 с разбросом до часа).
+  5. Сразу после регистрации запускает первый прогон — отчёт появляется в день установки, а не ночью.
 Журнал — C:\ProgramData\HardeningAgent\gpo-startup.log.
 
 Ключ площадки в параметрах сценария виден всем пользователям домена (SYSVOL) — выдавайте его с коротким
@@ -26,6 +28,7 @@ param(
     [string]$Share = "",
     [string]$Environment = "prod",
     [string]$Proxy = "",
+    [ValidateSet("Daily", "Weekly")][string]$Schedule = "Daily",
     [string]$InstallDir = "C:\Program Files\Hardening",
     [string]$StateDir = "C:\ProgramData\HardeningAgent",
     [switch]$AllowHttp  # только для проверки (CI, стенд): сервер по http://localhost
@@ -78,6 +81,7 @@ try {
     if ($Proxy) { [Environment]::SetEnvironmentVariable("HARDENING_PROXY", $Proxy, "Machine") }
 
     # 3. Регистрация хоста — один раз; ключ площадки только в командной строке этого запуска
+    $enrolledNow = $false
     if (-not (Test-Path (Join-Path $StateDir "host.json"))) {
         $enroll = @("--api-url", $Server, "--environment", $Environment, "--api-key", $SiteKey, "--state-dir", $StateDir, "--enroll")
         if ($Pin) { $enroll += @("--pin-sha256", $Pin) }
@@ -95,19 +99,32 @@ try {
             Start-Sleep -Seconds 20
         }
         if ($code -ne 0) { exit $code }  # задача не создаётся без регистрации: при следующей загрузке — заново
+        $enrolledNow = $true
     }
 
-    # 4. Ежедневная задача от SYSTEM, разброс запуска до часа — тысяча ПК не обращается к серверу разом
+    # 4. Задача от SYSTEM, разброс запуска до часа — тысяча ПК не обращается к серверу разом
     $arguments = "--api-url $Server --environment $Environment --use-packs --state-dir `"$StateDir`""
     if ($AllowHttp -and $Server.StartsWith("http://")) { $arguments += " --allow-http" }
+    $triggerClass = if ($Schedule -eq "Weekly") { "MSFT_TaskWeeklyTrigger" } else { "MSFT_TaskDailyTrigger" }
     $existing = Get-ScheduledTask -TaskName "Hardening agent" -ErrorAction SilentlyContinue
-    if (-not $existing -or $existing.Actions[0].Execute -ne $exe -or $existing.Actions[0].Arguments -ne $arguments) {
+    if (-not $existing -or $existing.Actions[0].Execute -ne $exe -or $existing.Actions[0].Arguments -ne $arguments -or
+        $existing.Triggers[0].CimClass.CimClassName -ne $triggerClass) {
         $action = New-ScheduledTaskAction -Execute $exe -Argument $arguments
-        $trigger = New-ScheduledTaskTrigger -Daily -At 03:00 -RandomDelay (New-TimeSpan -Hours 1)
+        if ($Schedule -eq "Weekly") {
+            $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday -At 03:00 -RandomDelay (New-TimeSpan -Hours 1)
+        } else {
+            $trigger = New-ScheduledTaskTrigger -Daily -At 03:00 -RandomDelay (New-TimeSpan -Hours 1)
+        }
         $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
         Register-ScheduledTask -TaskName "Hardening agent" -Action $action -Trigger $trigger -Settings $settings `
             -User "SYSTEM" -RunLevel Highest -Force | Out-Null
-        Write-Log "задача планировщика «Hardening agent» создана"
+        Write-Log "задача планировщика «Hardening agent» создана (расписание $Schedule)"
+    }
+
+    # 5. Первый прогон сразу после регистрации: задача выполняется в фоне, загрузку ПК не задерживает
+    if ($enrolledNow) {
+        Start-ScheduledTask -TaskName "Hardening agent"
+        Write-Log "первый прогон запущен"
     }
     exit 0
 }

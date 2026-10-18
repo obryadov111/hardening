@@ -153,8 +153,9 @@ jobs:
           }
 
       # Сценарий запуска компьютера для GPO (Windows PowerShell 5.1, как в GPO): .exe из общей папки со сверкой
-      # SHA-256, регистрация, задача от SYSTEM; повторный запуск ничего не меняет; подменённый файл не ставится;
-      # задача от SYSTEM читает ключ хоста и отправляет отчёт.
+      # SHA-256, регистрация, задача от SYSTEM и первый прогон сразу после регистрации; повторный запуск ничего не
+      # меняет; -Schedule Weekly переводит задачу на еженедельную; подменённый файл не ставится; задача от SYSTEM
+      # читает ключ хоста и отправляет отчёт.
       - name: GPO startup script
         shell: pwsh
         run: |
@@ -176,15 +177,35 @@ jobs:
           if ($enrolls.Count -ne 1) { Write-Output "регистраций: $($enrolls.Count), ожидалась одна"; exit 1 }
           if (@(Select-String -Path "$state\gpo-startup.log" -Pattern "установлен агент").Count -ne 1) { Write-Output "агент ставился повторно"; exit 1 }
           $task = Get-ScheduledTask -TaskName "Hardening agent"
-          Write-Output "задача: $($task.Principal.UserId) $($task.Actions[0].Execute) $($task.Actions[0].Arguments); разброс $($task.Triggers[0].RandomDelay)"
-          if ($task.Actions[0].Execute -ne "$install\hardening-agent.exe" -or $task.Triggers[0].RandomDelay -ne "PT1H") { exit 1 }
+          Write-Output "задача: $($task.Principal.UserId) $($task.Actions[0].Execute) $($task.Actions[0].Arguments); разброс $($task.Triggers[0].RandomDelay); $($task.Triggers[0].CimClass.CimClassName)"
+          if ($task.Actions[0].Execute -ne "$install\hardening-agent.exe" -or $task.Triggers[0].RandomDelay -ne "PT1H" -or
+              $task.Triggers[0].CimClass.CimClassName -ne "MSFT_TaskDailyTrigger") { exit 1 }
+          function Get-Ingests { @(Get-Content ci-requests.jsonl | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.path -eq "/api/ingest" }) }
+          function Wait-Task([int]$expected) {
+            for ($i = 0; $i -lt 90 -and ((Get-Ingests).Count -lt $expected -or (Get-ScheduledTask -TaskName "Hardening agent").State -eq "Running"); $i++) { Start-Sleep -Seconds 2 }
+          }
+          # первый прогон — сразу после регистрации, один на два запуска сценария
+          if (@(Select-String -Path "$state\gpo-startup.log" -Pattern "первый прогон запущен").Count -ne 1) { Write-Output "первый прогон запускался не один раз"; exit 1 }
+          Wait-Task 1
+          $info = Get-ScheduledTaskInfo -TaskName "Hardening agent"
+          $ingests = Get-Ingests
+          Write-Output "первый прогон: код $($info.LastTaskResult); отчётов: $($ingests.Count), ключ $($ingests[0].key)"
+          if ($info.LastTaskResult -ne 0 -or $ingests.Count -ne 1 -or $ingests[0].key -ne "ci-host-key") { exit 1 }
           # задача от SYSTEM: читает ключ хоста из каталога с правами SYSTEM/Администраторы и отправляет отчёт
           Start-ScheduledTask -TaskName "Hardening agent"
-          for ($i = 0; $i -lt 60 -and (Get-ScheduledTask -TaskName "Hardening agent").State -eq "Running"; $i++) { Start-Sleep -Seconds 2 }
+          Wait-Task 2
           $info = Get-ScheduledTaskInfo -TaskName "Hardening agent"
-          $ingests = @(Get-Content ci-requests.jsonl | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.path -eq "/api/ingest" })
-          Write-Output "задача завершилась с кодом $($info.LastTaskResult); отчётов: $($ingests.Count), ключ $($ingests[0].key)"
-          if ($info.LastTaskResult -ne 0 -or $ingests.Count -ne 1 -or $ingests[0].key -ne "ci-host-key") { exit 1 }
+          $ingests = Get-Ingests
+          Write-Output "задача завершилась с кодом $($info.LastTaskResult); отчётов: $($ingests.Count), ключи $($ingests.key -join ', ')"
+          if ($info.LastTaskResult -ne 0 -or $ingests.Count -ne 2 -or @($ingests | Where-Object { $_.key -ne "ci-host-key" }).Count) { exit 1 }
+          # -Schedule Weekly: задача пересоздаётся еженедельной, без новой регистрации и внепланового прогона
+          powershell.exe @gpo -Schedule Weekly
+          if ($LASTEXITCODE -ne 0) { Get-Content "$state\gpo-startup.log"; exit 1 }
+          $trigger = (Get-ScheduledTask -TaskName "Hardening agent").Triggers[0]
+          Write-Output "еженедельно: $($trigger.CimClass.CimClassName), дни $($trigger.DaysOfWeek), разброс $($trigger.RandomDelay)"
+          if ($trigger.CimClass.CimClassName -ne "MSFT_TaskWeeklyTrigger" -or $trigger.RandomDelay -ne "PT1H") { exit 1 }
+          $requests = @(Get-Content ci-requests.jsonl | ForEach-Object { $_ | ConvertFrom-Json })
+          if (@($requests | Where-Object { $_.path -eq "/api/agent/enroll" }).Count -ne 1 -or (Get-Ingests).Count -ne 2) { Write-Output "лишняя регистрация или прогон"; exit 1 }
           # подменённый файл в общей папке не ставится
           Remove-Item "$install\hardening-agent.exe"
           Set-Content -Path "$share\hardening-agent.exe" -Value "подделка"
