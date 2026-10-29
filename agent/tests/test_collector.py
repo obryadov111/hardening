@@ -330,6 +330,26 @@ def test_dry_run_with_manifests_file_needs_no_server(pack_files, capsys):
     assert payload["run_id"] and payload["collected_at"].endswith("+00:00")
 
 
+def test_pack_payload_includes_inventory_for_local_host(pack_files, capsys, monkeypatch):
+    # Рабочий режим агента — паки; инвентаризация должна уходить и здесь (для локального хоста).
+    monkeypatch.setattr(collector, "collect_hardware", lambda collect_identity_pii=False: {"mac_address": "aa:bb", "cpu_cores": 4})
+    assert collector.main(_pack_args(pack_files, "--dry-run")) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["inventory"] == {"mac_address": "aa:bb", "cpu_cores": 4}
+
+
+def test_pack_payload_forwards_collect_identity_flag(pack_files, capsys, monkeypatch):
+    seen = {}
+
+    def fake(collect_identity_pii=False):
+        seen["pii"] = collect_identity_pii
+        return {"cpu_cores": 1}
+
+    monkeypatch.setattr(collector, "collect_hardware", fake)
+    collector.main(_pack_args(pack_files, "--dry-run", "--collect-identity"))
+    assert seen["pii"] is True
+
+
 def test_out_writes_private_report_signed_with_site_key(pack_files, capsys):
     out = pack_files["dir"] / "report.json"
     assert collector.main(_pack_args(pack_files, "--out", str(out), "--api-key", "site-key", "--state-dir", str(pack_files["dir"] / "state"))) == 0

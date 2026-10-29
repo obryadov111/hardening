@@ -997,6 +997,7 @@ def build_pack_payload(args: argparse.Namespace, probes_module, conn: "ServerCon
             "criticality": args.criticality,
         },
         "software": collect_software() if local else firmware,
+        "inventory": collect_hardware(collect_identity_pii=args.collect_identity) if local else None,
         "platform_tags": tags,
         "packs": runs,
         "scan_label": args.scan_label,
