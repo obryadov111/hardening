@@ -15,3 +15,7 @@ export async function getAssetsByOrganization(organizationId) {
 export async function getAssetById(assetId) {
   return apiFetch(`/assets/${assetId}`);
 }
+
+export async function getInventoryByAsset(assetId) {
+  return apiFetch(`/assets/${assetId}/inventory`);
+}

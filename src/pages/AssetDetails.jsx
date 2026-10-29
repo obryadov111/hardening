@@ -7,8 +7,40 @@ import EmptyState from "../components/ui/EmptyState";
 import SeverityBadge from "../components/ui/SeverityBadge";
 import CheckStatusBadge from "../components/ui/CheckStatusBadge";
 import { Skeleton, SkeletonTable } from "../components/ui/Skeleton";
-import { getAssetById } from "../api/assets";
+import { getAssetById, getInventoryByAsset } from "../api/assets";
 import { formatDateTime } from "../utils/datetime";
+
+const DISK_TONE = {
+  nvme: "border-blue-500/20 bg-blue-500/10 text-blue-300",
+  ssd: "border-emerald-500/20 bg-emerald-500/10 text-emerald-300",
+  hdd: "border-zinc-700 bg-zinc-800/60 text-zinc-300",
+};
+
+function formatMemory(memoryMb) {
+  if (!memoryMb) {
+    return "—";
+  }
+  return `${(memoryMb / 1024).toFixed(1)} ГБ`;
+}
+
+function formatDiskSize(sizeGb) {
+  if (sizeGb == null) {
+    return "—";
+  }
+  if (sizeGb >= 1000) {
+    return `${(sizeGb / 1000).toFixed(1)} ТБ`;
+  }
+  return `${sizeGb} ГБ`;
+}
+
+function InfoRow({ label, value, mono = false }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-xs text-zinc-400">{label}</dt>
+      <dd className={`text-sm text-zinc-100 ${mono ? "font-mono" : ""}`}>{value || "—"}</dd>
+    </div>
+  );
+}
 
 export default function AssetDetails() {
   const params = useParams();
@@ -17,6 +49,9 @@ export default function AssetDetails() {
   const [asset, setAsset] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const [inventory, setInventory] = useState(null);
+  const [inventoryLoading, setInventoryLoading] = useState(true);
 
   async function loadAsset(currentAssetId) {
     try {
@@ -40,6 +75,36 @@ export default function AssetDetails() {
     }
 
     loadAsset(assetId);
+  }, [assetId]);
+
+  useEffect(() => {
+    if (!assetId) {
+      return;
+    }
+
+    let cancelled = false;
+    setInventoryLoading(true);
+    // Инвентаризация грузится отдельно: её отсутствие или сбой не должны ломать страницу актива.
+    getInventoryByAsset(assetId)
+      .then((data) => {
+        if (!cancelled) {
+          setInventory(data);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setInventory(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setInventoryLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [assetId]);
 
   const backLink = (
@@ -109,6 +174,86 @@ export default function AssetDetails() {
         <StatCard label="Проверок выполнено" value={asset.checks_count ?? 0} tone="default" />
         <StatCard label="Проваленных проверок" value={asset.failed_checks_count ?? 0} tone="danger" />
       </div>
+
+      <AppCard title="Паспорт оборудования" subtitle="Инвентаризация «железа» актива">
+        {inventoryLoading ? (
+          <SkeletonTable rows={3} cols={2} />
+        ) : inventory ? (
+          <div className="space-y-6">
+            <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <InfoRow label="Процессор" value={inventory.cpu_model} />
+              <InfoRow label="Ядер / потоков" value={inventory.cpu_cores ?? "—"} />
+              <InfoRow label="Оперативная память" value={formatMemory(inventory.memory_mb)} />
+              <InfoRow
+                label="Материнская плата"
+                value={[inventory.board_vendor, inventory.board_product].filter(Boolean).join(" ")}
+              />
+              <InfoRow label="MAC-адрес" value={inventory.mac_address} mono />
+              <InfoRow label="UUID устройства" value={inventory.device_uuid} mono />
+            </dl>
+
+            <div>
+              <div className="mb-2 text-sm font-medium text-zinc-300">Диски</div>
+              {inventory.disks?.length ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="border-b border-zinc-800 text-zinc-400">
+                      <tr>
+                        <th className="px-4 py-3">Устройство</th>
+                        <th className="px-4 py-3">Модель</th>
+                        <th className="px-4 py-3">Объём</th>
+                        <th className="px-4 py-3">Тип</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {inventory.disks.map((disk, i) => (
+                        <tr key={disk.name || i} className="border-b border-zinc-800/60 text-zinc-200 hover:bg-zinc-800/40">
+                          <td className="px-4 py-3 font-mono text-zinc-300">{disk.name || "—"}</td>
+                          <td className="px-4 py-3 text-zinc-300">{disk.model || "—"}</td>
+                          <td className="px-4 py-3 text-zinc-300">{formatDiskSize(disk.size_gb)}</td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`inline-flex rounded-full border px-2 py-0.5 text-xs uppercase ${
+                                DISK_TONE[disk.type] || DISK_TONE.hdd
+                              }`}
+                            >
+                              {disk.type || "—"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-sm text-zinc-400">Нет данных о дисках.</p>
+              )}
+            </div>
+
+            {inventory.username || inventory.domain || inventory.domain_groups?.length ? (
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+                <div className="mb-3 text-sm font-medium text-amber-300">
+                  Учётные данные (ПДн)
+                </div>
+                <dl className="grid gap-4 sm:grid-cols-3">
+                  <InfoRow label="Пользователь" value={inventory.username} />
+                  <InfoRow label="Домен" value={inventory.domain} />
+                  <InfoRow label="Доменные группы" value={inventory.domain_groups?.join(", ")} />
+                </dl>
+              </div>
+            ) : null}
+
+            {inventory.collected_at ? (
+              <p className="text-xs text-zinc-500">Собрано: {formatDateTime(inventory.collected_at)}</p>
+            ) : null}
+          </div>
+        ) : (
+          <EmptyState
+            title="Инвентаризация не собрана"
+            description="Агент ещё не присылал паспорт оборудования этого актива."
+          />
+        )}
+      </AppCard>
 
       <AppCard title="Установленное ПО" subtitle="Инвентаризация ПО на активе">
         {asset.software?.length ? (
