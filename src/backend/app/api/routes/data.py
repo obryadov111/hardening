@@ -12,7 +12,7 @@ from app.api.deps import (
     require_org_access,
 )
 from app.core.config import settings
-from app.models.asset import Asset
+from app.models.asset import Asset, AssetInventory
 from app.models.environment import Environment
 from app.models.organization import ClientOrganization
 from app.models.scan_snapshot import ScanSnapshot
@@ -315,6 +315,29 @@ def get_software_by_asset(asset_id: str, current_user: User = Depends(get_curren
         {"asset_id": asset_id},
     ).mappings().all()
     return [_software_row_to_dict(row) for row in rows]
+
+
+@router.get("/assets/{asset_id}/inventory")
+def get_inventory_by_asset(asset_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Паспорт оборудования актива (и ПДн, если собирались). Нет строки — агент инвентаризацию не присылал."""
+    _require_asset_access(db, current_user, asset_id)
+    row = db.query(AssetInventory).filter(AssetInventory.asset_id == asset_id).first()
+    if row is None:
+        return None
+    return {
+        "mac_address": row.mac_address,
+        "device_uuid": row.device_uuid,
+        "cpu_model": row.cpu_model,
+        "cpu_cores": row.cpu_cores,
+        "memory_mb": row.memory_mb,
+        "board_vendor": row.board_vendor,
+        "board_product": row.board_product,
+        "disks": row.disks or [],
+        "username": row.username,
+        "domain": row.domain,
+        "domain_groups": row.domain_groups or [],
+        "collected_at": row.collected_at,
+    }
 
 
 _HARDENING_SELECT = """

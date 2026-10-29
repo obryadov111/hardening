@@ -179,6 +179,105 @@ def test_primary_ip_without_network_is_none(monkeypatch):
     assert collector.get_primary_ip() is None
 
 
+# ---------- инвентаризация оборудования ----------
+
+IP_ROUTE = ("ip", "-o", "route", "get", "1.1.1.1")
+ID_GROUPS = ("id", "-Gn")
+
+
+@pytest.fixture
+def dirs(monkeypatch):
+    """Подменённый /sys: listing — содержимое каталогов для collector.list_dir."""
+    listing = {}
+    monkeypatch.setattr(collector, "list_dir", lambda path: listing.get(path, []))
+    return listing
+
+
+def test_collect_cpu_memory_motherboard(host):
+    host["files"]["/proc/cpuinfo"] = (
+        "processor\t: 0\nmodel name\t: Intel(R) Xeon(R) Gold 6338\n"
+        "processor\t: 1\nmodel name\t: Intel(R) Xeon(R) Gold 6338\n"
+    )
+    assert collector.collect_cpu() == ("Intel(R) Xeon(R) Gold 6338", 2)
+    host["files"]["/proc/meminfo"] = "MemTotal:       16318464 kB\nMemFree: 100 kB\n"
+    assert collector.collect_memory_mb() == 15936
+    host["files"]["/sys/class/dmi/id/board_vendor"] = "ASUSTeK COMPUTER INC.\n"
+    host["files"]["/sys/class/dmi/id/board_name"] = "PRIME B560M-A\n"
+    assert collector.collect_motherboard() == ("ASUSTeK COMPUTER INC.", "PRIME B560M-A")
+
+
+def test_collect_cpu_and_memory_absent(host):
+    assert collector.collect_cpu() == (None, None)
+    assert collector.collect_memory_mb() is None
+
+
+def test_collect_disks_classifies_and_skips_virtual(host, dirs):
+    dirs["/sys/block"] = ["loop0", "nvme0n1", "sda", "sdb"]
+    host["files"]["/sys/block/nvme0n1/size"] = "1000215216\n"  # ~512 ГБ
+    host["files"]["/sys/block/sda/size"] = "3907029168\n"       # ~2 ТБ HDD
+    host["files"]["/sys/block/sda/queue/rotational"] = "1\n"
+    host["files"]["/sys/block/sda/device/model"] = "ST2000DM008\n"
+    host["files"]["/sys/block/sdb/size"] = "500118192\n"        # SSD
+    host["files"]["/sys/block/sdb/queue/rotational"] = "0\n"
+    disks = collector.collect_disks()
+    assert [(d["name"], d["type"]) for d in disks] == [("nvme0n1", "nvme"), ("sda", "hdd"), ("sdb", "ssd")]
+    assert disks[1] == {"name": "sda", "model": "ST2000DM008", "size_gb": 2000.4, "type": "hdd"}
+
+
+def test_collect_mac_prefers_primary_interface(host, dirs):
+    host["commands"][IP_ROUTE] = "1.1.1.1 via 10.0.0.1 dev eth0 src 10.0.0.5\n"
+    host["files"]["/sys/class/net/eth0/address"] = "52:54:00:d7:b2:5b\n"
+    assert collector.collect_mac_address() == "52:54:00:d7:b2:5b"
+
+
+def test_collect_mac_falls_back_skipping_virtual(host, dirs):
+    # Нет маршрута — берём первый физический, пропуская docker0/lo с нулевым MAC
+    dirs["/sys/class/net"] = ["docker0", "eno1", "lo"]
+    host["files"]["/sys/class/net/docker0/address"] = "02:42: aa"  # виртуальный — пропускается по префиксу
+    host["files"]["/sys/class/net/eno1/address"] = "aa:bb:cc:dd:ee:ff\n"
+    assert collector.collect_mac_address() == "aa:bb:cc:dd:ee:ff"
+
+
+def test_device_uuid_prefers_machine_id(host):
+    assert collector.collect_device_uuid() is None
+    host["files"]["/sys/class/dmi/id/product_uuid"] = "DMI-UUID\n"
+    assert collector.collect_device_uuid() == "DMI-UUID"
+    host["files"]["/etc/machine-id"] = "b9e2c1a0f00d4e9b\n"
+    assert collector.collect_device_uuid() == "b9e2c1a0f00d4e9b"
+
+
+def test_collect_hardware_none_when_nothing(host, dirs, monkeypatch):
+    monkeypatch.setattr(collector.os, "name", "posix")
+    assert collector.collect_hardware() is None
+
+
+def test_collect_identity_only_with_flag(host, dirs, monkeypatch):
+    monkeypatch.setattr(collector.os, "name", "posix")
+    monkeypatch.setattr(collector.getpass, "getuser", lambda: "svc-hardening")
+    host["commands"][ID_GROUPS] = "domain users\nadmins\n".replace("\n", " ")
+    host["files"]["/etc/machine-id"] = "id123\n"
+    host["files"]["/etc/krb5.conf"] = "[libdefaults]\n  default_realm = CORP.EXAMPLE.RU\n"
+    without = collector.collect_hardware(collect_identity_pii=False)
+    assert "username" not in without
+    with_id = collector.collect_hardware(collect_identity_pii=True)
+    assert with_id["username"] == "svc-hardening"
+    assert with_id["domain"] == "CORP.EXAMPLE.RU"
+    assert with_id["domain_groups"] == ["domain", "users", "admins"]
+
+
+def test_windows_hardware_parses_json(monkeypatch):
+    monkeypatch.setattr(collector.os, "name", "nt")
+    payload = {
+        "mac_address": "AA-BB-CC-DD-EE-FF", "device_uuid": "WIN-UUID", "cpu_model": "Intel i7",
+        "cpu_cores": 8, "memory_mb": 16384, "board_vendor": "Dell", "board_product": "OptiPlex",
+        "disks": {"name": "Samsung SSD", "model": "Samsung SSD", "size_gb": 512.0, "type": "SSD"},
+    }
+    monkeypatch.setattr(collector, "run", lambda cmd: json.dumps(payload))
+    hw = collector.collect_hardware()
+    assert hw["device_uuid"] == "WIN-UUID" and hw["cpu_cores"] == 8
+    assert hw["disks"] == [{"name": "Samsung SSD", "model": "Samsung SSD", "size_gb": 512.0, "type": "SSD"}]
+
+
 def test_collect_facts_keeps_only_found_categories_and_payload_fields(host, monkeypatch):
     host["files"]["/proc/sys/net/ipv4/ip_forward"] = "0\n"
     host["files"]["/etc/ssh/sshd_config"] = "PermitRootLogin no\n"

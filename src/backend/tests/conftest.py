@@ -32,6 +32,7 @@ TRUNCATE_TABLES = [
     "scan_snapshots",
     "configs",
     "software",
+    "asset_inventory",
     "assets",
     "environments",
     "agent_hosts",

@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import AgentIdentity, get_agent_identity, get_db, get_pack_registry, normalize_hostname
-from app.models.asset import Asset
+from app.models.asset import Asset, AssetInventory
 from app.models.environment import Environment
 from app.models.hardening import (
     AgentCollection,
@@ -96,6 +96,33 @@ def _get_or_create_asset(db: Session, environment_id: str, payload, platform_tag
         db.add(asset)
     db.flush()
     return asset
+
+
+def _upsert_inventory(db: Session, asset: Asset, inventory, collected_at) -> None:
+    """Железо и (опц.) ПДн актива — одна строка на актив, перезаписывается прогоном.
+    inventory=None — агент инвентаризацию не прислал: прежнюю строку не трогаем (мог быть прогон пака)."""
+    if inventory is None:
+        return
+    fields = {
+        "mac_address": inventory.mac_address,
+        "device_uuid": inventory.device_uuid,
+        "cpu_model": inventory.cpu_model,
+        "cpu_cores": inventory.cpu_cores,
+        "memory_mb": inventory.memory_mb,
+        "board_vendor": inventory.board_vendor,
+        "board_product": inventory.board_product,
+        "disks": [d.model_dump() for d in inventory.disks] or None,
+        "username": inventory.username,
+        "domain": inventory.domain,
+        "domain_groups": inventory.domain_groups or None,
+        "collected_at": collected_at,
+    }
+    row = db.query(AssetInventory).filter(AssetInventory.asset_id == asset.id).first()
+    if row:
+        for key, value in fields.items():
+            setattr(row, key, value)
+    else:
+        db.add(AssetInventory(asset_id=asset.id, **fields))
 
 
 def _pack_runs(payload: IngestRequest) -> list[IngestPackRun]:
@@ -194,6 +221,7 @@ def ingest_payload(
 
     environment = _get_or_create_environment(db, organization_id, payload.environment)
     asset = _get_or_create_asset(db, str(environment.id), payload.asset, payload.platform_tags)
+    _upsert_inventory(db, asset, payload.inventory, now)
 
     db.query(Software).filter(Software.asset_id == asset.id).delete()
     # Находки БДУ актива посчитаны по прежнему списку ПО — пересчитаются при следующем открытии (bdu/matching.py)

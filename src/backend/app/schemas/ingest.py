@@ -21,6 +21,30 @@ class IngestAssetIn(BaseModel):
     criticality: str | None = None
 
 
+class IngestDiskIn(BaseModel):
+    name: str | None = None
+    model: str | None = None
+    size_gb: float | None = None
+    type: str | None = None  # ssd | hdd | nvme | unknown
+
+
+class IngestInventoryIn(BaseModel):
+    """Инвентаризация оборудования актива. Поля с ПДн (username, domain, domain_groups)
+    агент присылает только при запуске с --collect-identity."""
+
+    mac_address: str | None = Field(default=None, max_length=64)
+    device_uuid: str | None = Field(default=None, max_length=128)
+    cpu_model: str | None = None
+    cpu_cores: int | None = Field(default=None, ge=0)
+    memory_mb: int | None = Field(default=None, ge=0)
+    board_vendor: str | None = None
+    board_product: str | None = None
+    disks: list[IngestDiskIn] = Field(default_factory=list, max_length=64)
+    username: str | None = Field(default=None, max_length=256)
+    domain: str | None = Field(default=None, max_length=256)
+    domain_groups: list[str] = Field(default_factory=list, max_length=256)
+
+
 class IngestPackRef(BaseModel):
     id: str = Field(..., max_length=100)
     version: str = Field(..., max_length=32)
@@ -62,6 +86,9 @@ class IngestCollection(BaseModel):
 class IngestRequest(BaseModel):
     environment: str = Field(..., description="Имя окружения (создаётся, если не существует)")
     asset: IngestAssetIn
+    inventory: IngestInventoryIn | None = Field(
+        default=None, description="Инвентаризация оборудования актива; нет — агент её не собирал (сетевое устройство, выгрузка)",
+    )
     software: list[IngestSoftwareIn] = Field(default_factory=list)
     facts: dict = Field(default_factory=dict, description="Сырые факты по категориям: {'ssh': {'permit_root_login': 'no'}, ...}")
     scan_label: str | None = None

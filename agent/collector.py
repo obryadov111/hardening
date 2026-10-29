@@ -21,6 +21,7 @@ HARDENING_AGENT_API_KEY (предпочтительно — не остаётс�
 import argparse
 import base64
 import datetime
+import getpass
 import hashlib
 import hmac
 import http.client
@@ -55,6 +56,21 @@ def run(cmd: "list[str]") -> "str | None":
         return result.stdout
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+def read_stripped(path: str) -> "str | None":
+    text = read_file(path)
+    if text is None:
+        return None
+    text = text.strip()
+    return text or None
+
+
+def list_dir(path: str) -> "list[str]":
+    try:
+        return sorted(os.listdir(path))
+    except OSError:
+        return []
 
 
 # --- sshd_config -------------------------------------------------------
@@ -299,6 +315,189 @@ def collect_software() -> "list[dict]":
     return []
 
 
+# --- инвентаризация оборудования -------------------------------------------
+#
+# Паспорт «железа» хоста для инвентаризации активов. Только stdlib и чтение sysfs/procfs (без прав
+# root) на Linux; на Windows — один вызов PowerShell (CIM). Железо не влияет на оценку compliance —
+# это справочные данные актива. Имя пользователя/домен/группы (ПДн) собираются только при
+# --collect-identity, по умолчанию выключено.
+
+_VIRTUAL_DISK_PREFIXES = ("loop", "ram", "dm-", "sr", "fd", "zram", "md")
+_VIRTUAL_NET_PREFIXES = ("lo", "docker", "veth", "br-", "virbr", "vnet", "tap", "tun", "wg", "kube")
+_ZERO_MAC = "00:00:00:00:00:00"
+
+
+def primary_interface() -> "str | None":
+    """Сетевой интерфейс, через который хост ходит наружу (по таблице маршрутизации)."""
+    out = run(["ip", "-o", "route", "get", "1.1.1.1"])
+    if out:
+        m = re.search(r"\bdev\s+(\S+)", out)
+        if m:
+            return m.group(1)
+    return None
+
+
+def collect_mac_address() -> "str | None":
+    """MAC интерфейса с дефолтным маршрутом; иначе первый физический не-loopback интерфейс."""
+    preferred = primary_interface()
+    if preferred:
+        mac = read_stripped(f"/sys/class/net/{preferred}/address")
+        if mac and mac != _ZERO_MAC:
+            return mac
+    for name in list_dir("/sys/class/net"):
+        if name.startswith(_VIRTUAL_NET_PREFIXES):
+            continue
+        mac = read_stripped(f"/sys/class/net/{name}/address")
+        if mac and mac != _ZERO_MAC:
+            return mac
+    return None
+
+
+def collect_device_uuid() -> "str | None":
+    """Стабильный идентификатор устройства: machine-id (без прав) → DMI product_uuid (нужен root)."""
+    for path in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+        value = read_stripped(path)
+        if value:
+            return value
+    return read_stripped("/sys/class/dmi/id/product_uuid")
+
+
+def collect_cpu() -> "tuple[str | None, int | None]":
+    text = read_file("/proc/cpuinfo")
+    if not text:
+        return None, None
+    model = None
+    cores = 0
+    for line in text.splitlines():
+        key, sep, value = line.partition(":")
+        if not sep:
+            continue
+        key = key.strip().lower()
+        if key == "model name" and model is None:
+            model = value.strip()
+        elif key == "processor":
+            cores += 1
+    return model, cores or None
+
+
+def collect_memory_mb() -> "int | None":
+    text = read_file("/proc/meminfo")
+    if not text:
+        return None
+    m = re.search(r"^MemTotal:\s+(\d+)\s*kB", text, re.MULTILINE)
+    return int(m.group(1)) // 1024 if m else None
+
+
+def collect_motherboard() -> "tuple[str | None, str | None]":
+    return read_stripped("/sys/class/dmi/id/board_vendor"), read_stripped("/sys/class/dmi/id/board_name")
+
+
+def collect_disks() -> "list[dict]":
+    disks = []
+    for name in list_dir("/sys/block"):
+        if name.startswith(_VIRTUAL_DISK_PREFIXES):
+            continue
+        size = read_stripped(f"/sys/block/{name}/size")  # число секторов по 512 байт
+        if size is None:
+            continue
+        try:
+            size_gb = round(int(size) * 512 / 1_000_000_000, 1)
+        except ValueError:
+            continue
+        rotational = read_stripped(f"/sys/block/{name}/queue/rotational")
+        if name.startswith("nvme"):
+            kind = "nvme"
+        elif rotational == "0":
+            kind = "ssd"
+        elif rotational == "1":
+            kind = "hdd"
+        else:
+            kind = "unknown"
+        disks.append({
+            "name": name,
+            "model": read_stripped(f"/sys/block/{name}/device/model"),
+            "size_gb": size_gb,
+            "type": kind,
+        })
+    return disks
+
+
+def collect_identity() -> dict:
+    """Учётные данные (ПДн). Агент обычно работает как служба (root/SYSTEM), поэтому это учётная
+    запись, под которой он запущен, а не интерактивный пользователь."""
+    try:
+        username = getpass.getuser()
+    except Exception:  # getuser может бросить, если нет pwd-записи/переменных окружения
+        username = os.environ.get("USER") or os.environ.get("USERNAME")
+    domain = os.environ.get("USERDOMAIN")  # задаётся на Windows в домене
+    groups = []
+    gn = run(["id", "-Gn"])
+    if gn:
+        groups = [g for g in gn.split() if g]
+    if not domain:
+        krb = read_file("/etc/krb5.conf")
+        if krb:
+            m = re.search(r"^\s*default_realm\s*=\s*(\S+)", krb, re.MULTILINE)
+            if m:
+                domain = m.group(1)
+    return {"username": username, "domain": domain, "domain_groups": groups or None}
+
+
+WIN_HW_PS = (
+    "$ErrorActionPreference='SilentlyContinue';"
+    "$cs=Get-CimInstance Win32_ComputerSystem;"
+    "$bb=Get-CimInstance Win32_BaseBoard;"
+    "$cpu=Get-CimInstance Win32_Processor|Select-Object -First 1;"
+    "$uuid=(Get-CimInstance Win32_ComputerSystemProduct).UUID;"
+    "$mac=(Get-CimInstance Win32_NetworkAdapter -Filter 'NetEnabled=true'|Select-Object -First 1).MACAddress;"
+    "$disks=@(Get-CimInstance Win32_DiskDrive|ForEach-Object{[pscustomobject]@{"
+    "name=$_.Model;model=$_.Model;size_gb=[math]::Round($_.Size/1e9,1);type=$_.MediaType}});"
+    "[pscustomobject]@{mac_address=$mac;device_uuid=$uuid;cpu_model=$cpu.Name;"
+    "cpu_cores=$cpu.NumberOfLogicalProcessors;memory_mb=[math]::Round($cs.TotalPhysicalMemory/1MB);"
+    "board_vendor=$bb.Manufacturer;board_product=$bb.Product;disks=$disks}|ConvertTo-Json -Depth 4 -Compress"
+)
+
+
+def collect_windows_hardware() -> dict:
+    out = run(["powershell", "-NoProfile", "-NonInteractive", "-Command", WIN_HW_PS])
+    if not out:
+        return {}
+    try:
+        data = json.loads(out)
+    except ValueError:
+        return {}
+    disks = data.get("disks") or []
+    if isinstance(disks, dict):  # ConvertTo-Json отдаёт одиночный объект не списком
+        disks = [disks]
+    data["disks"] = [d for d in disks if isinstance(d, dict)]
+    return data
+
+
+def collect_hardware(collect_identity_pii: bool = False) -> "dict | None":
+    """Полный паспорт актива. None — ничего собрать не удалось (не затираем прежнюю инвентаризацию)."""
+    if os.name == "nt":
+        inventory = collect_windows_hardware()
+    else:
+        cpu_model, cpu_cores = collect_cpu()
+        board_vendor, board_product = collect_motherboard()
+        inventory = {
+            "mac_address": collect_mac_address(),
+            "device_uuid": collect_device_uuid(),
+            "cpu_model": cpu_model,
+            "cpu_cores": cpu_cores,
+            "memory_mb": collect_memory_mb(),
+            "board_vendor": board_vendor,
+            "board_product": board_product,
+            "disks": collect_disks(),
+        }
+    if collect_identity_pii:
+        inventory.update(collect_identity())
+    # Пустой словарь или только пустые значения — инвентаризацию не прислали.
+    if not any(v for v in inventory.values()):
+        return None
+    return inventory
+
+
 def collect_facts() -> dict:
     facts = {}
     ssh = collect_ssh_facts()
@@ -332,6 +531,7 @@ def build_payload(args: argparse.Namespace) -> dict:
             "asset_type": args.asset_type,
             "criticality": args.criticality,
         },
+        "inventory": collect_hardware(collect_identity_pii=args.collect_identity),
         "software": collect_software(),
         "facts": collect_facts(),
         "scan_label": args.scan_label,
@@ -824,6 +1024,8 @@ def parse_args(argv: "list[str]") -> argparse.Namespace:
     parser.add_argument("--asset-type", default="server", help="Тип актива (по умолчанию: server)")
     parser.add_argument("--criticality", default="medium", choices=["low", "medium", "high", "critical"])
     parser.add_argument("--scan-label", default=None, help="Метка прогона для отчёта")
+    parser.add_argument("--collect-identity", action="store_true",
+                        help="Собирать учётные данные (имя пользователя, домен, группы) — это ПДн; по умолчанию выключено")
     parser.add_argument("--dry-run", action="store_true", help="Собрать факты и вывести payload, не отправляя на бэкенд")
     parser.add_argument("--out", default=None,
                         help="Изолированный сегмент: сохранить прогон в файл, подписанный ключом агента, вместо отправки "
