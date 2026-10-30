@@ -90,6 +90,9 @@ Start-ScheduledTask -TaskName "Hardening agent"
 
 ## Массовая установка
 
+Пошагово для администратора домена (GPO по кликам, пилот, раскатка волнами, Ansible, разбор ошибок;
+проверено на стенде AD) — [agent-domain-install.md](agent-domain-install.md).
+
 ### Windows — групповая политика (GPO)
 
 Сценарий запуска компьютера `gpo-startup.ps1` (страница «Агенты» → «Скачать агент»; в архиве —
