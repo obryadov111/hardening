@@ -21,7 +21,6 @@ HARDENING_AGENT_API_KEY (предпочтительно — не остаётс�
 import argparse
 import base64
 import datetime
-import getpass
 import hashlib
 import hmac
 import http.client
@@ -422,24 +421,62 @@ def collect_disks() -> "list[dict]":
     return disks
 
 
-def collect_identity() -> dict:
-    """Учётные данные (ПДн). Агент обычно работает как служба (root/SYSTEM), поэтому это учётная
-    запись, под которой он запущен, а не интерактивный пользователь."""
+# Кто работает за ПК (иначе — кто входил последним) и его группы; от SYSTEM группы доменной учётки даёт
+# S4U-вход по неявному UPN (имя@домен). Вывод — Base64(UTF-8): кириллица не зависит от кодовой страницы консоли.
+WIN_IDENTITY_PS = (
+    "$ErrorActionPreference='SilentlyContinue';$cs=Get-CimInstance Win32_ComputerSystem;$u=$cs.UserName;"
+    "if(-not $u){$u=(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Authentication\\LogonUI').LastLoggedOnSAMUser};"
+    "$d=$null;$g=@();if($cs.PartOfDomain){$d=$cs.Domain;"
+    "if($u -and $u.Split('\\')[0] -notin @('.',$env:COMPUTERNAME)){try{"
+    "$id=New-Object Security.Principal.WindowsIdentity(($u.Split('\\')[-1])+'@'+$d);"
+    "$g=@($id.Groups|ForEach-Object{try{$_.Translate([Security.Principal.NTAccount]).Value}catch{}})}catch{}}};"
+    "$j=[pscustomobject]@{username=$u;domain=$d;domain_groups=$g}|ConvertTo-Json -Compress;"
+    "[Console]::Out.Write([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($j)))"
+)
+SYSTEM_USERS = {"root", "reboot", "shutdown", "wtmp"}
+
+
+def collect_windows_identity() -> dict:
+    encoded = base64.b64encode(WIN_IDENTITY_PS.encode("utf-16-le")).decode("ascii")
+    out = run(["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], timeout=60)
     try:
-        username = getpass.getuser()
-    except Exception:  # getuser может бросить, если нет pwd-записи/переменных окружения
-        username = os.environ.get("USER") or os.environ.get("USERNAME")
-    domain = os.environ.get("USERDOMAIN")  # задаётся на Windows в домене
+        data = json.loads(base64.b64decode(out or "").decode("utf-8"))
+    except ValueError:
+        return {"username": None, "domain": None, "domain_groups": None}
+    groups = data.get("domain_groups") or []
+    if isinstance(groups, str):  # ConvertTo-Json отдаёт одиночный элемент не списком
+        groups = [groups]
+    # «Все», NT AUTHORITY\… есть у любого входа — оставляем группы домена и BUILTIN (локальный админ)
+    groups = [g for g in groups if "\\" in g and not g.upper().startswith("NT AUTHORITY\\")]
+    return {"username": data.get("username"), "domain": data.get("domain"), "domain_groups": groups or None}
+
+
+def linux_interactive_user() -> "str | None":
+    """Первый вошедший пользователь (who), иначе последний входивший (last); root и служебные записи — мимо."""
+    for cmd in (["who"], ["last", "-w", "-n", "50"]):
+        for line in (run(cmd) or "").splitlines():
+            name = line.split()[0] if line.split() else ""
+            if name and name not in SYSTEM_USERS:
+                return name
+    return None
+
+
+def collect_identity() -> dict:
+    """Учётные данные (ПДн) сотрудника за компьютером. Агент работает как служба (root/SYSTEM) — его
+    собственная учётная запись не нужна, поэтому берётся интерактивный или последний вошедший пользователь."""
+    if os.name == "nt":
+        return collect_windows_identity()
+    username = linux_interactive_user()
     groups = []
-    gn = run(["id", "-Gn"])
-    if gn:
-        groups = [g for g in gn.split() if g]
-    if not domain:
-        krb = read_file("/etc/krb5.conf")
-        if krb:
-            m = re.search(r"^\s*default_realm\s*=\s*(\S+)", krb, re.MULTILINE)
-            if m:
-                domain = m.group(1)
+    if username:
+        gz = run(["id", "-Gnz", username])  # NUL-разделитель: в именах групп AD бывают пробелы
+        groups = [g for g in gz.split("\0") if g] if gz else (run(["id", "-Gn", username]) or "").split()
+    domain = None
+    krb = read_file("/etc/krb5.conf")
+    if krb:
+        m = re.search(r"^\s*default_realm\s*=\s*(\S+)", krb, re.MULTILINE)
+        if m:
+            domain = m.group(1)
     return {"username": username, "domain": domain, "domain_groups": groups or None}
 
 

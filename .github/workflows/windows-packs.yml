@@ -176,6 +176,8 @@ jobs:
           $enrolls = @(Get-Content ci-requests.jsonl | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.path -eq "/api/agent/enroll" })
           if ($enrolls.Count -ne 1) { Write-Output "регистраций: $($enrolls.Count), ожидалась одна"; exit 1 }
           if (@(Select-String -Path "$state\gpo-startup.log" -Pattern "установлен агент").Count -ne 1) { Write-Output "агент ставился повторно"; exit 1 }
+          # ответ агента (UTF-8) в журнале читается, а не кракозябрами кодовой страницы консоли
+          if (-not (Select-String -Path "$state\gpo-startup.log" -Pattern "зарегистрирован на сервере" -Encoding UTF8 -Quiet)) { Write-Output "ответ агента в журнале нечитаем"; exit 1 }
           $task = Get-ScheduledTask -TaskName "Hardening agent"
           Write-Output "задача: $($task.Principal.UserId) $($task.Actions[0].Execute) $($task.Actions[0].Arguments); разброс $($task.Triggers[0].RandomDelay); $($task.Triggers[0].CimClass.CimClassName)"
           if ($task.Actions[0].Execute -ne "$install\hardening-agent.exe" -or $task.Triggers[0].RandomDelay -ne "PT1H" -or

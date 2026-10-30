@@ -10,6 +10,7 @@
 #   hardening_pin: "sha256//..."                # отпечаток ключа сервера (есть в version.json)
 #   hardening_environment: prod                 # необязательно; также hardening_criticality, hardening_proxy
 #   hardening_schedule: weekly                  # необязательно: daily (по умолчанию) или weekly — понедельник
+#   hardening_collect_identity: true            # необязательно: сотрудник за ПК, домен, группы (ПДн; по умолчанию нет)
 #
 # Повторный запуск безопасен: агент обновляется до опубликованной версии, файл настроек приводится к
 # переменным, зарегистрированный хост не регистрируется заново. Архив агента проверяется по SHA-256
@@ -25,6 +26,7 @@
     hardening_ca_file: ""
     hardening_run_now: true
     hardening_schedule: daily
+    hardening_collect_identity: false
     hardening_validate_certs: true
     hardening_src: /opt/hardening-agent-src
   tasks:

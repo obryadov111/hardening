@@ -182,7 +182,6 @@ def test_primary_ip_without_network_is_none(monkeypatch):
 # ---------- инвентаризация оборудования ----------
 
 IP_ROUTE = ("ip", "-o", "route", "get", "1.1.1.1")
-ID_GROUPS = ("id", "-Gn")
 
 
 @pytest.fixture
@@ -253,16 +252,39 @@ def test_collect_hardware_none_when_nothing(host, dirs, monkeypatch):
 
 def test_collect_identity_only_with_flag(host, dirs, monkeypatch):
     monkeypatch.setattr(collector.os, "name", "posix")
-    monkeypatch.setattr(collector.getpass, "getuser", lambda: "svc-hardening")
-    host["commands"][ID_GROUPS] = "domain users\nadmins\n".replace("\n", " ")
+    host["commands"][("who",)] = "root     tty1  2026-10-30 08:00\nivanov   pts/0 2026-10-30 09:00 (10.0.0.5)\n"
+    host["commands"][("id", "-Gnz", "ivanov")] = "domain users\0admins\0"
     host["files"]["/etc/machine-id"] = "id123\n"
     host["files"]["/etc/krb5.conf"] = "[libdefaults]\n  default_realm = CORP.EXAMPLE.RU\n"
     without = collector.collect_hardware(collect_identity_pii=False)
     assert "username" not in without
     with_id = collector.collect_hardware(collect_identity_pii=True)
-    assert with_id["username"] == "svc-hardening"
+    assert with_id["username"] == "ivanov"  # сотрудник, а не root, под которым работает агент
     assert with_id["domain"] == "CORP.EXAMPLE.RU"
-    assert with_id["domain_groups"] == ["domain", "users", "admins"]
+    assert with_id["domain_groups"] == ["domain users", "admins"]
+
+
+def test_linux_identity_falls_back_to_last_login(host, monkeypatch):
+    monkeypatch.setattr(collector.os, "name", "posix")
+    host["commands"][("who",)] = ""
+    host["commands"][("last", "-w", "-n", "50")] = "reboot   system boot  6.8.0\npetrov   pts/1  10.0.0.7\n\nwtmp begins Mon\n"
+    host["commands"][("id", "-Gn", "petrov")] = "petrov sudo"  # нет -z (BusyBox)
+    assert collector.collect_identity() == {"username": "petrov", "domain": None, "domain_groups": ["petrov", "sudo"]}
+    host["commands"][("last", "-w", "-n", "50")] = "reboot   system boot  6.8.0\n"
+    assert collector.collect_identity()["username"] is None
+
+
+def test_windows_identity_decodes_base64_and_drops_builtin_principals(monkeypatch):
+    import base64
+    monkeypatch.setattr(collector.os, "name", "nt")
+    data = {"username": "LAB\\Иванов", "domain": "lab.local", "domain_groups": [
+        "LAB\\Пользователи домена", "Все", "BUILTIN\\Администраторы", "NT AUTHORITY\\СЕТЬ"]}
+    encoded = base64.b64encode(json.dumps(data, ensure_ascii=False).encode("utf-8")).decode()
+    monkeypatch.setattr(collector, "run", lambda cmd, timeout=15: encoded)
+    assert collector.collect_identity() == {"username": "LAB\\Иванов", "domain": "lab.local",
+                                            "domain_groups": ["LAB\\Пользователи домена", "BUILTIN\\Администраторы"]}
+    monkeypatch.setattr(collector, "run", lambda cmd, timeout=15: None)  # powershell не выполнился
+    assert collector.collect_identity() == {"username": None, "domain": None, "domain_groups": None}
 
 
 def test_windows_hardware_parses_json(monkeypatch):

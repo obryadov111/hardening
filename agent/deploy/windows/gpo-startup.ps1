@@ -6,6 +6,8 @@
   этот файл, параметры (одной строкой):
     -Server https://audit.example.ru -SiteKey yak_... -PackPublicKey ... -Pin sha256//... -Share \\corp.local\NETLOGON\Hardening
   -Schedule Weekly — прогон раз в неделю (понедельник) вместо ежедневного: для аудита как проекта.
+  -CollectIdentity — собирать сотрудника за ПК (или последнего вошедшего), домен и его группы: это ПДн,
+     включайте, только если сбор согласован (по умолчанию выключено).
 
 Что делает:
   1. Берёт hardening-agent.exe из общей папки (-Share: тысяча ПК не качает файл из интернета) или с сервера и
@@ -29,12 +31,15 @@ param(
     [string]$Environment = "prod",
     [string]$Proxy = "",
     [ValidateSet("Daily", "Weekly")][string]$Schedule = "Daily",
+    [switch]$CollectIdentity,
     [string]$InstallDir = "C:\Program Files\Hardening",
     [string]$StateDir = "C:\ProgramData\HardeningAgent",
     [switch]$AllowHttp  # только для проверки (CI, стенд): сервер по http://localhost
 )
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+# Агент пишет в UTF-8: без этого его ответы попадают в журнал кракозябрами (кодовая страница консоли)
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
 $Server = $Server.TrimEnd("/")
 $exe = Join-Path $InstallDir "hardening-agent.exe"
 $log = Join-Path $StateDir "gpo-startup.log"
@@ -105,6 +110,7 @@ try {
     # 4. Задача от SYSTEM, разброс запуска до часа — тысяча ПК не обращается к серверу разом
     $arguments = "--api-url $Server --environment $Environment --use-packs --state-dir `"$StateDir`""
     if ($AllowHttp -and $Server.StartsWith("http://")) { $arguments += " --allow-http" }
+    if ($CollectIdentity) { $arguments += " --collect-identity" }
     $triggerClass = if ($Schedule -eq "Weekly") { "MSFT_TaskWeeklyTrigger" } else { "MSFT_TaskDailyTrigger" }
     $existing = Get-ScheduledTask -TaskName "Hardening agent" -ErrorAction SilentlyContinue
     if (-not $existing -or $existing.Actions[0].Execute -ne $exe -or $existing.Actions[0].Arguments -ne $arguments -or
