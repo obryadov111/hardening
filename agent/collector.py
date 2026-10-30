@@ -48,9 +48,9 @@ def read_file(path: str) -> "str | None":
         return None
 
 
-def run(cmd: "list[str]") -> "str | None":
+def run(cmd: "list[str]", timeout: int = 15) -> "str | None":
     try:
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=15)
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)
         if result.returncode != 0:
             return None
         return result.stdout
@@ -450,16 +450,34 @@ WIN_HW_PS = (
     "$cpu=Get-CimInstance Win32_Processor|Select-Object -First 1;"
     "$uuid=(Get-CimInstance Win32_ComputerSystemProduct).UUID;"
     "$mac=(Get-CimInstance Win32_NetworkAdapter -Filter 'NetEnabled=true'|Select-Object -First 1).MACAddress;"
-    "$disks=@(Get-CimInstance Win32_DiskDrive|ForEach-Object{[pscustomobject]@{"
-    "name=$_.Model;model=$_.Model;size_gb=[math]::Round($_.Size/1e9,1);type=$_.MediaType}});"
+    "$disks=@(Get-CimInstance -Namespace root/Microsoft/Windows/Storage MSFT_PhysicalDisk|ForEach-Object{[pscustomobject]@{"
+    "name=$_.FriendlyName;model=$_.Model;size_gb=[math]::Round($_.Size/1e9,1);media_type=$_.MediaType;bus_type=$_.BusType}});"
     "[pscustomobject]@{mac_address=$mac;device_uuid=$uuid;cpu_model=$cpu.Name;"
     "cpu_cores=$cpu.NumberOfLogicalProcessors;memory_mb=[math]::Round($cs.TotalPhysicalMemory/1MB);"
     "board_vendor=$bb.Manufacturer;board_product=$bb.Product;disks=$disks}|ConvertTo-Json -Depth 4 -Compress"
 )
 
 
+# MSFT_PhysicalDisk: MediaType 3 — HDD, 4 — SSD; BusType 17 — NVMe
+WIN_MEDIA_TYPES = {3: "hdd", 4: "ssd"}
+WIN_BUS_NVME = 17
+
+
+def win_disk_type(disk: dict) -> str:
+    if disk.get("bus_type") == WIN_BUS_NVME:
+        return "nvme"
+    return WIN_MEDIA_TYPES.get(disk.get("media_type"), "unknown")
+
+
+def is_blank_uuid(value: "str | None") -> bool:
+    """Нулевой или FFFF… UUID — прошивка его не задала (ВМ, дешёвые платы): это не идентификатор устройства."""
+    digits = (value or "").replace("-", "").upper()
+    return not digits or set(digits) <= {"0"} or set(digits) <= {"F"}
+
+
 def collect_windows_hardware() -> dict:
-    out = run(["powershell", "-NoProfile", "-NonInteractive", "-Command", WIN_HW_PS])
+    # Пять запросов CIM занимают ~10 с на прогретой машине, при загрузке ПК (первый прогон из GPO) — дольше
+    out = run(["powershell", "-NoProfile", "-NonInteractive", "-Command", WIN_HW_PS], timeout=120)
     if not out:
         return {}
     try:
@@ -469,7 +487,12 @@ def collect_windows_hardware() -> dict:
     disks = data.get("disks") or []
     if isinstance(disks, dict):  # ConvertTo-Json отдаёт одиночный объект не списком
         disks = [disks]
-    data["disks"] = [d for d in disks if isinstance(d, dict)]
+    data["disks"] = [
+        {"name": d.get("name"), "model": d.get("model"), "size_gb": d.get("size_gb"), "type": win_disk_type(d)}
+        for d in disks if isinstance(d, dict)
+    ]
+    if is_blank_uuid(data.get("device_uuid")):
+        data["device_uuid"] = None
     return data
 
 

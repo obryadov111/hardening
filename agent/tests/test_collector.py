@@ -18,7 +18,7 @@ def host(monkeypatch):
     """Подменённый хост: files — содержимое файлов, commands — вывод команд (None — команда не выполнилась)."""
     state = {"files": {}, "commands": {}}
     monkeypatch.setattr(collector, "read_file", lambda path: state["files"].get(path))
-    monkeypatch.setattr(collector, "run", lambda cmd: state["commands"].get(tuple(cmd)))
+    monkeypatch.setattr(collector, "run", lambda cmd, timeout=15: state["commands"].get(tuple(cmd)))
     return state
 
 
@@ -270,12 +270,32 @@ def test_windows_hardware_parses_json(monkeypatch):
     payload = {
         "mac_address": "AA-BB-CC-DD-EE-FF", "device_uuid": "WIN-UUID", "cpu_model": "Intel i7",
         "cpu_cores": 8, "memory_mb": 16384, "board_vendor": "Dell", "board_product": "OptiPlex",
-        "disks": {"name": "Samsung SSD", "model": "Samsung SSD", "size_gb": 512.0, "type": "SSD"},
+        "disks": {"name": "Samsung SSD", "model": "Samsung SSD", "size_gb": 512.0, "media_type": 4, "bus_type": 11},
     }
-    monkeypatch.setattr(collector, "run", lambda cmd: json.dumps(payload))
+    calls = []
+    monkeypatch.setattr(collector, "run", lambda cmd, timeout=15: calls.append(timeout) or json.dumps(payload))
     hw = collector.collect_hardware()
     assert hw["device_uuid"] == "WIN-UUID" and hw["cpu_cores"] == 8
-    assert hw["disks"] == [{"name": "Samsung SSD", "model": "Samsung SSD", "size_gb": 512.0, "type": "SSD"}]
+    assert hw["disks"] == [{"name": "Samsung SSD", "model": "Samsung SSD", "size_gb": 512.0, "type": "ssd"}]
+    assert calls == [120]  # при загрузке ПК CIM отвечает дольше 15 с
+
+
+def test_windows_disk_types_and_blank_uuid(monkeypatch):
+    monkeypatch.setattr(collector.os, "name", "nt")
+    payload = {
+        "device_uuid": "00000000-0000-0000-0000-000000000000", "cpu_cores": 4,
+        "disks": [
+            {"name": "nvme", "model": "m", "size_gb": 1.0, "media_type": 4, "bus_type": 17},
+            {"name": "hdd", "model": "m", "size_gb": 1.0, "media_type": 3, "bus_type": 11},
+            {"name": "vm", "model": "m", "size_gb": 1.0, "media_type": 0, "bus_type": 10},
+        ],
+    }
+    monkeypatch.setattr(collector, "run", lambda cmd, timeout=15: json.dumps(payload))
+    hw = collector.collect_hardware()
+    assert [d["type"] for d in hw["disks"]] == ["nvme", "hdd", "unknown"]
+    assert hw["device_uuid"] is None
+    assert collector.is_blank_uuid("FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF")
+    assert not collector.is_blank_uuid("4C4C4544-0046-3510-8058-B4C04F4B4E32")
 
 
 def test_collect_facts_keeps_only_found_categories_and_payload_fields(host, monkeypatch):
