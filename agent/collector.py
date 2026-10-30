@@ -442,13 +442,13 @@ def collect_windows_identity() -> dict:
     try:
         data = json.loads(base64.b64decode(out or "").decode("utf-8"))
     except ValueError:
-        return {"username": None, "domain": None, "domain_groups": None}
+        return {"username": None, "domain": None, "domain_groups": []}
     groups = data.get("domain_groups") or []
     if isinstance(groups, str):  # ConvertTo-Json отдаёт одиночный элемент не списком
         groups = [groups]
     # «Все», NT AUTHORITY\… есть у любого входа — оставляем группы домена и BUILTIN (локальный админ)
     groups = [g for g in groups if "\\" in g and not g.upper().startswith("NT AUTHORITY\\")]
-    return {"username": data.get("username"), "domain": data.get("domain"), "domain_groups": groups or None}
+    return {"username": data.get("username"), "domain": data.get("domain"), "domain_groups": groups}
 
 
 def linux_interactive_user() -> "str | None":
@@ -464,6 +464,7 @@ def linux_interactive_user() -> "str | None":
 def collect_identity() -> dict:
     """Учётные данные (ПДн) сотрудника за компьютером. Агент работает как служба (root/SYSTEM) — его
     собственная учётная запись не нужна, поэтому берётся интерактивный или последний вошедший пользователь."""
+    # domain_groups — всегда список (пустой — групп нет): сервер не принимает null (HTTP 422 на весь отчёт)
     if os.name == "nt":
         return collect_windows_identity()
     username = linux_interactive_user()
@@ -477,7 +478,7 @@ def collect_identity() -> dict:
         m = re.search(r"^\s*default_realm\s*=\s*(\S+)", krb, re.MULTILINE)
         if m:
             domain = m.group(1)
-    return {"username": username, "domain": domain, "domain_groups": groups or None}
+    return {"username": username, "domain": domain, "domain_groups": groups}
 
 
 WIN_HW_PS = (

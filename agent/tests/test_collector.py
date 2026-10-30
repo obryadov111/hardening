@@ -271,7 +271,7 @@ def test_linux_identity_falls_back_to_last_login(host, monkeypatch):
     host["commands"][("id", "-Gn", "petrov")] = "petrov sudo"  # нет -z (BusyBox)
     assert collector.collect_identity() == {"username": "petrov", "domain": None, "domain_groups": ["petrov", "sudo"]}
     host["commands"][("last", "-w", "-n", "50")] = "reboot   system boot  6.8.0\n"
-    assert collector.collect_identity()["username"] is None
+    assert collector.collect_identity() == {"username": None, "domain": None, "domain_groups": []}  # не null: сервер ждёт список
 
 
 def test_windows_identity_decodes_base64_and_drops_builtin_principals(monkeypatch):
@@ -284,7 +284,7 @@ def test_windows_identity_decodes_base64_and_drops_builtin_principals(monkeypatc
     assert collector.collect_identity() == {"username": "LAB\\Иванов", "domain": "lab.local",
                                             "domain_groups": ["LAB\\Пользователи домена", "BUILTIN\\Администраторы"]}
     monkeypatch.setattr(collector, "run", lambda cmd, timeout=15: None)  # powershell не выполнился
-    assert collector.collect_identity() == {"username": None, "domain": None, "domain_groups": None}
+    assert collector.collect_identity() == {"username": None, "domain": None, "domain_groups": []}
 
 
 def test_windows_hardware_parses_json(monkeypatch):
