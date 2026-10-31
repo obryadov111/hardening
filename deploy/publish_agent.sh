@@ -26,6 +26,49 @@ if [[ -n "$(git status --porcelain -- agent docs/agent-install.md)" ]]; then
 fi
 AGENT_COMMIT="$(git log -1 --format=%H -- agent)"
 VERSION="$(git log -1 --format=%cd --date=format:%Y.%m.%d -- agent)-$(git rev-parse --short "$AGENT_COMMIT")"
+
+# Отпечаток ключа сервера (HARDENING_PIN_SHA256) — до замены файлов в downloads/.
+# Иначе обрыв по set -e оставляет новые архивы и старый version.json.
+# С самого сервера публичный адрес домена не отвечает (нет обратного NAT), и TCP
+# без предела висит до системного таймаута. Ждём 15 с и повторяем на 127.0.0.1
+# с тем же SNI: nginx слушает 443 на хосте и отдаёт тот же сертификат.
+# $1 — host:port, $2 — имя SNI. Код возврата — код конвейера (pipefail в подшелле):
+# без сертификата base64 печатает хеш пустого ввода, это не ключ сервера.
+server_spki_sha256() {
+  (
+    set -o pipefail
+    timeout 15 openssl s_client -connect "$1" -servername "$2" </dev/null 2>/dev/null \
+      | openssl x509 -pubkey -noout 2>/dev/null \
+      | openssl pkey -pubin -outform der 2>/dev/null \
+      | openssl dgst -sha256 -binary 2>/dev/null \
+      | base64 2>/dev/null
+  )
+}
+
+PIN=""
+if [[ -n "${HARDENING_DOMAIN:-}" ]]; then
+  pin_via=""
+  for connect in "${HARDENING_DOMAIN}:443" "127.0.0.1:443"; do
+    if [[ "$connect" == "127.0.0.1:443" && "$connect" != "${HARDENING_DOMAIN}:443" ]]; then
+      echo "==> публичный адрес ${HARDENING_DOMAIN}:443 недоступен, повтор через 127.0.0.1 (SNI ${HARDENING_DOMAIN})" >&2
+    fi
+    if pin_b64="$(server_spki_sha256 "$connect" "$HARDENING_DOMAIN")" && [[ -n "$pin_b64" ]]; then
+      PIN="sha256//${pin_b64}"
+      pin_via="$connect"
+      break
+    fi
+  done
+  if [[ -z "$PIN" ]]; then
+    echo "Не удалось получить отпечаток ключа ${HARDENING_DOMAIN} ни с публичного адреса, ни с 127.0.0.1:443 — файлы не заменены" >&2
+    exit 1
+  fi
+  if [[ "$pin_via" == "127.0.0.1:443" ]]; then
+    echo "==> отпечаток ключа сервера получен через 127.0.0.1:443 (SNI ${HARDENING_DOMAIN})"
+  else
+    echo "==> отпечаток ключа сервера получен через публичный адрес ${pin_via}"
+  fi
+fi
+
 mkdir -p "$OUT"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -67,13 +110,6 @@ elif [[ -f "$OUT/hardening-agent.exe" ]]; then
   echo "==> Windows: сборки CI с этим кодом агента ещё нет — оставлен прежний .exe (${WIN_VERSION:-версия неизвестна}); повторите после CI" >&2
 else
   echo "==> Windows: сборки CI с этим кодом агента ещё нет — .exe не опубликован; повторите после CI" >&2
-fi
-
-# --- отпечаток ключа сервера: агент закрепляет его (HARDENING_PIN_SHA256) ---
-PIN=""
-if [[ -n "${HARDENING_DOMAIN:-}" ]]; then
-  PIN="sha256//$(openssl s_client -connect "${HARDENING_DOMAIN}:443" -servername "$HARDENING_DOMAIN" </dev/null 2>/dev/null \
-    | openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | base64)"
 fi
 
 python3 - "$OUT" "$LINUX_VERSION" "$WIN_VERSION" "$PIN" "${HARDENING_DOMAIN:+https://${HARDENING_DOMAIN}}" <<'PY'
