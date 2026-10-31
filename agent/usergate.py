@@ -395,7 +395,11 @@ class _TimeoutTransport(xmlrpc.client.Transport):
 
 
 class PipeReader:
-    """Чтение канала в фоне: select() на Windows не работает с трубами ssh."""
+    """Чтение канала в фоне: select() на Windows не работает с трубами ssh.
+
+    BufferedReader.read(n) у трубы subprocess ждёт n байт или EOF. Короткое приглашение
+    `ssh -tt` (канал не закрывается) так не приходит никогда, и сеанс отваливается по таймауту.
+    read1 делает один read() сырого fd и отдаёт то, что уже есть."""
 
     def __init__(self, stream):
         self.stream = stream
@@ -409,7 +413,8 @@ class PipeReader:
     def _run(self):
         try:
             while True:
-                data = self.stream.read(65536)
+                # Фейковые трубы тестов отдают кусок из read(); у настоящего Popen есть read1.
+                data = self.stream.read1(65536) if hasattr(self.stream, "read1") else self.stream.read(65536)
                 with self.cv:
                     if not data:
                         self.eof = True

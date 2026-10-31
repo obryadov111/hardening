@@ -5,7 +5,10 @@
 """
 import json
 import os
+import subprocess
+import sys
 import threading
+import time
 import xmlrpc.client
 from pathlib import Path
 
@@ -237,6 +240,26 @@ def test_short_terminal_pager_is_removed_but_text_stays():
     text = usergate.clean_terminal(_read("session-h24.raw").decode("utf-8", "replace"))
     assert "--more--" not in text and "\x1b" not in text
     assert "Any ICMP" in text and "ha" in text and "allowed-addresses" in text
+
+
+def test_pipe_reader_sees_a_short_prompt_before_the_child_exits():
+    """Настоящий Popen: приглашение без перевода строки и без EOF. read(65536) ждал бы 64 КБ."""
+    proc = subprocess.Popen(
+        [sys.executable, "-c",
+         "import sys,time; sys.stdout.buffer.write(b'Admin@lab>'); sys.stdout.buffer.flush(); time.sleep(60)"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    reader = usergate.PipeReader(proc.stdout)
+    started = time.monotonic()
+    try:
+        data, eof = b"", False
+        while time.monotonic() - started < 3 and not data and not eof:
+            data, eof = reader.read_available(0.2)
+        elapsed = time.monotonic() - started
+    finally:
+        proc.kill()
+        proc.wait()
+    assert data == b"Admin@lab>" and eof is False and elapsed < 3
 
 
 def test_exec_capture_needs_open_stdin_and_error_line_is_a_failure():
