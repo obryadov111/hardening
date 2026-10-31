@@ -436,6 +436,8 @@ def test_pack_filter_and_wrong_pack_key(pack_files):
 
 @pytest.mark.parametrize(("extra", "message"), [
     (["--offline-dir", "/tmp", "--ssh-host", "10.0.0.1"], "взаимоисключающие"),
+    (["--device-config", "ug.json", "--ssh-host", "10.0.0.1"], "взаимоисключающие"),
+    (["--device-config", "ug.json", "--offline-dir", "/tmp", "--hostname", "ug"], "взаимоисключающие"),
 ])
 def test_offline_dir_conflicts(pack_files, extra, message):
     with pytest.raises(SystemExit, match=message):

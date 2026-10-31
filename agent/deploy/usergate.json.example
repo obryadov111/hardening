@@ -1,0 +1,9 @@
+{
+  "host": "10.77.0.20",
+  "user": "Admin",
+  "hostname": "ug1",
+  "password_file": "/etc/hardening-agent/usergate.pass",
+  "ssh_port": 2200,
+  "xmlrpc_port": 4040,
+  "known_hosts": "/var/lib/hardening-agent/known_hosts"
+}

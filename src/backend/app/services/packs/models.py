@@ -34,6 +34,19 @@ CLI_READONLY_RE = re.compile(
     r"|^iplir option get [a-z-]+$"
     r"|^version( full)?$"
 )
+# Методы XML-RPC UserGate только на чтение. Тот же набор, что USERGATE_READONLY_METHODS в agent/usergate.py:
+# агент не вызовет метод вне списка, даже если он есть в подписанном манифесте.
+USERGATE_XMLRPC_READONLY = frozenset({
+    "v2.core.login",
+    "v2.core.logout",
+    "v2.core.license.info",
+    "v2.core.administrator.config.get",
+    "v1.netmanager.zones.list",
+    "v1.firewall.rules.list",
+    "v1.dos.profiles.list",
+})
+_XMLRPC_METHOD_RE = re.compile(r"^[a-z][a-z0-9]*(\.[a-z][a-z0-9_]*)+$")
+_XMLRPC_WRITE_RE = re.compile(r"(^|\.)(add|update|delete|set|remove|start|stop|create|edit|import|execute)(\.|$)")
 
 Severity = Literal["critical", "high", "medium", "low", "info"]
 # inventory — только обнаружение платформы; draft — проверки написаны по документации и НЕ подтверждены на
@@ -465,6 +478,9 @@ class Pack(StrictModel):
     detect: list[DetectRule] = Field(default_factory=list)  # обязателен, кроме manual: там платформу выбирает аудитор
     checks: list[Check] = Field(default_factory=list)
     firmware: Firmware | None = None  # только сетевые устройства (transport: ssh) и проверка по опросу (manual)
+    # Методы XML-RPC, которые агент имеет право вызвать для этого пака (только чтение, белый список).
+    # Пусто у всех паков, кроме тех, где устройство отдаёт те же факты по API (UserGate).
+    xmlrpc_methods: list[str] = Field(default_factory=list)
 
     @field_validator("pack")
     @classmethod
@@ -499,6 +515,14 @@ class Pack(StrictModel):
 
         if self.firmware is not None and self.transport == "local":
             raise ValueError("firmware — для сетевых устройств (transport: ssh) и опроса (manual); ПО хоста агент собирает сам")
+        if self.xmlrpc_methods and self.transport != "ssh":
+            raise ValueError("xmlrpc_methods допустимы только при transport: ssh")
+        rejected = [
+            name for name in self.xmlrpc_methods
+            if not _XMLRPC_METHOD_RE.match(name) or _XMLRPC_WRITE_RE.search(name) or name not in USERGATE_XMLRPC_READONLY
+        ]
+        if rejected:
+            raise ValueError("xmlrpc_methods: только известные методы на чтение, отклонено: " + ", ".join(rejected))
         all_probes = [
             leaf
             for probe in [check.probe for check in self.checks] + [rule.probe for rule in self.detect]

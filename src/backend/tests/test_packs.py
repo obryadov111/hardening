@@ -535,6 +535,32 @@ def test_manual_packs_have_questions_only_and_no_detect():
                                                   "probe": {"type": "manual", "answer": "choice", "question": "Что выбрано?"}}]))
 
 
+def test_usergate_xmlrpc_methods_are_read_only_and_match_the_agent():
+    import sys
+    from pathlib import Path
+
+    from app.services.packs.models import USERGATE_XMLRPC_READONLY
+
+    agent = Path(__file__).resolve().parents[3] / "agent"
+    sys.path.insert(0, str(agent))
+    import usergate
+
+    assert usergate.USERGATE_READONLY_METHODS == USERGATE_XMLRPC_READONLY
+    packs_dir = Path(__file__).resolve().parents[1] / "app" / "packs"
+    pack = next(item for item in load_registry(packs_dir).latest() if item.pack == "usergate-ngfw")
+    assert pack.version == "1.1.0"
+    assert set(pack.xmlrpc_methods) <= USERGATE_XMLRPC_READONLY
+    assert "v2.core.login" in pack.xmlrpc_methods and "v2.core.logout" in pack.xmlrpc_methods
+    manifest = build_manifest(pack)
+    assert manifest["xmlrpc_methods"] == list(pack.xmlrpc_methods)
+    assert manifest["firmware"]["product"] == "usergate next-generation firewall (ngfw)"
+    assert "xmlrpc_methods" not in build_manifest(Pack.model_validate(make_pack()))
+    with pytest.raises(ValueError, match="только известные методы"):
+        Pack.model_validate(_ssh_pack_with({"type": "cli_config", "cmd": "show version", "match": "x"}) | {
+            "xmlrpc_methods": ["v2.core.administrator.add"],
+        })
+
+
 def test_manual_probe_is_rejected_outside_manual_packs_and_detect_is_required_elsewhere():
     question = {"id": "n.q", "title": "x", "probe": {"type": "manual", "question": "Пароль сменён?"},
                 "assert": {"op": "eq", "value": "yes"}}

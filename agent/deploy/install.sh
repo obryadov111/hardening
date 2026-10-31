@@ -19,7 +19,7 @@ id hardening-agent >/dev/null 2>&1 || useradd --system --no-create-home --shell 
 
 # 2) код агента: принадлежит root, агент его только читает — подменить свой код он не может
 install -d -m 0755 -o root -g root /opt/hardening-agent
-install -m 0644 -o root -g root "$SRC/collector.py" "$SRC/probes.py" "$SRC/README.md" /opt/hardening-agent/
+install -m 0644 -o root -g root "$SRC/collector.py" "$SRC/probes.py" "$SRC/usergate.py" "$SRC/README.md" /opt/hardening-agent/
 
 # 3) настройки: каталог 0750 root:hardening-agent, файл 0640 — читает только агент
 install -d -m 0750 -o root -g hardening-agent /etc/hardening-agent

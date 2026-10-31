@@ -991,8 +991,9 @@ def build_pack_payload(args: argparse.Namespace, probes_module, conn: "ServerCon
         raise SystemExit("Ошибка: для --use-packs нужен открытый ключ подписи паков --pack-public-key "
                          "(HARDENING_PACK_PUBLIC_KEY) или старый общий ключ --pack-key (HARDENING_PACK_KEY)")
 
-    if args.offline_dir and args.ssh_host:
-        raise SystemExit("Ошибка: --offline-dir и --ssh-host взаимоисключающие — либо выгрузка, либо живое устройство")
+    if sum(bool(item) for item in (args.offline_dir, args.ssh_host, args.device_config)) > 1:
+        raise SystemExit("Ошибка: --offline-dir, --ssh-host и --device-config взаимоисключающие — "
+                         "либо выгрузка, либо SSH по ключу, либо цель UserGate")
     if args.offline_dir:
         if not args.hostname:
             raise SystemExit("Ошибка: для --offline-dir нужен --hostname (имя устройства, чья это выгрузка)")
@@ -1000,74 +1001,92 @@ def build_pack_payload(args: argparse.Namespace, probes_module, conn: "ServerCon
             transport = probes_module.OfflineConfigTransport(args.offline_dir)
         except ValueError as exc:
             raise SystemExit(f"Ошибка: {exc}")
+    elif args.device_config:
+        try:
+            import usergate
+        except ImportError as exc:
+            raise SystemExit("Ошибка: для --device-config нужен файл usergate.py рядом с collector.py") from exc
+        try:
+            transport = usergate.UserGateTransport(usergate.load_config(args.device_config))
+        except ValueError as exc:
+            raise SystemExit("Ошибка: {0}".format(exc))
     elif args.ssh_host:
         transport = probes_module.SshTransport(args.ssh_host, args.ssh_user, args.ssh_port, args.ssh_key)
     else:
         transport = probes_module.LocalTransport()
 
-    if args.manifests_file:
-        with open(args.manifests_file, encoding="utf-8") as fh:
-            response = json.load(fh)
-    else:
-        if conn is None or not conn.api_key:  # ключ хоста (host.json) или ключ площадки
-            raise SystemExit("Ошибка: нужен --api-key или переменная окружения HARDENING_AGENT_API_KEY")
-        response = fetch_manifests(conn, probes_module.pack_transport(transport))
-
     try:
-        public_key = probes_module.decode_public_key(args.pack_public_key) if args.pack_public_key else None
-        manifests = probes_module.load_verified_manifests(response, args.pack_key, public_key)
-    except probes_module.ManifestError as exc:
-        raise SystemExit(f"Ошибка безопасности: {exc}")
+        if args.manifests_file:
+            with open(args.manifests_file, encoding="utf-8") as fh:
+                response = json.load(fh)
+        else:
+            if conn is None or not conn.api_key:  # ключ хоста (host.json) или ключ площадки
+                raise SystemExit("Ошибка: нужен --api-key или переменная окружения HARDENING_AGENT_API_KEY")
+            response = fetch_manifests(conn, probes_module.pack_transport(transport))
 
-    if args.pack:
-        manifests = [m for m in manifests if m["pack"] == args.pack]
-    matched = probes_module.select_manifests(transport, manifests, declared=args.pack if args.offline_dir else None)
-    if not matched:
-        if args.offline_dir and not args.pack:
-            raise SystemExit("Платформа по выгрузке не распознана (нет выгрузки команды detect, например show_version.txt) — "
-                             "укажите пак явно: --pack <id>")
-        raise SystemExit("Платформа не распознана ни одним паком — данные не отправлены (агент не гадает)")
+        try:
+            public_key = probes_module.decode_public_key(args.pack_public_key) if args.pack_public_key else None
+            manifests = probes_module.load_verified_manifests(response, args.pack_key, public_key)
+        except probes_module.ManifestError as exc:
+            raise SystemExit(f"Ошибка безопасности: {exc}")
 
-    def log(entry: dict) -> None:
-        print(json.dumps(entry, ensure_ascii=False), file=sys.stderr)
+        if args.pack:
+            manifests = [m for m in manifests if m["pack"] == args.pack]
+        # До detect: XML-RPC UserGate вызывает только методы, объявленные в подписанном манифесте.
+        if hasattr(transport, "bind_manifests"):
+            transport.bind_manifests(manifests)
+        matched = probes_module.select_manifests(transport, manifests, declared=args.pack if args.offline_dir else None)
+        if not matched:
+            if args.offline_dir and not args.pack:
+                raise SystemExit("Платформа по выгрузке не распознана (нет выгрузки команды detect, например show_version.txt) — "
+                                 "укажите пак явно: --pack <id>")
+            raise SystemExit("Платформа не распознана ни одним паком — данные не отправлены (агент не гадает)")
 
-    # Хосту может подходить несколько паков сразу (ОС + Docker + СУБД): выполняются все подошедшие
-    # и уходят одним запросом — один прогон, один снимок, общая оценка.
-    runs, tags, asset_type = [], [], None
-    for manifest in matched:
-        runs.append({
-            "id": manifest["pack"], "version": manifest["version"],
-            "probe_results": probes_module.run_manifest(transport, manifest, log=log),
-        })
-        tags.extend(tag for tag in manifest["tags"] if tag not in tags)
-        asset_type = asset_type or manifest.get("asset_type")
-    local = transport.name == "local"
-    # Сетевое устройство: модель и версия прошивки из паков (поле firmware) — ПО актива для сопоставления с БДУ.
-    firmware = []
-    for manifest in [] if local else matched:
-        entry = probes_module.collect_firmware(transport, manifest)
-        if entry and entry not in firmware:
-            firmware.append(entry)
-    payload = {
-        "environment": args.environment,
-        "asset": {
-            "hostname": args.hostname or args.ssh_host or socket.gethostname(),
-            "ip_address": args.ip_address or (get_primary_ip() if local else None),
-            "os": get_os_pretty_name() if local else None,
-            "asset_type": asset_type or args.asset_type,
-            "criticality": args.criticality,
-        },
-        "software": collect_software() if local else firmware,
-        "inventory": collect_hardware(collect_identity_pii=args.collect_identity) if local else None,
-        "platform_tags": tags,
-        "packs": runs,
-        "scan_label": args.scan_label,
-    }
-    if hasattr(transport, "describe"):
-        # Источник данных — в снимок: проверка по выгрузке не равна проверке живого устройства.
-        payload["collection"] = transport.describe()
-        payload["collection"]["declared_pack"] = any(not probes_module.matches_detect(transport, m["detect"]) for m in matched)
-    return payload
+        def log(entry: dict) -> None:
+            print(json.dumps(entry, ensure_ascii=False), file=sys.stderr)
+
+        # Хосту может подходить несколько паков сразу (ОС + Docker + СУБД): выполняются все подошедшие
+        # и уходят одним запросом — один прогон, один снимок, общая оценка.
+        runs, tags, asset_type = [], [], None
+        for manifest in matched:
+            runs.append({
+                "id": manifest["pack"], "version": manifest["version"],
+                "probe_results": probes_module.run_manifest(transport, manifest, log=log),
+            })
+            tags.extend(tag for tag in manifest["tags"] if tag not in tags)
+            asset_type = asset_type or manifest.get("asset_type")
+        local = transport.name == "local"
+        # Сетевое устройство: модель и версия прошивки из паков (поле firmware) — ПО актива для сопоставления с БДУ.
+        firmware = []
+        for manifest in [] if local else matched:
+            entry = probes_module.collect_firmware(transport, manifest)
+            if entry and entry not in firmware:
+                firmware.append(entry)
+        payload = {
+            "environment": args.environment,
+            "asset": {
+                "hostname": args.hostname or getattr(transport, "asset_hostname", None) or args.ssh_host or socket.gethostname(),
+                "ip_address": args.ip_address or getattr(transport, "asset_ip", None) or (get_primary_ip() if local else None),
+                "os": get_os_pretty_name() if local else None,
+                "asset_type": asset_type or args.asset_type,
+                "criticality": args.criticality,
+            },
+            "software": collect_software() if local else firmware,
+            "inventory": collect_hardware(collect_identity_pii=args.collect_identity) if local else None,
+            "platform_tags": tags,
+            "packs": runs,
+            "scan_label": args.scan_label,
+        }
+        if hasattr(transport, "describe"):
+            # Источник данных — в снимок: проверка по выгрузке не равна проверке живого устройства.
+            payload["collection"] = transport.describe()
+            payload["collection"]["declared_pack"] = any(not probes_module.matches_detect(transport, m["detect"]) for m in matched)
+        return payload
+    finally:
+        # Сессия UserGate (XML-RPC logout, ssh) закрывается и при ошибке распознавания.
+        close = getattr(transport, "close", None)
+        if close is not None:
+            close()
 
 
 def parse_args(argv: "list[str]") -> argparse.Namespace:
@@ -1116,6 +1135,9 @@ def parse_args(argv: "list[str]") -> argparse.Namespace:
     packs.add_argument("--ssh-user", default=None, help="Пользователь SSH (учётка только на чтение)")
     packs.add_argument("--ssh-port", type=int, default=22)
     packs.add_argument("--ssh-key", default=None, help="Путь к приватному ключу SSH (сам ключ в пак не попадает)")
+    packs.add_argument("--device-config", default=os.environ.get("HARDENING_DEVICE_CONFIG"),
+                       help="JSON цели UserGate (адрес, пользователь, password_file, порты). Пароль в этот файл не входит; "
+                            "или HARDENING_DEVICE_CONFIG")
     packs.add_argument("--offline-dir", default=None,
                        help="Проверка по выгрузке конфигурации вместо живого устройства: каталог с выводом команд "
                             "(show_running-config.txt, show_version.txt …); нужен --hostname, без show_version — и --pack")

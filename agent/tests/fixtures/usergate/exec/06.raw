@@ -1,0 +1,52 @@
+# show network-policy firewall
+
+% ----------------- 1 -----------------
+DENY \
+    src.zone = Trusted \
+    dst.zone = Untrusted \
+    dst.ip = lib.network("Botnets IP list") \
+    desc("Firewall rule which blocks traffic from clients in Trusted zone to the list of IP addresses (updatable Botnets IP black list) in Untrusted zone. Recommended to keep this rule active for security reasons.") \
+    enabled(false) \
+    name("Block to botnets")
+% ----------------- 2 -----------------
+DENY \
+    src.zone = Untrusted \
+    src.ip = lib.network("Botnets IP list") \
+    desc("Firewall rule which blocks traffic from the list of IP addresses (updatable Botnets IP black list) in Untrusted zone to clients in Trusted zone. Recommended to keep this rule active for security reasons.") \
+    enabled(false) \
+    name("Block from botnets")
+% ----------------- 3 -----------------
+DENY \
+    dst.zone = Untrusted \
+    dst.ip = lib.network("Compliance to RU RKN (IP adresses)") \
+    desc("Пример правила, блокирующего доступ к IP-адресам, находящихся в списке Роскомнадзора. Для более точной блокировки необходимо использовать блокирование по доменным именам или по URL. Для работы данного правила необходима активная подписка ATP. Данное правило создано как пример, может быть изменено или удалено при необходимости.") \
+    enabled(false) \
+    name("Example block RU RKN by IP list")
+% ----------------- 4 -----------------
+PASS \
+    src.zone = Trusted \
+    dst.zone = Untrusted \
+    desc("Firewall rule which allows traffic from Trusted zone to Untrusted zone. This is an example rule which can be changed or deleted if necessary.") \
+    enabled(false) \
+    name("Allow trusted to untrusted")
+% ----------------- 5 -----------------
+PASS \
+    src.zone = DMZ \
+    dst.zone = Untrusted \
+    desc("Firewall rule which allows traffic from DMZ zone to Untrusted zone. This is an example rule which can be changed or deleted if necessary.") \
+    enabled(false) \
+    name("Allow from DMZ to Untrusted")
+% ----------------- 6 -----------------
+PASS \
+    src.zone = "VPN for remote access" \
+    dst.zone = (Untrusted, Trusted) \
+    desc("Example firewall rule which allows traffic from VPN for remote access zone to Trusted and Untrusted zones. This is an example rule which can be changed or deleted if necessary.") \
+    enabled(false) \
+    name("VPN for remote access to Trusted and Untrusted")
+% ----------------- 7 -----------------
+PASS \
+    src.zone = "VPN for Site-to-Site" \
+    dst.zone = (Untrusted, Trusted) \
+    desc("Example firewall rule which allows traffic from VPN for Site-to-Site zone to Trusted and Untrusted zones. This is an example rule which can be changed or deleted if necessary.") \
+    enabled(false) \
+    name("VPN for Site-to-Site to Trusted and Untrusted")

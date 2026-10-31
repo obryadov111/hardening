@@ -248,6 +248,10 @@ def test_cli_config_default_applies_only_when_line_is_absent():
     assert run_probe(FakeTransport("ssh", cli="security passwords min-length 16\n"), probe)["value"] == "16"
     # Ошибка устройства — не «строки нет»: умолчание не подставляется, проба не выполнилась
     assert run_probe(FakeTransport("ssh", cli="% Unrecognized command\n"), probe)["found"] is False
+    # UserGate: `Error:` — отказ команды, а `% -----` — разделитель правила, не ошибка IOS.
+    assert run_probe(FakeTransport("ssh", cli="Error: show system version\n"), probe)["found"] is False
+    separator = "% ----------------- 1 -----------------\nPASS \\\n    enabled(false) \\\n"
+    assert run_probe(FakeTransport("ssh", cli=separator), {"type": "cli_config", "cmd": "show network-policy firewall", "match": "PASS"})["found"] is True
 
 
 ESR_CONFIG = """\

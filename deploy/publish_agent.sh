@@ -34,7 +34,7 @@ sha() { sha256sum "$1" | cut -d' ' -f1; }
 
 # --- Linux: архив из коммита (не из рабочего каталога), одинаковый при повторной сборке ---
 mkdir -p "$WORK/stage"
-git -c tar.umask=022 archive --format=tar --prefix=hardening-agent/ "$AGENT_COMMIT" agent/collector.py agent/probes.py agent/README.md agent/deploy \
+git -c tar.umask=022 archive --format=tar --prefix=hardening-agent/ "$AGENT_COMMIT" agent/collector.py agent/probes.py agent/usergate.py agent/README.md agent/deploy \
   | tar -x -C "$WORK/stage" --strip-components=0
 mv "$WORK/stage/hardening-agent/agent/"* "$WORK/stage/hardening-agent/" && rmdir "$WORK/stage/hardening-agent/agent"
 git show "HEAD:docs/agent-install.md" > "$WORK/stage/hardening-agent/INSTALL.md"
@@ -55,7 +55,7 @@ RUN_ID=""
 if command -v gh >/dev/null; then
   while read -r run sha_; do
     # .exe собран из collector.py и probes.py — правка README или установщика Linux новой сборки не требует
-    if git cat-file -e "$sha_" 2>/dev/null && git diff --quiet "$sha_" "$AGENT_COMMIT" -- agent/collector.py agent/probes.py; then RUN_ID="$run"; break; fi
+    if git cat-file -e "$sha_" 2>/dev/null && git diff --quiet "$sha_" "$AGENT_COMMIT" -- agent/collector.py agent/probes.py agent/usergate.py; then RUN_ID="$run"; break; fi
   done < <(gh run list --workflow "$WORKFLOW" --branch main --status success -L 30 --json databaseId,headSha -q '.[] | "\(.databaseId) \(.headSha)"')
 fi
 if [[ -n "$RUN_ID" ]]; then

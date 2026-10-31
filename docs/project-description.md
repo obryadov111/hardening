@@ -171,7 +171,7 @@ flowchart TD
 |---|---|---|
 | Сервер | Python 3.12, FastAPI 0.116, SQLAlchemy 2.0, Alembic 1.16, Pydantic 2, Uvicorn 0.35 (2 процесса) | Типизированные схемы запросов, автоматическая валидация, OpenAPI. Тот же язык, что у агента: сервер выполняет код проб агента для выгрузок |
 | БД | PostgreSQL 15 (`psycopg` 3) | JSONB (сырые данные агента, источник снимка, коды 2FA), `COPY` для загрузки БДУ, транзакционные миграции, `pg_trgm` для поиска ПО |
-| Агент | Python 3.6+ (Linux), только стандартная библиотека; Windows — один `.exe` (PyInstaller) | Ставится на любой Linux (в том числе RHEL 8 с Python 3.6) без `pip`; два файла: `collector.py` и `probes.py` |
+| Агент | Python 3.6+ (Linux), только стандартная библиотека; Windows — один `.exe` (PyInstaller) | Ставится на любой Linux (в том числе RHEL 8 с Python 3.6) без `pip`; `collector.py`, `probes.py` и `usergate.py` (доступ к UserGate) |
 | Интерфейс | React 19, Vite 8, TailwindCSS 3, React Router 7, Recharts 3, lucide-react, framer-motion | Быстрая сборка, ленивая загрузка страниц (основной бандл ~400 КБ), графики |
 | Отчёты | reportlab 4.4 (PDF, шрифт DejaVu), openpyxl 3.1 (Excel) | Формируются на сервере из одного источника данных |
 | 2FA | pyotp 2.9 (TOTP, RFC 6238), qrcode | Стандарт для приложений-аутентификаторов |
@@ -414,8 +414,9 @@ v DESC)` — страница «Уязвимости ПО» сразу отда�
 
 ## 7. Агент
 
-Код: `agent/collector.py` (запуск, регистрация, связь с сервером, очередь, сбор ПО) и
-`agent/probes.py` (движок проб, транспорты, белые списки, проверка подписи, маскирование секретов).
+Код: `agent/collector.py` (запуск, регистрация, связь с сервером, очередь, сбор ПО),
+`agent/probes.py` (движок проб, транспорты, белые списки, проверка подписи, маскирование секретов)
+и `agent/usergate.py` (XML-RPC и SSH к UserGate NGFW).
 Только стандартная библиотека Python, совместимость с Python 3.6 (проверяется в CI на Rocky 8).
 
 ### 7.1 Режимы
@@ -665,7 +666,7 @@ vendor, category: firmware}` как ПО актива; имя должно со�
 | `snr-switch` | 1.0.0 | ssh | draft | 10 | SNR на ПО DCN |
 | `vipnet-coordinator` | 1.0.0 | ssh | draft | 6 | ViPNet Coordinator HW/KB 4 |
 | `s-terra-gate` | 1.0.0 | ssh | draft | 7 | С-Терра Шлюз 4.2 |
-| `usergate-ngfw` | 1.0.0 | ssh | draft | 6 | UserGate NGFW 7 |
+| `usergate-ngfw` | 1.1.0 | ssh | draft | 12 | UserGate NGFW 7: агент (XML-RPC/SSH) или выгрузка; прошивка → БДУ |
 | `infowatch-arma-ngfw` | 1.0.0 | ssh | draft | 7 | InfoWatch ARMA Стена (NGFWOS) |
 | `dionis-nx` | 1.0.0 | ssh | draft | 9 | Dionis-NX 2.x |
 | `pt-ngfw` | 1.0.0 | ssh | inventory | 0 | PT NGFW: распознавание и версия |
@@ -868,7 +869,7 @@ flowchart LR
 | SNR (НАГ) | `snr-switch` | SSH, выгрузка | 10 | руководство SNR S2985G/S2965 | да |
 | ИнфоТеКС ViPNet Coordinator HW/KB 4 | `vipnet-coordinator` | SSH, выгрузка | 6 | справочник команд 4.2.0 | да |
 | С-Терра Шлюз 4.2 | `s-terra-gate` | выгрузка из cs_console | 7 | Cisco-like команды 4.2 | нет в БДУ |
-| UserGate NGFW 7 | `usergate-ngfw` | выгрузка вывода CLI | 6 | руководство администратора 7.1 | — |
+| UserGate NGFW 7 | `usergate-ngfw` | агент (XML-RPC, SSH), выгрузка | 12 | руководство администратора 7.1; вывод 7.4.1 | да |
 | InfoWatch ARMA Стена | `infowatch-arma-ngfw` | SSH, выгрузка | 7 | руководство CLI | да |
 | Фактор-ТС Dionis-NX 2.x | `dionis-nx` | SSH, выгрузка | 9 | руководство по настройке 2.0-2 | нет в БДУ |
 | Positive Technologies PT NGFW | `pt-ngfw` + `pt-ngfw-settings` | SSH (распознавание) + опрос | 0 + 5 | справочный портал 1.11 | да |
@@ -890,8 +891,9 @@ flowchart LR
   (по умолчанию выключены), журнал не выключен и уходит на удалённый узел, тайм-аут сеанса.
 - **С-Терра**: DES/3DES и MD5/SHA-1 в IKE, AES вместо ГОСТ, esp-null/DES/MD5 в наборах IPsec, SNMP
   public, `username … password` вместо `secret`, syslog.
-- **UserGate**: политика паролей администраторов, блокировка, веб-консоль/CLI/XML-RPC/SNMP из зоны
-  Untrusted для любых адресов, антиспуфинг, защита от SYN-флуда.
+- **UserGate**: политика паролей администраторов, блокировка, веб-консоль/CLI/XML-RPC/SNMP из зон
+  Untrusted и Management не для любых адресов, антиспуфинг по зонам, защита от SYN/UDP/ICMP-флуда,
+  нет включённого правила «любой — любой», выгрузка журналов; версия ПО — в БДУ.
 - **ARMA Стена**: длина пароля (по умолчанию 1), блокировка, SNMP v2c, SNMPv3 на умолчаниях MD5/DES.
 - **Dionis-NX**: Telnet и diweb, вход `adm` по SSH, ограничение SSH (`allow`), SNMP `acl public` и без
   адреса, удалённый журнал, `session timeout … none`.
@@ -1334,8 +1336,8 @@ GPO.
 - **Сетевое оборудование и СЗИ:** паки по документации, на живых устройствах не запускались — образов
   в открытом доступе нет (vESR, С-Терра, UserGate, Континент, PT — по запросу). Не охвачены: Eltex
   MES14xx/24xx, Qtech QSW-6900+, SNR на eNOS, ViPNet HW 5 (другие ОС), B4COM, Булат, Zelax (нет открытой
-  документации CLI). Живой сбор по SSH у С-Терра, UserGate, ARMA затруднён (интерактивный CLI) —
-  основной путь выгрузка.
+  документации CLI). Живой сбор UserGate делает установленный агент (XML-RPC, затем SSH);
+  у С-Терра и ARMA по-прежнему основной путь — выгрузка.
 - **PT NGFW и Ideco:** проверки через API не сделаны — методы API известны только на самом устройстве;
   сейчас — опрос.
 - **Опрос** — ответы аудитора, а не чтение конфигурации; это видно в отчёте.

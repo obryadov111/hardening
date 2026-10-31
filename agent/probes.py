@@ -854,11 +854,11 @@ def probe_cmd_foreach(t, p: dict) -> dict:
 def _cli_text(t, p: dict) -> str:
     """Вывод команды устройства, проверенный ДО разбора: при нехватке прав IOS отвечает `% Invalid input…`
     вместо конфигурации, и все проверки «параметра нет» ложно прошли бы на пустом выводе. Поэтому строка-ошибка
-    `% …` — отказ пробы, а `require` (необязательно) задаёт признак настоящего вывода (например, завершающий
-    `end` running-config)."""
+    `% Слово…` и `Error:` (UserGate) — отказ пробы. Разделитель правила UserGate `% -----` ошибкой не является.
+    `require` (необязательно) задаёт признак настоящего вывода (например, завершающий `end` running-config)."""
     text = t.run_cli(p["cmd"]).stdout
     first = next((line for line in text.splitlines() if line.strip()), "")
-    if re.match(r"\s*%\s", first):
+    if re.match(r"\s*%\s*[A-Za-z]", first) or re.match(r"\s*Error:", first):
         raise ProbeError(f"устройство вернуло ошибку: {first.strip()[:120]}")
     if p.get("require") and not re.search(p["require"], text, re.MULTILINE):
         raise ProbeError("вывод команды не похож на ожидаемый (нет прав на просмотр конфигурации или неверная команда)")

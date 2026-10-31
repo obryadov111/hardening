@@ -1,0 +1,193 @@
+# Пак «UserGate NGFW» (ООО «Юзергейт»), UGOS 7.x. Сбор — обычный агент с хоста в сети заказчика
+# (XML-RPC :4040, SSH exec или интерактивный SSH :2200) либо выгрузка вывода тех же команд show.
+#
+# maturity: draft. Формат проверок сверен с лабораторным UserGate NGFW 7.4.1.341220R (заводские
+# умолчания: CLI и XML-RPC в pack_tests и agent/tests/fixtures/usergate). Живой прогон агента на стенде
+# выполняет автор; до него пак не называется baseline.
+#
+# Источники: руководство администратора 7.1 (CLI: settings administrators general, network zone) и
+# фактический вывод 7.4.1. В 7.4.1 NAT — `show network-policy nat-routing`; межсетевой экран —
+# `show network-policy firewall` (PASS/DENY, разделитель `% -----` — не ошибка). `show system version`
+# работает в операционном режиме и в ответе v2.core.login, но не в configure, куда попадает SSH exec.
+#
+# Зона Untrusted — заводское имя внешней зоны. Если внешняя зона названа иначе, проверки этой зоны
+# дадут error «вывод не похож на ожидаемый», а не pass.
+#
+# XML-RPC: агент вызывает только методы из xmlrpc_methods, и только если они есть в его белом списке
+# чтения. login/logout — служебные; пароль и auth_token на сервер не отправляются.
+
+pack: usergate-ngfw
+version: 1.1.0
+maturity: draft
+tags: [network-device, firewall, usergate, usergate-ngfw]
+transport: ssh
+asset_type: network-device
+
+xmlrpc_methods:
+  - v2.core.login
+  - v2.core.logout
+  - v2.core.administrator.config.get
+  - v1.netmanager.zones.list
+  - v1.firewall.rules.list
+
+detect:
+  - probe: { type: cli_config, cmd: show settings administrators general, match: '^\s*(num-auth-attempts)\s*:' }
+    equals: num-auth-attempts
+
+# Имя продукта — как в БДУ ФСТЭК («usergate next-generation firewall (ngfw)»). Версия — из
+# `show system version` (UGOS NGFW 7.4.1.341220R): XML-RPC подставляет её из ответа login,
+# интерактивный сеанс читает команду до configure, выгрузка — файл show_system_version.txt.
+firmware:
+  vendor: ООО «Юзергейт»
+  product: usergate next-generation firewall (ngfw)
+  version_probe:
+    type: cli_config
+    cmd: show system version
+    require: 'UGOS|\d+\.\d+\.\d+'
+    match: '(\d+\.\d+\.\d+(?:\.\d+)*[A-Za-z0-9]*)'
+
+checks:
+  - id: usergate_ngfw.admin_strong_password
+    title: Для администраторов включено требование сложного пароля (strong-password)
+    probe: { type: cli_config, cmd: show settings administrators general, require: '(?m)^\s*strong-password\s*:', match: '^\s*strong-password\s*:\s*(\S+)' }
+    assert: { op: eq, value: "on" }
+    severity: medium
+    remediation: "`set settings administrators general strong-password on`, затем задать min-length, min-uppercase, min-digits, spec-characters."
+    refs:
+      - { source: "UserGate NGFW 7.1. Руководство администратора", id: "CLI: settings administrators general" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+
+  - id: usergate_ngfw.admin_password_min_length
+    title: Минимальная длина пароля администратора не меньше 8 символов
+    probe: { type: cli_config, cmd: show settings administrators general, require: '(?m)^\s*strong-password\s*:', match: '^\s*min-length\s*:\s*(\d+)' }
+    assert: { op: gte, value: 8 }
+    severity: medium
+    remediation: "`set settings administrators general min-length 12` (действует при strong-password on)."
+    refs:
+      - { source: "UserGate NGFW 7.1. Руководство администратора", id: "CLI: settings administrators general" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+
+  - id: usergate_ngfw.admin_lockout_attempts
+    title: Учётная запись администратора блокируется не позже чем после 5 неверных попыток
+    probe: { type: cli_config, cmd: show settings administrators general, require: '(?m)^\s*strong-password\s*:', match: '^\s*num-auth-attempts\s*:\s*(\d+)' }
+    assert: { op: between, value: [1, 5] }
+    severity: medium
+    remediation: "`set settings administrators general num-auth-attempts 5 block-time 900`."
+    refs:
+      - { source: "UserGate NGFW 7.1. Руководство администратора", id: "CLI: settings administrators general" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.6" }
+
+  - id: usergate_ngfw.untrusted_management_restricted
+    title: Из зоны Untrusted управление (веб-консоль, CLI, XML-RPC, SNMP) не открыто для любых адресов
+    probe:
+      type: cli_config
+      cmd: show network zone Untrusted
+      require: '(?m)^\s*name\s*:'
+      multiline: true
+      match: 'service\s*:\s*"?(HTTPS RPC|Admin Console|CLI over SSH|SNMP|rpc)"?\s*\n\s*allowed-addresses\s*:\s*Any\s*\n\s*enabled\s*:\s*on'
+    assert: { op: absent }
+    severity: critical
+    remediation: "`set network zone Untrusted` — отключить сервисы Admin Console, CLI over SSH, rpc, HTTPS RPC, SNMP или ограничить их allowed-addresses списком адресов администраторов; управление — из зоны Management."
+    refs:
+      - { source: "UserGate NGFW 7.1. Руководство администратора", id: "Зоны: контроль доступа (services-access)" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.5" }
+
+  - id: usergate_ngfw.management_services_restricted
+    title: В зоне Management сервисы управления не открыты для любых адресов
+    probe:
+      type: cli_config
+      cmd: show network zone Management
+      require: '(?m)^\s*name\s*:'
+      multiline: true
+      match: 'service\s*:\s*"?(HTTPS RPC|Admin Console|CLI over SSH|SNMP|rpc)"?\s*\n\s*allowed-addresses\s*:\s*Any\s*\n\s*enabled\s*:\s*on'
+    assert: { op: absent }
+    severity: high
+    remediation: "В зоне Management для Admin Console, CLI over SSH, rpc, HTTPS RPC и SNMP задать allowed-addresses списком адресов администраторов, а не Any."
+    refs:
+      - { source: "UserGate NGFW 7.4.1, вывод `show network zone Management`", id: "services-access" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.5" }
+
+  - id: usergate_ngfw.untrusted_antispoofing
+    title: В зоне Untrusted включена защита от IP-спуфинга
+    probe: { type: cli_config, cmd: show network zone Untrusted, require: '(?m)^\s*name\s*:', match: '^\s*antispoof-enable?\s*:\s*(\S+)' }
+    assert: { op: eq, value: "on" }
+    severity: low
+    remediation: "`set network zone Untrusted antispoof-enable on` и списки адресов, которые не могут приходить из этой зоны."
+    refs:
+      - { source: "UserGate NGFW 7.1. Руководство администратора", id: "Зоны: antispoof-enabled" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.2" }
+
+  - id: usergate_ngfw.zones_antispoofing
+    title: Во всех зонах включена защита от IP-спуфинга
+    probe:
+      type: cli_blocks
+      cmd: show network zone
+      block: '^[^:]+$'
+      has: ['antispoof-enable\s*:\s*off']
+      require: '(?m)antispoof-enable'
+    assert: { op: eq, value: 0 }
+    severity: low
+    remediation: "Для каждой зоны `set network zone <имя> antispoof-enable on`."
+    refs:
+      - { source: "UserGate NGFW 7.4.1, вывод `show network zone`", id: "antispoof-enable" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.2" }
+
+  - id: usergate_ngfw.untrusted_syn_flood_protection
+    title: В зоне Untrusted включена защита от SYN-флуда
+    probe: { type: cli_config, cmd: show network zone Untrusted, require: '(?m)^\s*name\s*:', multiline: true, match: 'dos-protection-syn\s*:\s*\n\s*enabled\s*:\s*(\S+)' }
+    assert: { op: eq, value: "on" }
+    severity: low
+    remediation: "`set network zone Untrusted dos-protection-syn enabled on`."
+    refs:
+      - { source: "UserGate NGFW 7.1. Руководство администратора", id: "Зоны: dos-protection-syn" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.2" }
+
+  - id: usergate_ngfw.untrusted_udp_flood_protection
+    title: В зоне Untrusted включена защита от UDP-флуда
+    probe: { type: cli_config, cmd: show network zone Untrusted, require: '(?m)^\s*name\s*:', multiline: true, match: 'dos-protection-udp\s*:\s*\n\s*enabled\s*:\s*(\S+)' }
+    assert: { op: eq, value: "on" }
+    severity: low
+    remediation: "`set network zone Untrusted dos-protection-udp enabled on`."
+    refs:
+      - { source: "UserGate NGFW 7.4.1, вывод `show network zone Untrusted`", id: "dos-protection-udp" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.2" }
+
+  - id: usergate_ngfw.untrusted_icmp_flood_protection
+    title: В зоне Untrusted включена защита от ICMP-флуда
+    probe: { type: cli_config, cmd: show network zone Untrusted, require: '(?m)^\s*name\s*:', multiline: true, match: 'dos-protection-icmp\s*:\s*\n\s*enabled\s*:\s*(\S+)' }
+    assert: { op: eq, value: "on" }
+    severity: low
+    remediation: "`set network zone Untrusted dos-protection-icmp enabled on`."
+    refs:
+      - { source: "UserGate NGFW 7.4.1, вывод `show network zone Untrusted`", id: "dos-protection-icmp" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.2" }
+
+  - id: usergate_ngfw.firewall_no_any_any_accept
+    title: Нет включённого разрешающего правила «любой — любой»
+    probe:
+      type: cli_blocks
+      cmd: show network-policy firewall
+      block: '^(PASS|ACCEPT)\b'
+      has: ['enabled\(\s*true\s*\)']
+      lacks: ['src\.zone', 'dst\.zone', 'src\.ip', 'dst\.ip']
+      require: '(?m)^(%\s*-+|PASS\b|DENY\b)'
+    assert: { op: eq, value: 0 }
+    severity: critical
+    remediation: "Удалить или выключить правило PASS без ограничения зоны и адреса источника и назначения. Разрешать трафик отдельными правилами по зонам."
+    refs:
+      - { source: "UserGate NGFW 7.4.1, вывод `show network-policy firewall`", id: "PASS/DENY" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.2" }
+
+  - id: usergate_ngfw.log_export_enabled
+    title: Журналы выгружаются на внешний сервер
+    probe:
+      type: cli_config
+      cmd: show logs logs-export
+      require: '(?m)server-type\s*:'
+      match: '^\s*enabled\s*:\s*on\s*$'
+    assert: { op: exists }
+    severity: medium
+    remediation: "Включить хотя бы одно правило `logs-export` (syslog, FTP или SSH) на сборщик журналов организации. Заводские примеры созданы выключенными."
+    refs:
+      - { source: "UserGate NGFW 7.4.1, вывод `show logs logs-export`", id: "enabled" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.8" }

@@ -1,0 +1,873 @@
+UGOS NGFW 7.4.1.341220R
+
+Admin@rederskinter>WARNING: your terminal doesn't support cursor position requests (CPR).
+Admin@rederskinter>show system versionAdmin@rederskinter> show system version
+UGOS NGFW 7.4.1.341220R
+
+Admin@rederskinter>configureAdmin@rederskinter> configure
+Admin@rederskinter#WARNING: your terminal doesn't support cursor position requests (CPR).
+Admin@rederskinter#show settings administrators generalAdmin@rederskinter# show settings administrators general
+
+strong-password      : off
+block-time           : 300
+min-length           : 7
+min-uppercase        : 1
+min-lowercase        : 1
+min-digits           : 1
+spec-characters      : 1
+char-repetition      : 2
+num-auth-attempts    : 10
+ 
+Admin@rederskinter#show network zone UntrustedAdmin@rederskinter# show network zone Untrusted
+
+name                        : Untrusted
+antispoof-enable            : off
+antispoof-negate            : off
+dos-protection-syn          :
+    enabled            : on
+    aggregate          : off
+    alert-threshold    : 3000
+    drop-threshold     : 6000
+dos-protection-udp          :
+    enabled            : on
+    aggregate          : off
+    alert-threshold    : 3000
+    drop-threshold     : 6000
+dos-protection-icmp         :
+    enabled            : on
+    aggregate          : off
+    alert-threshold    : 100
+    drop-threshold     : 200
+services-access             :
+    service              : Any ICMP
+    allowed-addresses    : Any
+    enabled              : on
+ 
+    service              : SMTP Proxy
+    allowed-addresses    : Any
+    enabled              : on
+ 
+    service              : POP3 Proxy
+    allowed-addresses    : Any
+    enabled              : on
+ 
+sessions-limit-enabled      : off
+sessions-limit-threshold    : 0
+ 
+Admin@rederskinter#show network zone ManagementAdmin@rederskinter# show network zone Management
+
+name                        : Management
+antispoof-enable            : off
+antispoof-negate            : off
+dos-protection-syn          :
+    enabled            : on
+    aggregate          : off
+    alert-threshold    : 3000
+    drop-threshold     : 6000
+dos-protection-udp          :
+    enabled            : on
+    aggregate          : off
+    alert-threshold    : 3000
+    drop-threshold     : 6000
+dos-protection-icmp         :
+    enabled            : on
+    aggregate          : off
+    alert-threshold    : 100
+    drop-threshold     : 200
+services-access             :
+    service              : Any ICMP
+    allowed-addresses    : Any
+    enabled              : on
+ 
+    service              : SNMP
+    allowed-addresses    : Any
+    enabled              : on
+ 
+    service              : reponse_pages
+    allowed-addresses    : Any
+    enabled              : on
+ 
+    service              : rpc
+    allowed-addresses    : Any
+    enabled              : on
+ 
+    service              : Admin Console
+    allowed-addresses    : Any
+    enabled              : on
+ 
+    service              : CLI over SSH
+    allowed-addresses    : Any
+    enabled              : on
+ 
+    service              : HTTPS RPC
+    allowed-addresses    : Any
+    enabled              : on
+ 
+sessions-limit-enabled      : off
+sessions-limit-threshold    : 0
+ 
+Admin@rederskinter#show network zoneAdmin@rederskinter# show network zone
+
+Cluster
+    name                        : Cluster
+    antispoof-enable            : off
+    antispoof-negate            : off
+    dos-protection-syn          :
+        enabled            : off
+        aggregate          : off
+        alert-threshold    : 3000
+        drop-threshold     : 6000
+    dos-protection-udp          :
+        enabled            : off
+        aggregate          : off
+        alert-threshold    : 3000
+        drop-threshold     : 6000
+    dos-protection-icmp         :
+        enabled            : off
+        aggregate          : off
+        alert-threshold    : 100
+        drop-threshold     : 200
+    services-access             :
+        service              : Any ICMP
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : ha
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : Admin Console
+        allowed-addresses    : Any
+        enabled              : on
+ 
+    sessions-limit-enabled      : off
+    sessions-limit-threshold    : 0
+ 
+DMZ
+    name                        : DMZ
+    antispoof-enable            : off
+    antispoof-negate            : off
+    dos-protection-syn          :
+        enabled            : on
+        aggregate          : off
+        alert-threshold    : 3000
+        drop-threshold     : 6000
+    dos-protection-udp          :
+        enabled            : on
+        aggregate          : off
+        alert-threshold    : 3000
+        drop-threshold     : 6000
+    dos-protection-icmp         :
+        enabled            : on
+        aggregate          : off
+        alert-threshold    : 100
+        drop-threshold     : 200
+    services-access             :
+        service              : Any ICMP
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : DNS
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : SMTP Proxy
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : POP3 Proxy
+        allowed-addresses    : Any
+        enabled              : on
+ 
+    sessions-limit-enabled      : off
+    sessions-limit-threshold    : 0
+ 
+Management
+    name                        : Management
+    antispoof-enable            : off
+    antispoof-negate            : off
+    dos-protection-syn          :
+        enabled            : on
+        aggregate          : off
+        alert-threshold    : 3000
+        drop-threshold     : 6000
+    dos-protection-udp          :
+        enabled            : on
+        aggregate          : off
+        alert-threshold    : 3000
+        drop-threshold     : 6000
+    dos-protection-icmp         :
+        enabled            : on
+        aggregate          : off
+        alert-threshold    : 100
+        drop-threshold     : 200
+    services-access             :
+        service              : Any ICMP
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : SNMP
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : reponse_pages
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : rpc
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : Admin Console
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : CLI over SSH
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : HTTPS RPC
+        allowed-addresses    : Any
+        enabled              : on
+ 
+    sessions-limit-enabled      : off
+    sessions-limit-threshold    : 0
+ 
+Trusted
+    name                        : Trusted
+    antispoof-enable            : off
+    antispoof-negate            : off
+    dos-protection-syn          :
+        enabled            : on
+        aggregate          : off
+        alert-threshold    : 3000
+        drop-threshold     : 6000
+    dos-protection-udp          :
+        enabled            : on
+        aggregate          : off
+        alert-threshold    : 3000
+        drop-threshold     : 6000
+    dos-protection-icmp         :
+        enabled            : on
+        aggregate          : off
+        alert-threshold    : 100
+        drop-threshold     : 200
+    services-access             :
+        service              : Any ICMP
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : reponse_pages
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : DNS
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : HTTP Proxy
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : Authorization agent
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : SMTP Proxy
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : POP3 Proxy
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : SCADA
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : Endpoint connect
+        allowed-addresses    : Any
+        enabled              : on
+ 
+    sessions-limit-enabled      : off
+    sessions-limit-threshold    : 0
+ 
+Tunnel inspection zone
+    name                        : Tunnel inspection zone
+    antispoof-enable            : off
+    antispoof-negate            : off
+    dos-protection-syn          :
+        enabled            : off
+        aggregate          : off
+        alert-threshold    : 3000
+        drop-threshold     : 6000
+    dos-protection-udp          :
+        enabled            : off
+        aggregate          : off
+        alert-threshold    : 3000
+        drop-threshold     : 6000
+    dos-protection-icmp         :
+        enabled            : off
+        aggregate          : off
+        alert-threshold    : 100
+        drop-threshold     : 200
+    sessions-limit-enabled      : off
+    sessions-limit-threshold    : 0
+ 
+Untrusted
+    name                        : Untrusted
+    antispoof-enable            : off
+    antispoof-negate            : off
+    dos-protection-syn          :
+        enabled            : on
+        aggregate          : off
+        alert-threshold    : 3000
+        drop-threshold     : 6000
+    dos-protection-udp          :
+        enabled            : on
+        aggregate          : off
+        alert-threshold    : 3000
+        drop-threshold     : 6000
+    dos-protection-icmp         :
+        enabled            : on
+        aggregate          : off
+        alert-threshold    : 100
+        drop-threshold     : 200
+    services-access             :
+        service              : Any ICMP
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : SMTP Proxy
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : POP3 Proxy
+        allowed-addresses    : Any
+        enabled              : on
+ 
+    sessions-limit-enabled      : off
+    sessions-limit-threshold    : 0
+ 
+VPN for remote access
+    name                        : VPN for remote access
+    antispoof-enable            : off
+    antispoof-negate            : off
+    dos-protection-syn          :
+        enabled            : on
+        aggregate          : off
+        alert-threshold    : 3000
+        drop-threshold     : 6000
+    dos-protection-udp          :
+        enabled            : on
+        aggregate          : off
+        alert-threshold    : 3000
+        drop-threshold     : 6000
+    dos-protection-icmp         :
+        enabled            : on
+        aggregate          : off
+        alert-threshold    : 100
+        drop-threshold     : 200
+    services-access             :
+        service              : Any ICMP
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : reponse_pages
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : DNS
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : HTTP Proxy
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : Endpoint connect
+        allowed-addresses    : Any
+        enabled              : on
+ 
+    sessions-limit-enabled      : off
+    sessions-limit-threshold    : 0
+ 
+VPN for Site-to-Site
+    name                        : VPN for Site-to-Site
+    antispoof-enable            : off
+    antispoof-negate            : off
+    dos-protection-syn          :
+        enabled            : on
+        aggregate          : off
+        alert-threshold    : 3000
+        drop-threshold     : 6000
+    dos-protection-udp          :
+        enabled            : on
+        aggregate          : off
+        alert-threshold    : 3000
+        drop-threshold     : 6000
+    dos-protection-icmp         :
+        enabled            : on
+        aggregate          : off
+        alert-threshold    : 100
+        drop-threshold     : 200
+    services-access             :
+        service              : Any ICMP
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : reponse_pages
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : DNS
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : HTTP Proxy
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : Endpoint connect
+        allowed-addresses    : Any
+        enabled              : on
+ 
+    sessions-limit-enabled      : off
+    sessions-limit-threshold    : 0
+ 
+Admin@rederskinter#show network-policy firewallAdmin@rederskinter# show network-policy firewall
+
+% ----------------- 1 -----------------
+DENY \
+    src.zone = Trusted \
+    dst.zone = Untrusted \
+    dst.ip = lib.network("Botnets IP list") \
+    desc("Firewall rule which blocks traffic from clients in Trusted zone to the list of IP addresses (updatable Botnets IP black list) in Untrusted zone. Recommended to keep this rule active for security reasons.") \
+    enabled(false) \
+    name("Block to botnets")
+% ----------------- 2 -----------------
+DENY \
+    src.zone = Untrusted \
+    src.ip = lib.network("Botnets IP list") \
+    desc("Firewall rule which blocks traffic from the list of IP addresses (updatable Botnets IP black list) in Untrusted zone to clients in Trusted zone. Recommended to keep this rule active for security reasons.") \
+    enabled(false) \
+    name("Block from botnets")
+% ----------------- 3 -----------------
+DENY \
+    dst.zone = Untrusted \
+    dst.ip = lib.network("Compliance to RU RKN (IP adresses)") \
+    desc("Пример правила, блокирующего доступ к IP-адресам, находящихся в списке Роскомнадзора. Для более точной блокировки необходимо использовать блокирование по доменным именам или по URL. Для работы данного правила необходима активная подписка ATP. Данное правило создано как пример, может быть изменено или удалено при необходимости.") \
+    enabled(false) \
+    name("Example block RU RKN by IP list")
+% ----------------- 4 -----------------
+PASS \
+    src.zone = Trusted \
+    dst.zone = Untrusted \
+    desc("Firewall rule which allows traffic from Trusted zone to Untrusted zone. This is an example rule which can be changed or deleted if necessary.") \
+    enabled(false) \
+    name("Allow trusted to untrusted")
+% ----------------- 5 -----------------
+PASS \
+    src.zone = DMZ \
+    dst.zone = Untrusted \
+    desc("Firewall rule which allows traffic from DMZ zone to Untrusted zone. This is an example rule which can be changed or deleted if necessary.") \
+    enabled(false) \
+    name("Allow from DMZ to Untrusted")
+% ----------------- 6 -----------------
+PASS \
+    src.zone = "VPN for remote access" \
+    dst.zone = (Untrusted, Trusted) \
+    desc("Example firewall rule which allows traffic from VPN for remote access zone to Trusted and Untrusted zones. This is an example rule which can be changed or deleted if necessary.") \
+    enabled(false) \
+    name("VPN for remote access to Trusted and Untrusted")
+% ----------------- 7 -----------------
+PASS \
+    src.zone = "VPN for Site-to-Site" \
+    dst.zone = (Untrusted, Trusted) \
+    desc("Example firewall rule which allows traffic from VPN for Site-to-Site zone to Trusted and Untrusted zones. This is an example rule which can be changed or deleted if necessary.") \
+    enabled(false) \
+    name("VPN for Site-to-Site to Trusted and Untrusted")
+Admin@rederskinter#show network-policy nat-routingAdmin@rederskinter# show network-policy nat-routing
+
+% ----------------- 1 -----------------
+OK \
+    src.zone = Trusted \
+    dst.zone = Untrusted \
+    desc("NAT rule which allows traffic NAT-ting from Trusted zone to Untrusted zone. This is an example rule which can be changed or deleted if necessary.") \
+    enabled(false) \
+    name("NAT from Trusted to Untrusted")\
+    nat
+% ----------------- 2 -----------------
+OK \
+    src.zone = DMZ \
+    dst.zone = Untrusted \
+    desc("NAT rule which allows traffic NAT-ting from DMZ zone to Untrusted zone. This is an example rule which can be changed or deleted if necessary.") \
+    enabled(false) \
+    name("NAT from DMZ to Untrusted")\
+    nat
+% ----------------- 3 -----------------
+OK \
+    src.zone = "VPN for remote access" \
+    dst.zone = (Untrusted, Trusted) \
+    desc("Example NAT rule which allows traffic NAT-ting from zone VPN for remote access to Trusted and Untrusted zones.This or similar rule should be created to allow Remote access VPN users to have access to Internet and LAN. This is an example rule which can be changed or deleted if necessary.") \
+    enabled(false) \
+    name("NAT from VPN for remote access to Trusted and Untrusted")\
+    nat
+Admin@rederskinter#show network-policy natAdmin@rederskinter# show network-policy nat
+
+Error: show network-policy nat
+Use completion <tab> to help
+
+Admin@rederskinter#show security-policy content-filteringAdmin@rederskinter# show security-policy content-filtering
+
+[content.1 " Content Rules "]
+ % ----------------- 1 --- Content Rules --------------
+PASS \
+    url = lib.url("Education institutions") \
+    src.zone = Trusted \
+    desc("Content filtering rule which allows access to the list of URLs. This is an example rule which can be changed or deleted if necessary.") \
+    rule_log(yes) \
+    enabled(false) \
+    name("Example white list")
+% ----------------- 2 --- Content Rules --------------
+DENY \
+    url = lib.url("Compliance to RU (custom 460)", "Compliance to RU RKN (URL)", "Phishing sites") \
+    src.zone = Trusted \
+    desc("Content filtering rule which prohibit access to the list of URLs. This is an example rule which can be changed or deleted if necessary.") \
+    rule_log(yes) \
+    enabled(false) \
+    name("Example black list")
+% ----------------- 3 --- Content Rules --------------
+DENY \
+    category = lib.category(Threats) \
+    src.zone = Trusted \
+    desc("Content filtering rule which prohibit access to the sites in group of categories Threats. Recommended to keep this rule active for security reasons. This is an example rule which can be changed or deleted if necessary.") \
+    rule_log(yes) \
+    redirect(302, "http://127.0.0.1") \
+    enabled(false) \
+    name("Example threats sites")
+% ----------------- 4 --- Content Rules --------------
+DENY \
+    url = lib.url("List of search engines without safesearch capability") \
+    src.zone = Trusted \
+    desc("Content filtering rule which redirects all requests to the list of search engines which do not provide safe search functionality to bing.com (safe search capable). Recommended to keep active for parental control. This is an example rule which can be changed or deleted if necessary.") \
+    rule_log(yes) \
+    redirect(302, "https://bing.com") \
+    enabled(false) \
+    name("Example redirect to safesearch engines")
+% ----------------- 5 --- Content Rules --------------
+DENY \
+    category = lib.category(Threats, "Parental Control") \
+    src.zone = Trusted \
+    desc("Content filtering rule which prohibits access to sites belonging to the group of categories Parental control and Threats. Recommended to keep active for parental control. This is an example rule which can be changed or deleted if necessary.") \
+    rule_log(yes) \
+    enabled(false) \
+    name("Example parental control by categories")
+% ----------------- 6 --- Content Rules --------------
+DENY \
+    category = lib.category("Recommended for morphology checking") \
+    morphology = lib.morphology(Profanity, Drugs, Pornography, Suicide, Terrorism, "Compliance to RU (Custom 460)", Gambling) \
+    src.zone = Trusted \
+    desc("Content filtering rule which blocks access to sites belonging to the group of categories Recommended for morphology checking AND if they contain phrases prohibited by selected morphology dictionaries. Recommended to keep active for parental control. This is an example rule which can be changed or deleted if necessary.") \
+    rule_log(yes) \
+    enabled(false) \
+    name("Example parental control by morphology")
+% ----------------- 7 --- Content Rules --------------
+DENY \
+    virus_usergate = yes \
+    category = lib.category("Recommended for virus check") \
+    src.zone = Trusted \
+    desc("Content filtering rule which blocks access to web pages where virus is found. Recommended to keep active for security reasons. This is an example rule which can be changed or deleted if necessary.") \
+    rule_log(yes) \
+    enabled(false) \
+    name("Example AV check")
+% ----------------- 8 --- Content Rules --------------
+WARNING \
+    category = lib.category(Productivity) \
+    src.zone = Trusted \
+    desc("Content filtering rule which shows warning page when users try to access sites in Productivity category. This is an example rule which can be changed or deleted if necessary.") \
+    rule_log(yes) \
+    enabled(false) \
+    name("Example Non-productive sites")
+% ----------------- 9 --- Content Rules --------------
+DENY \
+    url = lib.url("Compliance to RU RKN (URL)") \
+    dst.zone = Untrusted \
+    desc("Пример правила, блокирующего доступ к URL, находящихся в списке Роскомнадзора. Для работы данного правила необходима активная подписка ATP. Данное правило создано как пример, может быть изменено или удалено при необходимости.") \
+    rule_log(yes) \
+    enabled(false) \
+    name("Example block RU RKN by URL list")
+Admin@rederskinter#show security-policy ssl-inspectionAdmin@rederskinter# show security-policy ssl-inspection
+
+% ----------------- 1 -----------------
+OK \
+    user = unknown \
+    desc("HTTPS decryption rule for Unknown users. Requires to authenticate unknown users via captive portal. This is an example rule which can be changed or deleted if necessary.") \
+    rule_log(yes) \
+    ssl_profile("Default SSL profile") \
+    enabled(false) \
+    name("Decrypt all for unknown users")
+% ----------------- 2 -----------------
+OK \
+    category = lib.category(Threats) \
+    desc("HTTPS decryption rule for the sites in group of categories Threats. Recommended to keep active for security reasons. This is an example rule which can be changed or deleted if necessary.") \
+    rule_log(yes) \
+    ssl_profile("Default SSL profile") \
+    enabled(false) \
+    name("Example decrypt rule for compromised sites")
+% ----------------- 3 -----------------
+PASS \
+    category = (Finance, "Information Security") \
+    desc("HTTPS decryption rule (do not decrypt) for the sites in categories Finance and Information security. Recommended to keep active for security reasons. This is an example rule which can be changed or deleted if necessary.") \
+    rule_log(yes) \
+    ssl_profile("Default SSL profile") \
+    enabled(false) \
+    name("Example DO NOT Decrypt rule for Finance and Security sites")
+% ----------------- 4 -----------------
+OK \
+    category = lib.category("Recommended for morphology checking") \
+    desc("HTTPS decryption rule for the sites in group of categories Recommended for morphology checking. Recommended to keep active for parental control. This is an example rule which can be changed or deleted if necessary.") \
+    rule_log(yes) \
+    ssl_profile("Default SSL profile") \
+    enabled(false) \
+    name("Example decrypt rule for parental control")
+% ----------------- 5 -----------------
+OK \
+    url = lib.url("Compliance to RU RKN (domains)") \
+    desc("Пример правила, дешифрующего трафик с IP-адресов, находящихся в списке Роскомнадзора. Данное правило необходимо включить для корректной работы блокирования URL, находящихся в списке Роскомнадзора. Для работы данного правила необходима активная подписка ATP. Данное правило создано как пример, может быть изменено или удалено при необходимости.") \
+    rule_log(yes) \
+    ssl_profile("Default SSL profile") \
+    enabled(false) \
+    name("Example decrypt RU RKN")
+Admin@rederskinter#show security-policy intrusion-preventionAdmin@rederskinter# show security-policy intrusion-prevention
+
+mode            : on
+limit           : 200
+flow-control    : on
+ 
+Admin@rederskinter#show security-policy dos-rulesAdmin@rederskinter# show security-policy dos-rules
+
+Admin@rederskinter#show security-policy dos-profileAdmin@rederskinter# show security-policy dos-profile
+
+ 
+Admin@rederskinter#show logs logs-exportAdmin@rederskinter# show logs logs-export
+
+Example log export syslog
+    name           : Example log export syslog
+    description    : Log export rule which sends logs to external syslog server. This is an example rule which can be changed or deleted if necessary.
+    enabled        : off
+    server-type    : syslog
+    target         : 192.168.1.9
+    port           : 514
+    passive        : off
+    transport      : udp
+    protocol       : rfc5424
+    severity       : info
+    facility       : user-level
+    hostname       : UGOS
+    app-name       : utm-loganalyzer
+    logs           :
+        dns             : json
+        events          : cef
+        idps            : cef
+        ssh             : off
+        traffic         : cef
+        webaccess       : cef
+        mailsecurity    : off
+        userid          : off
+ 
+Example log export ftp
+    name           : Example log export ftp
+    description    : Log export rule which sends logs to external ftp server. This is an example rule which can be changed or deleted if necessary.
+    enabled        : off
+    server-type    : ftp
+    target         : 192.168.1.9
+    port           : 21
+    login          : logsExportUser
+    path           : utmlogs
+    passive        : off
+    logs           :
+        dns             : json
+        events          : json
+        idps            : json
+        ssh             : off
+        traffic         : json
+        webaccess       : json
+        mailsecurity    : off
+        userid          : off
+ 
+Example log export ssh
+    name           : Example log export ssh
+    description    : Log export rule which sends logs to external ssh server. This is an example rule which can be changed or deleted if necessary.
+    enabled        : off
+    server-type    : ssh
+    target         : 192.168.1.9
+    port           : 22
+    login          : logsExportUser
+    path           : utmlogs
+    passive        : off
+    logs           :
+        dns             : json
+        events          : json
+        idps            : json
+        ssh             : off
+        traffic         : json
+        webaccess       : json
+        mailsecurity    : off
+        userid          : off
+ 
+Admin@rederskinter#show monitoring snmpAdmin@rederskinter# show monitoring snmp
+
+Example SNMPv2
+    name                : Example SNMPv2
+    enabled             : off
+    community           : public
+    version             : 2
+    security-profile    : none
+    query               : on
+    trap                : off
+    trap-port           : 162
+    events              : device-high-cpu-usage; device-low-memory
+ 
+Admin@rederskinter#show monitoring snmp-security-profileAdmin@rederskinter# show monitoring snmp-security-profile
+
+ 
+Admin@rederskinter#show settings administrators administratorsAdmin@rederskinter# show settings administrators administrators
+
+admin-auth-profile:
+ 
+ldap-group:
+ 
+ldap-user:
+ 
+local:
+    Admin
+        login            : Admin
+        enabled          : on
+        type             : local
+        locked           : off
+        description      : System administrator
+        admin-profile    : Root profile
+ 
+Admin@rederskinter#show settings administrators profilesAdmin@rederskinter# show settings administrators profiles
+
+ 
+Admin@rederskinter#show users auth-profileAdmin@rederskinter# show users auth-profile
+
+Example user auth profile
+    name               : Example user auth profile
+    max-attempts       : 5
+    idle-time          : 900
+    expiration-time    : 86400
+    lockout-time       : 300
+    mfa                : none
+    auth-methods       :
+        http-basic         : off
+        local-user-auth    : on
+        policy-accept      : off
+        ldap               : Example AD Auth server
+ 
+Admin@rederskinter#show users auth-serverAdmin@rederskinter# show users auth-server
+
+ldap:
+    Example AD Auth server
+        name             : Example AD Auth server
+        enabled          : off
+        ssl              : off
+        address          : 192.168.1.1
+        bind-dn          : DOMAIN\login
+        domains          : test.local
+        cache-ttl        : 28800
+        keytab_exists    : off
+ 
+ntlm:
+ 
+radius:
+    Example Radius Auth server
+        name         : Example Radius Auth server
+        enabled      : off
+        addresses    :
+            host    : 192.168.1.1
+            port    : 1812
+ 
+saml-idp:
+ 
+tacacs:
+ 
+Admin@rederskinter#show settings cliAdmin@rederskinter# show settings cli
+
+log-level    : error
+ 
+Admin@rederskinter#show settings radminAdmin@rederskinter# show settings radmin
+
+Remote administration disabled
+
+Admin@rederskinter#show settings general admin-consoleAdmin@rederskinter# show settings general admin-console
+
+timezone                      : UTC
+language                      : en
+webaccess                     : password
+web-ssl-profile               : Default SSL profile (web console)
+response-pages-ssl-profile    : Default SSL profile
+api-session-lifetime          : 5
+ 
+Admin@rederskinter#show settings general licenseAdmin@rederskinter# show settings general license
+
+pin-code          : XXXX-XXXXX-XXXX-XXXX
+product           : utm
+version           : 7.4.1.341220R
+product-device    : Standard PC (Q35 + ICH9, 2009)
+user-limit        : 10
+expiry-date       : 2027-02-25T00:00:00Z
+license-type      : normal
+modules           :
+    name           : users
+    expiry-date    : February 25, 2027, 00:00
+ 
+    name           : securityupdate
+    expiry-date    : February 25, 2027, 00:00
+ 
+Admin@rederskinter#show settings general server-timeAdmin@rederskinter# show settings general server-time
+
+timezone              : Etc/UTC
+time                  : October 31, 2026, 17:02
+local-time            : October 31, 2026, 17:02
+last-ntp-sync         : success
+ntp-enabled           : on
+primary-ntp-server    : pool.ntp.org
+ 
+Admin@rederskinter#show settings general modulesAdmin@rederskinter# show settings general modules
+
+proxy-port                : 8090
+auth-captive              : auth.captive
+cert-captive              : cert.captive
+logout-captive            : logout.captive
+block-page-domain         : block.captive
+ftp-enabled               : off
+ftp-domain                : ftpclient.captive
+tunnel-inspection-zone    :
+    enabled    : off
+    name       : Tunnel inspection zone
+snmp-engine-id            :
+    length    : dynamic
+    type      : text
+    value     : rederskinter
+lldp                      :
+    enabled           : off
+    transmit-delay    : 30
+    transmit-hold     : 4
+ 
+Admin@rederskinter#show settings loglevelAdmin@rederskinter# show settings loglevel
+
+value    : error
+ 
+Admin@rederskinter#show system versionAdmin@rederskinter# show system version
+
+Error: show system version
+Use completion <tab> to help
+
+Admin@rederskinter#Admin@rederskinter# exit
+Admin@rederskinter>WARNING: your terminal doesn't support cursor position requests (CPR).
+Admin@rederskinter>exitAdmin@rederskinter> exit
+
+Exiting...
