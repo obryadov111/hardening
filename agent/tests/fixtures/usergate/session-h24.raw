@@ -1,0 +1,67 @@
+[2J[HUGOS NGFW 7.4.1.341220R
+
+[6n[?2004h[?1l[?25l[0m[?7l[0m[J[0mAdmin@rederskinter>[19D[20C[?7h[0m[?12l[?25h[20D[J[0m[?7h[?2004lWARNING: your terminal doesn't support cursor position requests (CPR).
+[?2004h[?25l[0m[?7l[0m[J[0mAdmin@rederskinter>[19D[20C[?7h[0m[?12l[?25h[?25l[?7l[0mconfigure[?7h[0m[?12l[?25h[?25l[?7l[29D[0m[J[0mAdmin@rederskinter> configure[29D[0m
+[J[?7h[0m[?12l[?25h[?2004l[6n[?2004h[?1l[?25l[0m[?7l[0m[J[0mAdmin@rederskinter#[19D[20C[?7h[0m[?12l[?25h[20D[J[0m[?7h[?2004lWARNING: your terminal doesn't support cursor position requests (CPR).
+[?2004h[?25l[0m[?7l[0m[J[0mAdmin@rederskinter#[19D[20C[?7h[0m[?12l[?25h[?25l[?7l[0mshow network zone[?7h[0m[?12l[?25h[?25l[?7l[37D[0m[J[0mAdmin@rederskinter# show network zone[37D[0m
+[J[?7h[0m[?12l[?25h[?2004l
+Cluster
+    name                        : Cluster
+    antispoof-enable            : off
+    antispoof-negate            : off
+    dos-protection-syn          :
+        enabled            : off
+        aggregate          : off
+        alert-threshold    : 3000
+        drop-threshold     : 6000
+    dos-protection-udp          :
+        enabled            : off
+        aggregate          : off
+        alert-threshold    : 3000
+        drop-threshold     : 6000
+    dos-protection-icmp         :
+        enabled            : off
+        aggregate          : off
+        alert-threshold    : 100
+        drop-threshold     : 200
+    services-access             :
+        service              : Any ICMP
+--more--[J        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : ha
+        allowed-addresses    : Any
+        enabled              : on
+ 
+        service              : Admin Console
+        allowed-addresses    : Any
+        enabled              : on
+ 
+    sessions-limit-enabled      : off
+    sessions-limit-threshold    : 0
+ 
+DMZ
+    name                        : DMZ
+    antispoof-enable            : off
+    antispoof-negate            : off
+    dos-protection-syn          :
+        enabled            : on
+        aggregate          : off
+--more--[J[?2004h[?25l[0m[?7l[0m[J[0mAdmin@rederskinter#[19D[20C[?7h[0m[?12l[?25h[?25l[?7l[20D[0m[J[0mAdmin@rederskinter#[19D[0m
+[J[?7h[0m[?12l[?25h[?2004l[?2004h[?25l[0m[?7l[0m[J[0mAdmin@rederskinter#[19D[20C[?7h[0m[?12l[?25h[?25l[?7l[0mshow settings administrators general[?7h[0m[?12l[?25h[?25l[?7l[56D[0m[J[0mAdmin@rederskinter# show settings administrators general[56D[0m
+[J[?7h[0m[?12l[?25h[?2004l
+strong-password      : off
+block-time           : 300
+min-length           : 7
+min-uppercase        : 1
+min-lowercase        : 1
+min-digits           : 1
+spec-characters      : 1
+char-repetition      : 2
+num-auth-attempts    : 10
+ 
+[?2004h[?25l[0m[?7l[0m[J[0mAdmin@rederskinter#[19D[20C[?7h[0m[?12l[?25h[?25l[?7l[0mexit[?7h[0m[?12l[?25h[?25l[?7l[24D[0m[J[0mAdmin@rederskinter# exit[24D[0m
+[J[?7h[0m[?12l[?25h[?2004l[6n[?2004h[?1l[?25l[0m[?7l[0m[J[0mAdmin@rederskinter>[19D[20C[?7h[0m[?12l[?25h[20D[J[0m[?7h[?2004lWARNING: your terminal doesn't support cursor position requests (CPR).
+[?2004h[?25l[0m[?7l[0m[J[0mAdmin@rederskinter>[19D[20C[?7h[0m[?12l[?25h[?25l[?7l[0mexit[?7h[0m[?12l[?25h[?25l[?7l[24D[0m[J[0mAdmin@rederskinter> exit[24D[0m
+[J[?7h[0m[?12l[?25h[?2004l
+Exiting...

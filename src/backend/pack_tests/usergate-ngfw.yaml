@@ -1,109 +1,759 @@
-# Образцы для пака usergate-ngfw (transport: ssh). Пак draft: на живом UserGate не запускался.
-# Формат вывода — по примерам «UserGate NGFW 7.1.x. Руководство администратора» (show settings administrators general,
-# show network zone "VPN for Site-to-Site"); значения изменены под сценарии.
+# Образцы пака usergate-ngfw 1.1.0. База — заводской UserGate NGFW 7.4.1.341220R
+# (лабораторный стенд): вывод CLI без заголовка записи. Секреты в выгрузке замаскированы.
 pack: usergate-ngfw
-
 base:
   cli:
     show settings administrators general: |
-      strong-password      : on
-      block-time           : 900
-      min-length           : 12
+      strong-password      : off
+      block-time           : 300
+      min-length           : 7
       min-uppercase        : 1
       min-lowercase        : 1
       min-digits           : 1
       spec-characters      : 1
       char-repetition      : 2
-      num-auth-attempts    : 5
+      num-auth-attempts    : 10
+       
     show network zone Untrusted: |
-      name                           : Untrusted
-      antispoof-enable               : on
-      antispoof-negate               : off
-      dos-protection-syn             :
-            enabled           : on
-            aggregate         : off
-            alert-threshold   : 3000
-            drop-threshold    : 6000
-      dos-protection-udp             :
-            enabled           : on
-            aggregate         : off
-            alert-threshold   : 3000
-            drop-threshold    : 6000
-      services-access               :
-           service                : Any ICMP
-           allowed-addresses      : Any
-           enabled                : on
-           service                : VPN
-           allowed-addresses      : Any
-           enabled                : on
+      name                        : Untrusted
+      antispoof-enable            : off
+      antispoof-negate            : off
+      dos-protection-syn          :
+          enabled            : on
+          aggregate          : off
+          alert-threshold    : 3000
+          drop-threshold     : 6000
+      dos-protection-udp          :
+          enabled            : on
+          aggregate          : off
+          alert-threshold    : 3000
+          drop-threshold     : 6000
+      dos-protection-icmp         :
+          enabled            : on
+          aggregate          : off
+          alert-threshold    : 100
+          drop-threshold     : 200
+      services-access             :
+          service              : Any ICMP
+          allowed-addresses    : Any
+          enabled              : on
+       
+          service              : SMTP Proxy
+          allowed-addresses    : Any
+          enabled              : on
+       
+          service              : POP3 Proxy
+          allowed-addresses    : Any
+          enabled              : on
+       
+      sessions-limit-enabled      : off
+      sessions-limit-threshold    : 0
+       
+    show network zone Management: |
+
+      name                        : Management
+      antispoof-enable            : off
+      antispoof-negate            : off
+      dos-protection-syn          :
+          enabled            : on
+          aggregate          : off
+          alert-threshold    : 3000
+          drop-threshold     : 6000
+      dos-protection-udp          :
+          enabled            : on
+          aggregate          : off
+          alert-threshold    : 3000
+          drop-threshold     : 6000
+      dos-protection-icmp         :
+          enabled            : on
+          aggregate          : off
+          alert-threshold    : 100
+          drop-threshold     : 200
+      services-access             :
+          service              : Any ICMP
+          allowed-addresses    : Any
+          enabled              : on
+       
+          service              : SNMP
+          allowed-addresses    : Any
+          enabled              : on
+       
+          service              : reponse_pages
+          allowed-addresses    : Any
+          enabled              : on
+       
+          service              : rpc
+          allowed-addresses    : Any
+          enabled              : on
+       
+          service              : Admin Console
+          allowed-addresses    : Any
+          enabled              : on
+       
+          service              : CLI over SSH
+          allowed-addresses    : Any
+          enabled              : on
+       
+          service              : HTTPS RPC
+          allowed-addresses    : Any
+          enabled              : on
+       
+      sessions-limit-enabled      : off
+      sessions-limit-threshold    : 0
+       
+    show network zone: |
+
+      Cluster
+          name                        : Cluster
+          antispoof-enable            : off
+          antispoof-negate            : off
+          dos-protection-syn          :
+              enabled            : off
+              aggregate          : off
+              alert-threshold    : 3000
+              drop-threshold     : 6000
+          dos-protection-udp          :
+              enabled            : off
+              aggregate          : off
+              alert-threshold    : 3000
+              drop-threshold     : 6000
+          dos-protection-icmp         :
+              enabled            : off
+              aggregate          : off
+              alert-threshold    : 100
+              drop-threshold     : 200
+          services-access             :
+              service              : Any ICMP
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : ha
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : Admin Console
+              allowed-addresses    : Any
+              enabled              : on
+       
+          sessions-limit-enabled      : off
+          sessions-limit-threshold    : 0
+       
+      DMZ
+          name                        : DMZ
+          antispoof-enable            : off
+          antispoof-negate            : off
+          dos-protection-syn          :
+              enabled            : on
+              aggregate          : off
+              alert-threshold    : 3000
+              drop-threshold     : 6000
+          dos-protection-udp          :
+              enabled            : on
+              aggregate          : off
+              alert-threshold    : 3000
+              drop-threshold     : 6000
+          dos-protection-icmp         :
+              enabled            : on
+              aggregate          : off
+              alert-threshold    : 100
+              drop-threshold     : 200
+          services-access             :
+              service              : Any ICMP
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : DNS
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : SMTP Proxy
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : POP3 Proxy
+              allowed-addresses    : Any
+              enabled              : on
+       
+          sessions-limit-enabled      : off
+          sessions-limit-threshold    : 0
+       
+      Management
+          name                        : Management
+          antispoof-enable            : off
+          antispoof-negate            : off
+          dos-protection-syn          :
+              enabled            : on
+              aggregate          : off
+              alert-threshold    : 3000
+              drop-threshold     : 6000
+          dos-protection-udp          :
+              enabled            : on
+              aggregate          : off
+              alert-threshold    : 3000
+              drop-threshold     : 6000
+          dos-protection-icmp         :
+              enabled            : on
+              aggregate          : off
+              alert-threshold    : 100
+              drop-threshold     : 200
+          services-access             :
+              service              : Any ICMP
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : SNMP
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : reponse_pages
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : rpc
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : Admin Console
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : CLI over SSH
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : HTTPS RPC
+              allowed-addresses    : Any
+              enabled              : on
+       
+          sessions-limit-enabled      : off
+          sessions-limit-threshold    : 0
+       
+      Trusted
+          name                        : Trusted
+          antispoof-enable            : off
+          antispoof-negate            : off
+          dos-protection-syn          :
+              enabled            : on
+              aggregate          : off
+              alert-threshold    : 3000
+              drop-threshold     : 6000
+          dos-protection-udp          :
+              enabled            : on
+              aggregate          : off
+              alert-threshold    : 3000
+              drop-threshold     : 6000
+          dos-protection-icmp         :
+              enabled            : on
+              aggregate          : off
+              alert-threshold    : 100
+              drop-threshold     : 200
+          services-access             :
+              service              : Any ICMP
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : reponse_pages
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : DNS
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : HTTP Proxy
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : Authorization agent
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : SMTP Proxy
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : POP3 Proxy
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : SCADA
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : Endpoint connect
+              allowed-addresses    : Any
+              enabled              : on
+       
+          sessions-limit-enabled      : off
+          sessions-limit-threshold    : 0
+       
+      Tunnel inspection zone
+          name                        : Tunnel inspection zone
+          antispoof-enable            : off
+          antispoof-negate            : off
+          dos-protection-syn          :
+              enabled            : off
+              aggregate          : off
+              alert-threshold    : 3000
+              drop-threshold     : 6000
+          dos-protection-udp          :
+              enabled            : off
+              aggregate          : off
+              alert-threshold    : 3000
+              drop-threshold     : 6000
+          dos-protection-icmp         :
+              enabled            : off
+              aggregate          : off
+              alert-threshold    : 100
+              drop-threshold     : 200
+          sessions-limit-enabled      : off
+          sessions-limit-threshold    : 0
+       
+      Untrusted
+          name                        : Untrusted
+          antispoof-enable            : off
+          antispoof-negate            : off
+          dos-protection-syn          :
+              enabled            : on
+              aggregate          : off
+              alert-threshold    : 3000
+              drop-threshold     : 6000
+          dos-protection-udp          :
+              enabled            : on
+              aggregate          : off
+              alert-threshold    : 3000
+              drop-threshold     : 6000
+          dos-protection-icmp         :
+              enabled            : on
+              aggregate          : off
+              alert-threshold    : 100
+              drop-threshold     : 200
+          services-access             :
+              service              : Any ICMP
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : SMTP Proxy
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : POP3 Proxy
+              allowed-addresses    : Any
+              enabled              : on
+       
+          sessions-limit-enabled      : off
+          sessions-limit-threshold    : 0
+       
+      VPN for remote access
+          name                        : VPN for remote access
+          antispoof-enable            : off
+          antispoof-negate            : off
+          dos-protection-syn          :
+              enabled            : on
+              aggregate          : off
+              alert-threshold    : 3000
+              drop-threshold     : 6000
+          dos-protection-udp          :
+              enabled            : on
+              aggregate          : off
+              alert-threshold    : 3000
+              drop-threshold     : 6000
+          dos-protection-icmp         :
+              enabled            : on
+              aggregate          : off
+              alert-threshold    : 100
+              drop-threshold     : 200
+          services-access             :
+              service              : Any ICMP
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : reponse_pages
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : DNS
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : HTTP Proxy
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : Endpoint connect
+              allowed-addresses    : Any
+              enabled              : on
+       
+          sessions-limit-enabled      : off
+          sessions-limit-threshold    : 0
+       
+      VPN for Site-to-Site
+          name                        : VPN for Site-to-Site
+          antispoof-enable            : off
+          antispoof-negate            : off
+          dos-protection-syn          :
+              enabled            : on
+              aggregate          : off
+              alert-threshold    : 3000
+              drop-threshold     : 6000
+          dos-protection-udp          :
+              enabled            : on
+              aggregate          : off
+              alert-threshold    : 3000
+              drop-threshold     : 6000
+          dos-protection-icmp         :
+              enabled            : on
+              aggregate          : off
+              alert-threshold    : 100
+              drop-threshold     : 200
+          services-access             :
+              service              : Any ICMP
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : reponse_pages
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : DNS
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : HTTP Proxy
+              allowed-addresses    : Any
+              enabled              : on
+       
+              service              : Endpoint connect
+              allowed-addresses    : Any
+              enabled              : on
+       
+          sessions-limit-enabled      : off
+          sessions-limit-threshold    : 0
+       
+    show network-policy firewall: |
+
+      % ----------------- 1 -----------------
+      DENY \
+          src.zone = Trusted \
+          dst.zone = Untrusted \
+          dst.ip = lib.network("Botnets IP list") \
+          desc("Firewall rule which blocks traffic from clients in Trusted zone to the list of IP addresses (updatable Botnets IP black list) in Untrusted zone. Recommended to keep this rule active for security reasons.") \
+          enabled(false) \
+          name("Block to botnets")
+      % ----------------- 2 -----------------
+      DENY \
+          src.zone = Untrusted \
+          src.ip = lib.network("Botnets IP list") \
+          desc("Firewall rule which blocks traffic from the list of IP addresses (updatable Botnets IP black list) in Untrusted zone to clients in Trusted zone. Recommended to keep this rule active for security reasons.") \
+          enabled(false) \
+          name("Block from botnets")
+      % ----------------- 3 -----------------
+      DENY \
+          dst.zone = Untrusted \
+          dst.ip = lib.network("Compliance to RU RKN (IP adresses)") \
+          desc("Пример правила, блокирующего доступ к IP-адресам, находящихся в списке Роскомнадзора. Для более точной блокировки необходимо использовать блокирование по доменным именам или по URL. Для работы данного правила необходима активная подписка ATP. Данное правило создано как пример, может быть изменено или удалено при необходимости.") \
+          enabled(false) \
+          name("Example block RU RKN by IP list")
+      % ----------------- 4 -----------------
+      PASS \
+          src.zone = Trusted \
+          dst.zone = Untrusted \
+          desc("Firewall rule which allows traffic from Trusted zone to Untrusted zone. This is an example rule which can be changed or deleted if necessary.") \
+          enabled(false) \
+          name("Allow trusted to untrusted")
+      % ----------------- 5 -----------------
+      PASS \
+          src.zone = DMZ \
+          dst.zone = Untrusted \
+          desc("Firewall rule which allows traffic from DMZ zone to Untrusted zone. This is an example rule which can be changed or deleted if necessary.") \
+          enabled(false) \
+          name("Allow from DMZ to Untrusted")
+      % ----------------- 6 -----------------
+      PASS \
+          src.zone = "VPN for remote access" \
+          dst.zone = (Untrusted, Trusted) \
+          desc("Example firewall rule which allows traffic from VPN for remote access zone to Trusted and Untrusted zones. This is an example rule which can be changed or deleted if necessary.") \
+          enabled(false) \
+          name("VPN for remote access to Trusted and Untrusted")
+      % ----------------- 7 -----------------
+      PASS \
+          src.zone = "VPN for Site-to-Site" \
+          dst.zone = (Untrusted, Trusted) \
+          desc("Example firewall rule which allows traffic from VPN for Site-to-Site zone to Trusted and Untrusted zones. This is an example rule which can be changed or deleted if necessary.") \
+          enabled(false) \
+          name("VPN for Site-to-Site to Trusted and Untrusted")
+    show logs logs-export: |
+
+      Example log export syslog
+          name           : Example log export syslog
+          description    : Log export rule which sends logs to external syslog server. This is an example rule which can be changed or deleted if necessary.
+          enabled        : off
+          server-type    : syslog
+          target         : 192.168.1.9
+          port           : 514
+          passive        : off
+          transport      : udp
+          protocol       : rfc5424
+          severity       : info
+          facility       : user-level
+          hostname       : UGOS
+          app-name       : utm-loganalyzer
+          logs           :
+              dns             : json
+              events          : cef
+              idps            : cef
+              ssh             : off
+              traffic         : cef
+              webaccess       : cef
+              mailsecurity    : off
+              userid          : off
+       
+      Example log export ftp
+          name           : Example log export ftp
+          description    : Log export rule which sends logs to external ftp server. This is an example rule which can be changed or deleted if necessary.
+          enabled        : off
+          server-type    : ftp
+          target         : 192.168.1.9
+          port           : 21
+          login          : logsExportUser
+          path           : utmlogs
+          passive        : off
+          logs           :
+              dns             : json
+              events          : json
+              idps            : json
+              ssh             : off
+              traffic         : json
+              webaccess       : json
+              mailsecurity    : off
+              userid          : off
+       
+      Example log export ssh
+          name           : Example log export ssh
+          description    : Log export rule which sends logs to external ssh server. This is an example rule which can be changed or deleted if necessary.
+          enabled        : off
+          server-type    : ssh
+          target         : 192.168.1.9
+          port           : 22
+          login          : logsExportUser
+          path           : utmlogs
+          passive        : off
+          logs           :
+              dns             : json
+              events          : json
+              idps            : json
+              ssh             : off
+              traffic         : json
+              webaccess       : json
+              mailsecurity    : off
+              userid          : off
+       
+    show system version: |
+      UGOS NGFW 7.4.1.341220R
 
 cases:
-  - name: внешняя зона закрыта для управления, политика паролей включена — всё соблюдено
+  - name: заводские умолчания UserGate 7.4.1
     detect: true
+    firmware: {name: usergate next-generation firewall (ngfw), version: 7.4.1.341220R}
     expect:
-      usergate_ngfw.admin_strong_password: pass
-      usergate_ngfw.admin_password_min_length: pass
-      usergate_ngfw.admin_lockout_attempts: pass
+      usergate_ngfw.admin_strong_password: fail
+      usergate_ngfw.admin_password_min_length: fail
+      usergate_ngfw.admin_lockout_attempts: fail
       usergate_ngfw.untrusted_management_restricted: pass
-      usergate_ngfw.untrusted_antispoofing: pass
+      usergate_ngfw.management_services_restricted: fail
+      usergate_ngfw.untrusted_antispoofing: fail
+      usergate_ngfw.zones_antispoofing: fail
       usergate_ngfw.untrusted_syn_flood_protection: pass
+      usergate_ngfw.untrusted_udp_flood_protection: pass
+      usergate_ngfw.untrusted_icmp_flood_protection: pass
+      usergate_ngfw.firewall_no_any_any_accept: pass
+      usergate_ngfw.log_export_enabled: fail
 
-  - name: пример из руководства — сложный пароль выключен, 10 попыток, длина 7
+  - name: политика паролей, антиспуфинг, управление и выгрузка журналов приведены к норме
+    detect: true
     cli:
       show settings administrators general: |
-        strong-password      : off
-        block-time           : 400
-        min-length           : 7
+        strong-password      : on
+        block-time           : 900
+        min-length           : 12
         min-uppercase        : 1
         min-lowercase        : 1
         min-digits           : 1
         spec-characters      : 1
         char-repetition      : 2
-        num-auth-attempts    : 10
+        num-auth-attempts    : 5
+      show network zone Untrusted: |
+        name                        : Untrusted
+        antispoof-enable            : on
+        dos-protection-syn          :
+            enabled            : on
+        dos-protection-udp          :
+            enabled            : on
+        dos-protection-icmp         :
+            enabled            : on
+        services-access             :
+            service              : Any ICMP
+            allowed-addresses    : Any
+            enabled              : on
+      show network zone Management: |
+        name                        : Management
+        antispoof-enable            : on
+        services-access             :
+            service              : Admin Console
+            allowed-addresses    : admins
+            enabled              : on
+            service              : CLI over SSH
+            allowed-addresses    : admins
+            enabled              : on
+            service              : rpc
+            allowed-addresses    : admins
+            enabled              : on
+            service              : HTTPS RPC
+            allowed-addresses    : admins
+            enabled              : on
+            service              : SNMP
+            allowed-addresses    : admins
+            enabled              : off
+      show network zone: |
+        Management
+            name: Management
+            antispoof-enable: on
+        Untrusted
+            name: Untrusted
+            antispoof-enable: on
+      show logs logs-export: |
+        Example log export syslog
+            name           : syslog
+            server-type    : syslog
+            enabled        : on
+            target         : 192.168.1.9
     expect:
-      usergate_ngfw.admin_strong_password: fail
-      usergate_ngfw.admin_password_min_length: fail
-      usergate_ngfw.admin_lockout_attempts: fail
+      usergate_ngfw.admin_strong_password: pass
+      usergate_ngfw.admin_password_min_length: pass
+      usergate_ngfw.admin_lockout_attempts: pass
+      usergate_ngfw.untrusted_management_restricted: pass
+      usergate_ngfw.management_services_restricted: pass
+      usergate_ngfw.untrusted_antispoofing: pass
+      usergate_ngfw.zones_antispoofing: pass
+      usergate_ngfw.untrusted_syn_flood_protection: pass
+      usergate_ngfw.untrusted_udp_flood_protection: pass
+      usergate_ngfw.untrusted_icmp_flood_protection: pass
+      usergate_ngfw.firewall_no_any_any_accept: pass
+      usergate_ngfw.log_export_enabled: pass
 
-  - name: веб-консоль открыта из Untrusted для всех, антиспуфинг и защита от SYN-флуда выключены
+  - name: управление из Untrusted открыто, флуд выключен, есть any-any
+    detect: true
     cli:
       show network zone Untrusted: |
-        name                           : Untrusted
-        antispoof-enable               : off
-        dos-protection-syn             :
-              enabled           : off
-              aggregate         : off
-        services-access               :
-             service                : Any ICMP
-             allowed-addresses      : Any
-             enabled                : on
-             service                : Admin Console
-             allowed-addresses      : Any
-             enabled                : on
+        name                        : Untrusted
+        antispoof-enable            : off
+        dos-protection-syn          :
+            enabled            : off
+        dos-protection-udp          :
+            enabled            : off
+        dos-protection-icmp         :
+            enabled            : off
+        services-access             :
+            service              : Admin Console
+            allowed-addresses    : Any
+            enabled              : on
+            service              : CLI over SSH
+            allowed-addresses    : Any
+            enabled              : on
+            service              : HTTPS RPC
+            allowed-addresses    : Any
+            enabled              : on
+      show network-policy firewall: |
+
+        % ----------------- 1 -----------------
+        DENY \
+            src.zone = Trusted \
+            dst.zone = Untrusted \
+            dst.ip = lib.network("Botnets IP list") \
+            desc("Firewall rule which blocks traffic from clients in Trusted zone to the list of IP addresses (updatable Botnets IP black list) in Untrusted zone. Recommended to keep this rule active for security reasons.") \
+            enabled(false) \
+            name("Block to botnets")
+        % ----------------- 2 -----------------
+        DENY \
+            src.zone = Untrusted \
+            src.ip = lib.network("Botnets IP list") \
+            desc("Firewall rule which blocks traffic from the list of IP addresses (updatable Botnets IP black list) in Untrusted zone to clients in Trusted zone. Recommended to keep this rule active for security reasons.") \
+            enabled(false) \
+            name("Block from botnets")
+        % ----------------- 3 -----------------
+        DENY \
+            dst.zone = Untrusted \
+            dst.ip = lib.network("Compliance to RU RKN (IP adresses)") \
+            desc("Пример правила, блокирующего доступ к IP-адресам, находящихся в списке Роскомнадзора. Для более точной блокировки необходимо использовать блокирование по доменным именам или по URL. Для работы данного правила необходима активная подписка ATP. Данное правило создано как пример, может быть изменено или удалено при необходимости.") \
+            enabled(false) \
+            name("Example block RU RKN by IP list")
+        % ----------------- 4 -----------------
+        PASS \
+            src.zone = Trusted \
+            dst.zone = Untrusted \
+            desc("Firewall rule which allows traffic from Trusted zone to Untrusted zone. This is an example rule which can be changed or deleted if necessary.") \
+            enabled(false) \
+            name("Allow trusted to untrusted")
+        % ----------------- 5 -----------------
+        PASS \
+            src.zone = DMZ \
+            dst.zone = Untrusted \
+            desc("Firewall rule which allows traffic from DMZ zone to Untrusted zone. This is an example rule which can be changed or deleted if necessary.") \
+            enabled(false) \
+            name("Allow from DMZ to Untrusted")
+        % ----------------- 6 -----------------
+        PASS \
+            src.zone = "VPN for remote access" \
+            dst.zone = (Untrusted, Trusted) \
+            desc("Example firewall rule which allows traffic from VPN for remote access zone to Trusted and Untrusted zones. This is an example rule which can be changed or deleted if necessary.") \
+            enabled(false) \
+            name("VPN for remote access to Trusted and Untrusted")
+        % ----------------- 7 -----------------
+        PASS \
+            src.zone = "VPN for Site-to-Site" \
+            dst.zone = (Untrusted, Trusted) \
+            desc("Example firewall rule which allows traffic from VPN for Site-to-Site zone to Trusted and Untrusted zones. This is an example rule which can be changed or deleted if necessary.") \
+            enabled(false) \
+            name("VPN for Site-to-Site to Trusted and Untrusted")
+        % ----------------- 8 -----------------
+        PASS \
+            enabled(true) \
+            name("Allow any any")
     expect:
       usergate_ngfw.untrusted_management_restricted: fail
       usergate_ngfw.untrusted_antispoofing: fail
       usergate_ngfw.untrusted_syn_flood_protection: fail
+      usergate_ngfw.untrusted_udp_flood_protection: fail
+      usergate_ngfw.untrusted_icmp_flood_protection: fail
+      usergate_ngfw.firewall_no_any_any_accept: fail
 
-  - name: CLI по SSH из Untrusted разрешён только с адресов администраторов — не нарушение
+  - name: CLI по SSH из Untrusted разрешён только с адресов администраторов
     cli:
       show network zone Untrusted: |
-        name                           : Untrusted
-        antispoof-enable               : on
-        services-access               :
-             service                : CLI over SSH
-             allowed-addresses      : admins-ip-list
-             enabled                : on
+        name                        : Untrusted
+        antispoof-enable            : on
+        services-access             :
+            service              : CLI over SSH
+            allowed-addresses    : admins-ip-list
+            enabled              : on
+            service              : rpc
+            allowed-addresses    : admins-ip-list
+            enabled              : on
     expect:
       usergate_ngfw.untrusted_management_restricted: pass
 
-  - name: выгрузки зоны Untrusted нет (зона названа иначе) — проверки зоны не выполняются
+  - name: выгрузки зоны Untrusted нет — проверки зоны не выполняются
     cli:
-      show network zone Untrusted: "% Wrong zone name\n"
+      show network zone Untrusted: |
+        % Wrong zone name
     expect:
       usergate_ngfw.untrusted_management_restricted: error
+      usergate_ngfw.untrusted_antispoofing: error
+      usergate_ngfw.untrusted_syn_flood_protection: error
 
   - name: не UserGate — пак не применяется
     cli:
-      show settings administrators general: "% Unrecognized command\n"
+      show settings administrators general: |
+        % Unrecognized command
     detect: false
+

@@ -186,7 +186,7 @@ firmware:
 | `samba` | 1.0.0 | local | draft | 1 | Только при наличии `smb.conf` |
 | `snr-switch` | 1.0.0 | ssh | draft | 10 | SNR-S (ПО семейства DCN); прошивка → БДУ |
 | `ubuntu-server` | 1.4.0 | local | baseline | 25 | Перенос старого агента + auditd, политика паролей; см. `docs/agent-packs/stage1-report.md` |
-| `usergate-ngfw` | 1.0.0 | ssh | draft | 6 | UserGate NGFW 7.x: политика паролей администраторов, управление из Untrusted; по выгрузке вывода CLI |
+| `usergate-ngfw` | 1.1.0 | ssh | draft | 12 | UserGate NGFW 7.x: агент (XML-RPC, SSH exec, интерактивный SSH) или выгрузка; пароли, зоны, any-any, журналы; прошивка → БДУ |
 | `vipnet-coordinator` | 1.0.0 | ssh | draft | 6 | ViPNet Coordinator HW/KB 4.x (ИнфоТеКС); прошивка → БДУ |
 | `windows-client` | 1.0.0 | local | draft | 39 | Windows 10/11 |
 | `windows-dc` | 1.0.0 | local | draft | 26 | Контроллер домена AD |

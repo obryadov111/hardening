@@ -5,7 +5,7 @@
 #   фактическими значениями — артефакт live-<ОС>.json: образцы с реальной системы.
 #   Не ловит: опечатку в пути реестра — отсутствующий ключ для Windows норма («не задано» → умолчание).
 #   Поэтому в артефакте видно, какие значения найдены в реестре, а какие взяты по умолчанию.
-# exe: агент (collector.py + probes.py, только стандартная библиотека) собирается PyInstaller в один файл —
+# exe: агент (collector.py + probes.py + usergate.py, только стандартная библиотека) собирается PyInstaller в один файл —
 #   на Windows-хостах нет Python. Собранный файл прогоняется по подписанным манифестам без сервера.
 name: Windows packs
 
@@ -87,7 +87,7 @@ jobs:
           pip install -r src/backend/requirements.txt
 
       - name: Build hardening-agent.exe
-        run: pyinstaller --onefile --name hardening-agent --paths agent --hidden-import probes agent/collector.py
+        run: pyinstaller --onefile --name hardening-agent --paths agent --hidden-import probes --hidden-import usergate agent/collector.py
 
       - name: Built agent runs on signed manifests without a server
         shell: pwsh

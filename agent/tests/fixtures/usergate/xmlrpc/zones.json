@@ -1,0 +1,1650 @@
+[
+ {
+  "id": 5,
+  "name": "Cluster",
+  "description": "",
+  "dos_profiles": [
+   {
+    "enabled": false,
+    "kind": "syn",
+    "alert_threshold": 3000,
+    "drop_threshold": 6000,
+    "aggregate": false,
+    "excluded_ips": []
+   },
+   {
+    "enabled": false,
+    "kind": "udp",
+    "alert_threshold": 3000,
+    "drop_threshold": 6000,
+    "aggregate": false,
+    "excluded_ips": []
+   },
+   {
+    "enabled": false,
+    "kind": "icmp",
+    "alert_threshold": 100,
+    "drop_threshold": 200,
+    "aggregate": false,
+    "excluded_ips": []
+   }
+  ],
+  "services_access": [
+   {
+    "enabled": false,
+    "service_id": 2,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 4,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 5,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 7,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 9,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 10,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 11,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 12,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 13,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 14,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 15,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 16,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 17,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 18,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 19,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 20,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 21,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 22,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 23,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 24,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 25,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 26,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 27,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 28,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 29,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 30,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 31,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 32,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 33,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 34,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 1,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 6,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 8,
+    "allowed_ips": []
+   }
+  ],
+  "readonly": false,
+  "enable_antispoof": false,
+  "antispoof_invert": false,
+  "networks": [],
+  "sessions_limit_enabled": false,
+  "sessions_limit_threshold": 0,
+  "sessions_limit_exclusions": [],
+  "cc": false
+ },
+ {
+  "id": 4,
+  "name": "DMZ",
+  "description": "",
+  "dos_profiles": [
+   {
+    "enabled": true,
+    "kind": "syn",
+    "alert_threshold": 3000,
+    "drop_threshold": 6000,
+    "aggregate": false,
+    "excluded_ips": []
+   },
+   {
+    "enabled": true,
+    "kind": "udp",
+    "alert_threshold": 3000,
+    "drop_threshold": 6000,
+    "aggregate": false,
+    "excluded_ips": []
+   },
+   {
+    "enabled": true,
+    "kind": "icmp",
+    "alert_threshold": 100,
+    "drop_threshold": 200,
+    "aggregate": false,
+    "excluded_ips": []
+   }
+  ],
+  "services_access": [
+   {
+    "enabled": false,
+    "service_id": 2,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 4,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 5,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 6,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 7,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 8,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 10,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 11,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 14,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 15,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 16,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 17,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 18,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 19,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 20,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 21,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 22,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 23,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 24,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 25,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 26,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 27,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 28,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 29,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 30,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 31,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 32,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 33,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 34,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 1,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 9,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 12,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 13,
+    "allowed_ips": []
+   }
+  ],
+  "readonly": false,
+  "enable_antispoof": false,
+  "antispoof_invert": false,
+  "networks": [],
+  "sessions_limit_enabled": false,
+  "sessions_limit_threshold": 0,
+  "sessions_limit_exclusions": [],
+  "cc": false
+ },
+ {
+  "id": 1,
+  "name": "Management",
+  "description": "",
+  "dos_profiles": [
+   {
+    "enabled": true,
+    "kind": "syn",
+    "alert_threshold": 3000,
+    "drop_threshold": 6000,
+    "aggregate": false,
+    "excluded_ips": []
+   },
+   {
+    "enabled": true,
+    "kind": "udp",
+    "alert_threshold": 3000,
+    "drop_threshold": 6000,
+    "aggregate": false,
+    "excluded_ips": []
+   },
+   {
+    "enabled": true,
+    "kind": "icmp",
+    "alert_threshold": 100,
+    "drop_threshold": 200,
+    "aggregate": false,
+    "excluded_ips": []
+   }
+  ],
+  "services_access": [
+   {
+    "enabled": false,
+    "service_id": 6,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 7,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 9,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 10,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 11,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 12,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 13,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 15,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 16,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 17,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 18,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 19,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 20,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 21,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 22,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 23,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 24,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 25,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 26,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 27,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 28,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 29,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 30,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 31,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 32,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 33,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 1,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 2,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 4,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 5,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 8,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 14,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 34,
+    "allowed_ips": []
+   }
+  ],
+  "readonly": false,
+  "enable_antispoof": false,
+  "antispoof_invert": false,
+  "networks": [],
+  "sessions_limit_enabled": false,
+  "sessions_limit_threshold": 0,
+  "sessions_limit_exclusions": [],
+  "cc": false
+ },
+ {
+  "id": 2,
+  "name": "Trusted",
+  "description": "",
+  "dos_profiles": [
+   {
+    "enabled": true,
+    "kind": "syn",
+    "alert_threshold": 3000,
+    "drop_threshold": 6000,
+    "aggregate": false,
+    "excluded_ips": []
+   },
+   {
+    "enabled": true,
+    "kind": "udp",
+    "alert_threshold": 3000,
+    "drop_threshold": 6000,
+    "aggregate": false,
+    "excluded_ips": []
+   },
+   {
+    "enabled": true,
+    "kind": "icmp",
+    "alert_threshold": 100,
+    "drop_threshold": 200,
+    "aggregate": false,
+    "excluded_ips": []
+   }
+  ],
+  "services_access": [
+   {
+    "enabled": false,
+    "service_id": 2,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 5,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 6,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 7,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 8,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 14,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 15,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 16,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 18,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 19,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 20,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 21,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 22,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 23,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 24,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 25,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 26,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 27,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 28,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 29,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 30,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 31,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 32,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 34,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 1,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 4,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 9,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 10,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 11,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 12,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 13,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 17,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 33,
+    "allowed_ips": []
+   }
+  ],
+  "readonly": false,
+  "enable_antispoof": false,
+  "antispoof_invert": false,
+  "networks": [],
+  "sessions_limit_enabled": false,
+  "sessions_limit_threshold": 0,
+  "sessions_limit_exclusions": [],
+  "cc": false
+ },
+ {
+  "id": 8,
+  "name": "Tunnel inspection zone",
+  "description": "",
+  "dos_profiles": [
+   {
+    "enabled": false,
+    "kind": "syn",
+    "alert_threshold": 3000,
+    "drop_threshold": 6000,
+    "aggregate": false,
+    "excluded_ips": []
+   },
+   {
+    "enabled": false,
+    "kind": "udp",
+    "alert_threshold": 3000,
+    "drop_threshold": 6000,
+    "aggregate": false,
+    "excluded_ips": []
+   },
+   {
+    "enabled": false,
+    "kind": "icmp",
+    "alert_threshold": 100,
+    "drop_threshold": 200,
+    "aggregate": false,
+    "excluded_ips": []
+   }
+  ],
+  "services_access": [
+   {
+    "enabled": false,
+    "service_id": 1,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 2,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 4,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 5,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 6,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 7,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 8,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 9,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 10,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 11,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 12,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 13,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 14,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 15,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 16,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 17,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 18,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 19,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 20,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 21,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 22,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 23,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 24,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 25,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 26,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 27,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 28,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 29,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 30,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 31,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 32,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 33,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 34,
+    "allowed_ips": []
+   }
+  ],
+  "readonly": false,
+  "enable_antispoof": false,
+  "antispoof_invert": false,
+  "networks": [],
+  "sessions_limit_enabled": false,
+  "sessions_limit_threshold": 0,
+  "sessions_limit_exclusions": [],
+  "cc": false
+ },
+ {
+  "id": 3,
+  "name": "Untrusted",
+  "description": "",
+  "dos_profiles": [
+   {
+    "enabled": true,
+    "kind": "syn",
+    "alert_threshold": 3000,
+    "drop_threshold": 6000,
+    "aggregate": false,
+    "excluded_ips": []
+   },
+   {
+    "enabled": true,
+    "kind": "udp",
+    "alert_threshold": 3000,
+    "drop_threshold": 6000,
+    "aggregate": false,
+    "excluded_ips": []
+   },
+   {
+    "enabled": true,
+    "kind": "icmp",
+    "alert_threshold": 100,
+    "drop_threshold": 200,
+    "aggregate": false,
+    "excluded_ips": []
+   }
+  ],
+  "services_access": [
+   {
+    "enabled": false,
+    "service_id": 2,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 4,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 5,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 6,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 7,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 8,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 9,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 10,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 11,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 14,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 15,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 16,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 17,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 18,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 19,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 20,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 21,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 22,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 23,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 24,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 25,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 26,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 27,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 28,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 29,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 30,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 31,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 32,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 33,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 34,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 1,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 12,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 13,
+    "allowed_ips": []
+   }
+  ],
+  "readonly": false,
+  "enable_antispoof": false,
+  "antispoof_invert": false,
+  "networks": [],
+  "sessions_limit_enabled": false,
+  "sessions_limit_threshold": 0,
+  "sessions_limit_exclusions": [],
+  "cc": false
+ },
+ {
+  "id": 6,
+  "name": "VPN for remote access",
+  "description": "",
+  "dos_profiles": [
+   {
+    "enabled": true,
+    "kind": "syn",
+    "alert_threshold": 3000,
+    "drop_threshold": 6000,
+    "aggregate": false,
+    "excluded_ips": []
+   },
+   {
+    "enabled": true,
+    "kind": "udp",
+    "alert_threshold": 3000,
+    "drop_threshold": 6000,
+    "aggregate": false,
+    "excluded_ips": []
+   },
+   {
+    "enabled": true,
+    "kind": "icmp",
+    "alert_threshold": 100,
+    "drop_threshold": 200,
+    "aggregate": false,
+    "excluded_ips": []
+   }
+  ],
+  "services_access": [
+   {
+    "enabled": false,
+    "service_id": 2,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 5,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 6,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 7,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 8,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 11,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 12,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 13,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 14,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 15,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 16,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 17,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 18,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 19,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 20,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 21,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 22,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 23,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 24,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 25,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 26,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 27,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 28,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 29,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 30,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 31,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 32,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 34,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 1,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 4,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 9,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 10,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 33,
+    "allowed_ips": []
+   }
+  ],
+  "readonly": false,
+  "enable_antispoof": false,
+  "antispoof_invert": false,
+  "networks": [],
+  "sessions_limit_enabled": false,
+  "sessions_limit_threshold": 0,
+  "sessions_limit_exclusions": [],
+  "cc": false
+ },
+ {
+  "id": 7,
+  "name": "VPN for Site-to-Site",
+  "description": "",
+  "dos_profiles": [
+   {
+    "enabled": true,
+    "kind": "syn",
+    "alert_threshold": 3000,
+    "drop_threshold": 6000,
+    "aggregate": false,
+    "excluded_ips": []
+   },
+   {
+    "enabled": true,
+    "kind": "udp",
+    "alert_threshold": 3000,
+    "drop_threshold": 6000,
+    "aggregate": false,
+    "excluded_ips": []
+   },
+   {
+    "enabled": true,
+    "kind": "icmp",
+    "alert_threshold": 100,
+    "drop_threshold": 200,
+    "aggregate": false,
+    "excluded_ips": []
+   }
+  ],
+  "services_access": [
+   {
+    "enabled": false,
+    "service_id": 2,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 5,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 6,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 7,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 8,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 11,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 12,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 13,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 14,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 15,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 16,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 17,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 18,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 19,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 20,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 21,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 22,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 23,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 24,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 25,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 26,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 27,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 28,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 29,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 30,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 31,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 32,
+    "allowed_ips": []
+   },
+   {
+    "enabled": false,
+    "service_id": 34,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 1,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 4,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 9,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 10,
+    "allowed_ips": []
+   },
+   {
+    "enabled": true,
+    "service_id": 33,
+    "allowed_ips": []
+   }
+  ],
+  "readonly": false,
+  "enable_antispoof": false,
+  "antispoof_invert": false,
+  "networks": [],
+  "sessions_limit_enabled": false,
+  "sessions_limit_threshold": 0,
+  "sessions_limit_exclusions": [],
+  "cc": false
+ }
+]

@@ -1,0 +1,11 @@
+
+strong-password      : off
+block-time           : 300
+min-length           : 7
+min-uppercase        : 1
+min-lowercase        : 1
+min-digits           : 1
+spec-characters      : 1
+char-repetition      : 2
+num-auth-attempts    : 10
+ 

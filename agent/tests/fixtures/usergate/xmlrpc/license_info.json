@@ -1,0 +1,33 @@
+{
+ "pin_code": "XXXX-XXXXX-XXXX-XXXX",
+ "reg_name": "",
+ "user_name": "",
+ "last_name": "",
+ "email": "",
+ "country": "",
+ "region": "",
+ "company": "",
+ "address": "",
+ "phone": "",
+ "fax": "",
+ "expiry_date": "2027-02-25T00:00:00Z",
+ "license_type": "normal",
+ "modules": [
+  {
+   "name": "users",
+   "expiry": "2027-02-25T00:00:00Z",
+   "version": ""
+  },
+  {
+   "name": "securityupdate",
+   "expiry": "2027-02-25T00:00:00Z",
+   "version": ""
+  }
+ ],
+ "product": "utm",
+ "version": "7.4.1.341220R",
+ "hw_acc_ver": null,
+ "product_serial": "",
+ "product_device": "Standard PC (Q35 + ICH9, 2009)",
+ "user_limit": 10
+}

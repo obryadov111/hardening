@@ -1,0 +1,52 @@
+# show network zone Management
+
+name                        : Management
+antispoof-enable            : off
+antispoof-negate            : off
+dos-protection-syn          :
+    enabled            : on
+    aggregate          : off
+    alert-threshold    : 3000
+    drop-threshold     : 6000
+dos-protection-udp          :
+    enabled            : on
+    aggregate          : off
+    alert-threshold    : 3000
+    drop-threshold     : 6000
+dos-protection-icmp         :
+    enabled            : on
+    aggregate          : off
+    alert-threshold    : 100
+    drop-threshold     : 200
+services-access             :
+    service              : Any ICMP
+    allowed-addresses    : Any
+    enabled              : on
+ 
+    service              : SNMP
+    allowed-addresses    : Any
+    enabled              : on
+ 
+    service              : reponse_pages
+    allowed-addresses    : Any
+    enabled              : on
+ 
+    service              : rpc
+    allowed-addresses    : Any
+    enabled              : on
+ 
+    service              : Admin Console
+    allowed-addresses    : Any
+    enabled              : on
+ 
+    service              : CLI over SSH
+    allowed-addresses    : Any
+    enabled              : on
+ 
+    service              : HTTPS RPC
+    allowed-addresses    : Any
+    enabled              : on
+ 
+sessions-limit-enabled      : off
+sessions-limit-threshold    : 0
+ 

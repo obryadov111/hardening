@@ -43,6 +43,9 @@ def build_manifest(pack: Pack) -> dict:
     if pack.firmware is not None:
         # Только у паков с прошивкой: манифесты остальных паков (и их подписи) не меняются.
         manifest["firmware"] = pack.firmware.model_dump(mode="json", exclude_none=True)
+    if pack.xmlrpc_methods:
+        # То же для белого списка XML-RPC: у паков без API поле не появляется.
+        manifest["xmlrpc_methods"] = list(pack.xmlrpc_methods)
     return manifest
 
 

@@ -1,0 +1,34 @@
+name                        : Untrusted
+antispoof-enable            : off
+antispoof-negate            : off
+dos-protection-syn          :
+    enabled            : on
+    aggregate          : off
+    alert-threshold    : 3000
+    drop-threshold     : 6000
+dos-protection-udp          :
+    enabled            : on
+    aggregate          : off
+    alert-threshold    : 3000
+    drop-threshold     : 6000
+dos-protection-icmp         :
+    enabled            : on
+    aggregate          : off
+    alert-threshold    : 100
+    drop-threshold     : 200
+services-access             :
+    service              : Any ICMP
+    allowed-addresses    : Any
+    enabled              : on
+ 
+    service              : SMTP Proxy
+    allowed-addresses    : Any
+    enabled              : on
+ 
+    service              : POP3 Proxy
+    allowed-addresses    : Any
+    enabled              : on
+ 
+sessions-limit-enabled      : off
+sessions-limit-threshold    : 0
+ 

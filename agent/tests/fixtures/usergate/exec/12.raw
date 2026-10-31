@@ -1,0 +1,66 @@
+# show logs logs-export
+
+Example log export syslog
+    name           : Example log export syslog
+    description    : Log export rule which sends logs to external syslog server. This is an example rule which can be changed or deleted if necessary.
+    enabled        : off
+    server-type    : syslog
+    target         : 192.168.1.9
+    port           : 514
+    passive        : off
+    transport      : udp
+    protocol       : rfc5424
+    severity       : info
+    facility       : user-level
+    hostname       : UGOS
+    app-name       : utm-loganalyzer
+    logs           :
+        dns             : json
+        events          : cef
+        idps            : cef
+        ssh             : off
+        traffic         : cef
+        webaccess       : cef
+        mailsecurity    : off
+        userid          : off
+ 
+Example log export ftp
+    name           : Example log export ftp
+    description    : Log export rule which sends logs to external ftp server. This is an example rule which can be changed or deleted if necessary.
+    enabled        : off
+    server-type    : ftp
+    target         : 192.168.1.9
+    port           : 21
+    login          : logsExportUser
+    path           : utmlogs
+    passive        : off
+    logs           :
+        dns             : json
+        events          : json
+        idps            : json
+        ssh             : off
+        traffic         : json
+        webaccess       : json
+        mailsecurity    : off
+        userid          : off
+ 
+Example log export ssh
+    name           : Example log export ssh
+    description    : Log export rule which sends logs to external ssh server. This is an example rule which can be changed or deleted if necessary.
+    enabled        : off
+    server-type    : ssh
+    target         : 192.168.1.9
+    port           : 22
+    login          : logsExportUser
+    path           : utmlogs
+    passive        : off
+    logs           :
+        dns             : json
+        events          : json
+        idps            : json
+        ssh             : off
+        traffic         : json
+        webaccess       : json
+        mailsecurity    : off
+        userid          : off
+ 

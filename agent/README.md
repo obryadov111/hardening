@@ -114,6 +114,54 @@ python3 collector.py --api-url https://hardening.example.com --environment net -
 
 Устройство должно быть в `known_hosts`: проверка ключа хоста включена и не отключается.
 
+### UserGate NGFW
+
+Учётка Admin на CLI UserGate не принимает ключ, а `ssh` с закрытым stdin возвращает пустой вывод.
+Поэтому для UserGate агент ходит сам, с хоста в сети заказчика, и сам выбирает способ — пока один не ответит:
+
+1. **XML-RPC** (`http://<устройство>:4040/rpc`, только методы из подписанного пака `usergate-ngfw`).
+   Версия ПО берётся из ответа `v2.core.login` и уходит в сопоставление с БДУ.
+2. **SSH exec**, порт 2200: одна команда на одно соединение, пароль через `SSH_ASKPASS`
+   (в командную строку и в окружение ssh пароль не попадает). stdin не закрывается, пока не придёт вывод.
+   Код возврата ssh всегда 255 — это не ошибка; ошибка команды — строка `Error:`.
+   Exec выполняется в режиме configure, поэтому `show system version` там не работает.
+3. **Интерактивный** `ssh -tt`: агент ждёт приглашение `Admin@узел>` / `#`, сам входит в `configure`,
+   на `--more--` отвечает пробелом.
+
+Пароль лежит только на хосте агента, отдельным файлом с правами `0600`. В файл цели его не пишут,
+на сервер он не отправляется и в журнал не попадает.
+
+```bash
+install -d -m 0750 -o root -g hardening-agent /etc/hardening-agent
+install -m 0600 -o hardening-agent -g hardening-agent /dev/null /etc/hardening-agent/usergate.pass
+printf '%s\n' 'пароль-Admin' > /etc/hardening-agent/usergate.pass
+chown hardening-agent:hardening-agent /etc/hardening-agent/usergate.pass
+chmod 0600 /etc/hardening-agent/usergate.pass
+
+# ключ хоста CLI (порт 2200) — в known_hosts пользователя, от которого запускается агент
+ssh-keyscan -p 2200 10.77.0.20 >> /var/lib/hardening-agent/known_hosts
+
+cp deploy/usergate.json.example /etc/hardening-agent/usergate.json
+# в json: host, user, hostname, password_file, ssh_port, xmlrpc_port, known_hosts
+
+export HARDENING_AGENT_API_KEY=<ключ площадки>
+export HARDENING_PACK_PUBLIC_KEY=<открытый ключ подписи паков>
+python3 collector.py --api-url https://hardening.example.com --environment net --use-packs \
+  --pack usergate-ngfw --device-config /etc/hardening-agent/usergate.json
+```
+
+Проверка без отправки — тот же запуск с `--dry-run`. В stderr одна строка `UserGate <адрес>: способ доступа xmlrpc`
+(или `ssh-exec` / `ssh-interactive`).
+
+Если XML-RPC молчит: в зоне, откуда подключается агент, должен быть разрешён сервис XML-RPC
+(на зоне Management он включён с завода, порт 4040). Если пустой вывод SSH — агент этой версии
+stdin не закрывает раньше ответа; пустой вывод у старого `ssh -n` как раз из-за этого.
+`show system version` в exec даёт `Error:` — версию тогда приносит XML-RPC или интерактивный сеанс.
+Выгрузка команд в файлы (`--offline-dir`) по-прежнему работает и пароля не требует.
+
+Команды `show` и методы XML-RPC — только чтение. Метод записи в паке агент не вызовет, даже если
+он подписан: белый список зашит в `usergate.py`.
+
 Проверка по выгрузке конфигурации — без доступа к устройству (нет SSH-доступа, устройство изолировано,
 вендора нет на стенде). Вывод команд сохраняется в каталог, по файлу на команду; имя файла — команда,
 в которой пробелы и `/` заменены на `_`: `show_running-config.txt`, `show_version.txt`,
@@ -164,7 +212,7 @@ RHEL, Rocky Linux, AlmaLinux, Oracle Linux, CentOS Stream, **РЕД ОС 7.3 и 
 
 ```powershell
 pip install pyinstaller==6.11.1
-pyinstaller --onefile --name hardening-agent --paths agent --hidden-import probes agent/collector.py
+pyinstaller --onefile --name hardening-agent --paths agent --hidden-import probes --hidden-import usergate agent/collector.py
 ```
 
 Запуск — только в режиме паков, **от имени администратора или SYSTEM**: `secedit` (политика паролей и
