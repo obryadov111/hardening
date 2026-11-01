@@ -460,7 +460,8 @@ def test_shipped_packs_and_their_maturity():
         "eltex-esr": "draft", "eltex-mes": "draft", "qtech-qsw": "draft", "snr-switch": "draft",
         "vipnet-coordinator": "draft", "s-terra-gate": "draft", "usergate-ngfw": "draft",
         "pt-ngfw": "inventory",  # CLI только операционный: распознавание и версия для БДУ, без проверок
-        "kontinent-4": "draft",  # проверка по опросу: конфигурация только в графическом Менеджере конфигурации
+        "kontinent-4": "draft",  # API ЦУС: шесть проверок; живой прогон на стенде ещё не подтверждён
+        "kontinent-4-local": "draft",  # BIOS, пароль локального меню и тайм-аут ЛМ — только опрос
         "infowatch-arma-ngfw": "draft", "dionis-nx": "draft", "ideco-ngfw": "draft", "pt-ngfw-settings": "draft",
     }
     assert packs["cisco-ios"].verified_on == []

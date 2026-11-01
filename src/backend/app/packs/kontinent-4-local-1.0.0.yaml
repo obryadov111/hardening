@@ -5,7 +5,8 @@
 # Эти три пункта остаются вопросами аудитору. Версию ПО для БДУ берёт автоматический пак.
 #
 # maturity: draft. Вопросы те же, что в kontinent-4 1.0.0; на живом узле после API-сбора их
-# по-прежнему отвечает аудитор.
+# по-прежнему отвечает аудитор. Версия здесь — на случай, когда автоматический снимок не снимался:
+# иначе сопоставлять с БДУ нечего.
 #
 # Заводские пароли из документации: BIOS — 123456; загрузчик после обновления — Passgrub.1.
 
@@ -15,6 +16,15 @@ maturity: draft
 tags: [network-device, security-gateway, firewall, securitycode, kontinent-4]
 transport: manual
 asset_type: network-device
+
+firmware:
+  vendor: ООО «Код Безопасности»
+  product: комплекс безопасности «континент». версия 4
+  version_probe:
+    type: manual
+    answer: text
+    question: Версия ПО узла безопасности (например, 4.2.1)
+    hint: "МК → «Структура» → узел безопасности → «Свойства», поле версии обновления (update_version)"
 
 checks:
   - id: kontinent4.loader_password_changed

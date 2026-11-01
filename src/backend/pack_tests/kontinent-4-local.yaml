@@ -2,6 +2,8 @@
 pack: kontinent-4-local
 cases:
   - name: пароли сменены, тайм-аут 5 минут
+    firmware_version: 4.2.1
+    firmware: { name: "комплекс безопасности «континент». версия 4", version: "4.2.1" }
     answers:
       kontinent4.loader_password_changed: да
       kontinent4.bios_password_changed: да
