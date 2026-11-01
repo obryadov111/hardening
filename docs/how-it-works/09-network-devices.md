@@ -27,7 +27,7 @@
 | Файл цели | `--device-config` JSON | живое устройство. Для Континента `describe()` пустой |
 | Выгрузка | `--offline-dir` или страница «Проверка по выгрузке» | `collection.source = offline-config` |
 
-Выгрузка через интерфейс: `POST /api/organizations/{org}/offline-scans` (`api/routes/offline_scans.py`). Администратор организации. До 10 файлов по 5 МБ. Команда файла должна встречаться в каком-нибудь ssh-паке. Сервер импортирует тот же `agent/probes.py` (`load_agent_probes` в `services/offline_scan.py`), кладёт файлы во временный каталог и вызывает `OfflineConfigTransport`. Дальше обычный `ingest_payload` с источником `offline-upload`. Тип актива по умолчанию `network-device`.
+Выгрузка через интерфейс: `POST /api/organizations/{org}/offline-scans`, функция `upload_offline_scan`. Администратор организации. До 10 файлов по 5 МБ (`MAX_FILES`, `MAX_FILE_BYTES` в `services/offline_scan.py`). Команда файла должна встречаться в каком-нибудь ssh-паке, иначе `OfflineScanError`. Сервер грузит `agent/probes.py` (`load_agent_probes`) и для обычных команд вызывает `OfflineConfigTransport`. Если рядом лежит `continent4.py`, JSON ЦУС сначала пробует `Continent4Transport.from_uploads`. В текущем `Dockerfile` копируется только `probes.py`, поэтому в собранном образе этого шага нет. Дальше обычный `ingest_payload` с источником `offline-upload`. Тип актива — из пака, иначе у загрузки подставляется `network-device` в маршруте, если пак его не задал.
 
 ## UserGate NGFW
 

@@ -2,7 +2,7 @@
 
 Проверка полноты на 1 ноября 2026. В таблицу попали исходники бэкенда, агента, интерфейса, паки, фикстуры паков, тесты, скрипты `deploy/` и workflow CI. Бинарные образцы вывода в `agent/tests/fixtures/` в таблицу не включены: их читают тесты UserGate и Континента, глава 09.
 
-Всего строк карты: 323 вместе с `src/backend/.env.example` (шаблон переменных, глава 21). Неразнесённых среди исходников, паков, скриптов deploy и workflow: 0. Файл `.env.example` добавлен к сгенерированному списку отдельно, потому что у него нестандартное расширение.
+Всего строк карты: 327 вместе с `src/backend/.env.example`, контекстом интерфейса, хуком сортировки и главами 00 и 27 (шаблон переменных, глава 21). Неразнесённых среди исходников, паков, скриптов deploy и workflow: 0. Файл `.env.example` добавлен к сгенерированному списку отдельно, потому что у него нестандартное расширение.
 
 | Файл | Глава |
 |---|---|
@@ -291,6 +291,8 @@
 | `src/components/Topbar.jsx` | 17 |
 | `src/components/TrendChart.jsx` | 17 |
 | `src/components/ui/AppCard.jsx` | 17 |
+| `src/context/OrganizationContext.jsx` | 17 |
+| `src/hooks/useSort.js` | 17 |
 | `src/components/ui/CheckStatusBadge.jsx` | 17 |
 | `src/components/ui/CopyButton.jsx` | 17 |
 | `src/components/ui/EmptyState.jsx` | 17 |
@@ -329,4 +331,6 @@
 | `src/utils/utils.test.js` | 17 |
 | `tools/loadtest/ui_load.py` | 22, 23 |
 | `src/backend/.env.example` | 21 |
+| `docs/how-it-works/00-cheatsheet.md` | шпаргалка |
+| `docs/how-it-works/27-worked-examples.md` | примеры из репозитория |
 

@@ -178,8 +178,9 @@ npm run lint && npm run test:unit && npm run build                    # инте
 E2E_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5433/app_e2e_db npm run test:e2e
 ```
 
-Подсчёт тестов на 1 ноября 2026 по дереву репозитория (не запуск pytest в документации): бэкенд
-629 кейсов, агент 300, утилиты интерфейса 7. Как считали — [`docs/how-it-works/23-tests-ci.md`](docs/how-it-works/23-tests-ci.md).
+Подсчёт тестов на 1 ноября 2026: `pytest --collect-only` дал 629 кейсов бэкенда и 300 кейсов агента,
+`npx playwright test --list` — 134 сквозных, в `utils.test.js` — 7. Подробности —
+[`docs/how-it-works/23-tests-ci.md`](docs/how-it-works/23-tests-ci.md).
 
 Нагрузка: `tools/loadtest/ui_load.py` — засев N хостов (ПО как на хосте, настоящие пробы агента) и замер
 API каждой страницы; приём отчётов от 1000 хостов — заметка «Агент на 1000+ хостов» в репозитории диплома.
