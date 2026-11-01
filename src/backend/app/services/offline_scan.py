@@ -67,25 +67,79 @@ class OfflineRun:
     software: list[dict] = field(default_factory=list)  # модель и версия прошивки (поле firmware пака) — для БДУ
 
 
+def _continent4():
+    """Модуль ЦУС Континент 4. Грузится по пути, как пробы: агент не пакет бэкенда."""
+    import importlib.util
+
+    from app.services.packs.authoring import AGENT_DIR
+
+    path = AGENT_DIR / "continent4.py"
+    if not path.exists():
+        return None
+    spec = importlib.util.spec_from_file_location("hardening_agent_continent4", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _finish(agent, packs, manifests, transport, matched) -> OfflineRun:
+    runs = [(pack_by_id, agent.run_manifest(transport, manifests[pack_by_id.pack]))
+            for pack_by_id in packs if manifests[pack_by_id.pack] in matched]
+    declared = any(not agent.matches_detect(transport, manifest["detect"]) for manifest in matched)
+    software = []
+    for manifest in matched:
+        entry = agent.collect_firmware(transport, manifest)
+        if entry and entry not in software:
+            software.append(entry)
+    collection = transport.describe()
+    collection["declared_pack"] = declared
+    tags: list[str] = []
+    for pack, _ in runs:
+        tags.extend(tag for tag in pack.tags if tag not in tags)
+    return OfflineRun(
+        packs=runs, tags=tags, asset_type=next((pack.asset_type for pack, _ in runs if pack.asset_type), None),
+        collection=collection, software=software,
+    )
+
+
 def run_offline(registry: PackRegistry, files: dict[str, bytes], declared_pack: str | None) -> OfflineRun:
-    """files — {команда: вывод}. Выполняет пробы подошедших паков, как агент с --offline-dir."""
+    """files — {команда: вывод} или JSON выгрузки ЦУС Континент 4. Пробы те же, что у агента с --offline-dir."""
     if not files:
         raise OfflineScanError("не загружено ни одного файла")
     if len(files) > MAX_FILES:
         raise OfflineScanError(f"не больше {MAX_FILES} файлов за раз")
-    agent = agent_probes()
-    known = {c["command"] for p in offline_packs(registry) for c in p["commands"]}
     for command, data in files.items():
-        if command not in known:
-            raise OfflineScanError(f"команда {command!r} не используется ни одним паком")
         if len(data) > MAX_FILE_BYTES:
             raise OfflineScanError(f"выгрузка {command!r} больше {MAX_FILE_BYTES} байт")
 
+    agent = agent_probes()
     packs = registry.latest("ssh")
-    if declared_pack and declared_pack not in {p.pack for p in packs}:
+    if declared_pack and declared_pack not in {pack.pack for pack in packs}:
         raise OfflineScanError(f"нет пака {declared_pack!r} для сетевых устройств")
-    manifests = {p.pack: build_manifest(p) for p in packs}
-    candidates = [m for m in manifests.values() if not declared_pack or m["pack"] == declared_pack]
+    manifests = {pack.pack: build_manifest(pack) for pack in packs}
+    candidates = [manifest for manifest in manifests.values() if not declared_pack or manifest["pack"] == declared_pack]
+
+    continent4 = _continent4()
+    if continent4 is not None:
+        try:
+            c4_transport = continent4.Continent4Transport.from_uploads(files)
+        except ValueError as exc:
+            raise OfflineScanError(str(exc)) from exc
+        if c4_transport is not None:
+            c4_transport.bind_manifests(candidates)
+            matched = agent.select_manifests(c4_transport, candidates, declared=declared_pack)
+            if not matched:
+                if declared_pack:
+                    raise OfflineScanError(
+                        f"выгрузка не похожа на {declared_pack}: проверка платформы (detect) не совпала"
+                    )
+                raise OfflineScanError("JSON не распознан как выгрузка Континент 4")
+            return _finish(agent, packs, manifests, c4_transport, matched)
+
+    known = {item["command"] for pack in offline_packs(registry) for item in pack["commands"]}
+    for command in files:
+        if command not in known:
+            raise OfflineScanError(f"команда {command!r} не используется ни одним паком")
 
     with tempfile.TemporaryDirectory(prefix="offline-config-") as directory:
         for command, data in files.items():
@@ -97,19 +151,4 @@ def run_offline(registry: PackRegistry, files: dict[str, bytes], declared_pack: 
                 raise OfflineScanError(f"выгрузка не похожа на {declared_pack}: проверка платформы (detect) не совпала")
             raise OfflineScanError("платформа по выгрузке не распознана: выберите пак явно или загрузите выгрузку "
                                    "команды распознавания (например, show version)")
-        runs = [(pack_by_id, agent.run_manifest(transport, manifests[pack_by_id.pack]))
-                for pack_by_id in packs if manifests[pack_by_id.pack] in matched]
-        declared = any(not agent.matches_detect(transport, m["detect"]) for m in matched)
-        software = []
-        for manifest in matched:
-            entry = agent.collect_firmware(transport, manifest)
-            if entry and entry not in software:
-                software.append(entry)
-        collection = transport.describe()
-
-    tags: list[str] = []
-    for pack, _ in runs:
-        tags.extend(t for t in pack.tags if t not in tags)
-    collection["declared_pack"] = declared
-    return OfflineRun(packs=runs, tags=tags, asset_type=next((p.asset_type for p, _ in runs if p.asset_type), None),
-                      collection=collection, software=software)
+        return _finish(agent, packs, manifests, transport, matched)

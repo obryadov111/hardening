@@ -1,0 +1,9 @@
+{
+  "kind": "continent4",
+  "host": "10.77.0.30",
+  "port": 444,
+  "user": "hardening-ro",
+  "password_file": "/etc/hardening-agent/continent4.pass",
+  "pin_sha256": "",
+  "timeout": 90
+}

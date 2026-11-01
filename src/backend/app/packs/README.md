@@ -176,7 +176,8 @@ firmware:
 | `eltex-mes` | 1.0.0 | ssh | draft | 10 | Eltex MES23xx/33xx/53xx (ПО 4.x–6.x); прошивка → БДУ |
 | `ideco-ngfw` | 1.0.0 | manual | draft | 6 | Ideco NGFW: доступ извне (веб, SSH), персональные учётки, AD/RADIUS, журналы; версия → БДУ |
 | `infowatch-arma-ngfw` | 1.0.0 | ssh | draft | 7 | InfoWatch ARMA Стена (NGFWOS на VyOS): пароли, блокировка, SNMPv3 (умолчания MD5/DES), syslog; прошивка → БДУ |
-| `kontinent-4` | 1.0.0 | manual | draft | 9 | Континент 4 (Код Безопасности): **проверка по опросу** — настройки только в Менеджере конфигурации |
+| `kontinent-4` | 1.1.0 | ssh | draft | 6 | Континент 4: агент читает ЦУС тремя GET (ГОСТ TLS :444) или выгрузка JSON; прошивка → БДУ |
+| `kontinent-4-local` | 1.0.0 | manual | draft | 3 | Континент 4: пароль BIOS, пароль локального меню и тайм-аут ЛМ — только опрос |
 | `postgresql` | 1.1.0 | local | draft | 9 | Раздел СУБД методики ФСТЭК |
 | `pt-ngfw` | 1.0.0 | ssh | inventory | 0 | PT NGFW: CLI только операционный — распознавание и версия для БДУ; проверки после доступа к API |
 | `pt-ngfw-settings` | 1.0.0 | manual | draft | 5 | PT NGFW — настройки в системе управления: any-any, учётки, LDAP/RADIUS, SNMPv3, сборщик журналов |

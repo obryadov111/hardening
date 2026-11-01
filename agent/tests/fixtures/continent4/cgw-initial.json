@@ -1,0 +1,59 @@
+{
+ "data": [
+  {
+   "check_sum": "7852EE57EC41CD76060D4803C8CA5D1AE96F9913AC44B7452B4E2B31A34F62F2",
+   "ct_zone": true,
+   "dhcp_status": "off",
+   "domain": {
+    "is_current": true,
+    "name": "domain-4210001",
+    "type": "domain",
+    "uuid": "5d32d44d-f51c-4598-bcaf-331b385ba1d7"
+   },
+   "domain_level": 1,
+   "hwserial": "4210001",
+   "mode": "utm",
+   "name": "node-4210001",
+   "platform": {
+    "capabilities": [
+     "firewall",
+     "ncc",
+     "l3vpn"
+    ],
+    "is_ca": false,
+    "platform": "CUSTOM_PLATFORM",
+    "version": "4.0.0"
+   },
+   "previous_update_version": "",
+   "root_cert_expiry": 157678811,
+   "srv_cert_expiry": 31534958,
+   "timezone_name": "",
+   "timezone_string": "",
+   "type": "cgw",
+   "update_version": "4.2.1-653",
+   "uuid": "9ce3b894-f708-490a-aef3-de23994e4ebf",
+   "virtual_hosts": [
+    {
+     "server_name": "",
+     "type": "monitoringaeschannel",
+     "uuid": "2ac7b52a-decd-4142-97d6-9c27d020d741"
+    },
+    {
+     "server_name": "",
+     "type": "aservcomponent",
+     "uuid": "a3f2085a-f359-4309-b07e-3991bd6293dc"
+    },
+    {
+     "server_name": "k4-cus-mgmt",
+     "type": "managechannel",
+     "uuid": "b83b8847-2fc9-4056-bbb4-8cc23c6fe28b"
+    },
+    {
+     "server_name": "k4-cus-mgmt",
+     "type": "monitoringchannel",
+     "uuid": "f3304f55-4e18-44ff-a35a-54cd7c27f697"
+    }
+   ]
+  }
+ ]
+}

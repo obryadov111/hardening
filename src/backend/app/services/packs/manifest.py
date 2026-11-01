@@ -46,6 +46,9 @@ def build_manifest(pack: Pack) -> dict:
     if pack.xmlrpc_methods:
         # То же для белого списка XML-RPC: у паков без API поле не появляется.
         manifest["xmlrpc_methods"] = list(pack.xmlrpc_methods)
+    if pack.c4_paths:
+        # Белый список GET ЦУС Континент 4: у остальных паков поле не появляется, подписи не меняются.
+        manifest["c4_paths"] = list(pack.c4_paths)
     return manifest
 
 
