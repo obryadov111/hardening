@@ -3,13 +3,17 @@
 Пара export-for-cgw-4210001-initial.json / export-for-cgw-4210001.json — конфигурация до и после
 изменений на стенде. Секреты в фикстурах уже заменены; рендер не должен вернуть REDACTED и хэши.
 """
+import base64
+import hashlib
 import json
 import os
 import shutil
+import socket
 import ssl
 import stat
 import subprocess
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -363,10 +367,12 @@ def test_fake_https_fetches_only_the_three_gets(tmp_path, monkeypatch):
     httpd = _https_server(routes)
     host, port = httpd.server_address
 
-    def local_get(host_, port_, path, user, password, timeout, connect_timeout, ciphers):
+    def local_get(host_, port_, path, user, password, timeout, connect_timeout, ciphers, pin="", send_request=True):
         assert password == PASSWORD
         assert ciphers  # агент просит ГОСТ; в тесте сервер говорит обычным TLS
-        return continent4.http_get(host_, port_, path, user, password, timeout, connect_timeout, "DEFAULT")
+        return continent4.http_get(
+            host_, port_, path, user, password, timeout, connect_timeout, "DEFAULT", pin, send_request,
+        )
 
     monkeypatch.setattr(continent4, "_process_has_gost", lambda: False)
     transport = continent4.Continent4Transport(
@@ -431,7 +437,7 @@ def test_cli_prints_results_without_the_password(tmp_path, capsys, monkeypatch):
 def test_one_401_is_a_single_request_and_not_a_tls_fallback(tmp_path, monkeypatch):
     calls = []
 
-    def http_get(host, port, path, user, password, timeout, connect_timeout, ciphers):
+    def http_get(host, port, path, user, password, timeout, connect_timeout, ciphers, pin="", send_request=True):
         calls.append(path)
         return 401, b'{"detail":"unauthorized"}', b"\x30"
 
@@ -550,3 +556,281 @@ def test_cli_tls_flag_selects_methods(tmp_path, capsys):
     assert "не сверяет отпечаток" in captured.err
     assert captured.out.strip() == ""
     assert "kontinent4." not in captured.out and "kontinent4." not in captured.err
+
+
+def _basic_token():
+    return base64.b64encode("hardening-ro:{0}".format(PASSWORD).encode("utf-8"))
+
+
+def _assert_no_credentials(payloads):
+    """После рукопожатия сервер не должен увидеть ни заголовка, ни токена, ни пароля."""
+    assert payloads, "сервер не принял соединение — сверку пина не на чём проверять"
+    for blob in payloads:
+        assert blob == b""
+        assert b"Authorization" not in blob
+        assert _basic_token() not in blob
+        assert PASSWORD.encode("utf-8") not in blob
+
+
+class _RecordingTLS(object):
+    """Обычный TLS (не ГОСТ): логика пина от шифра не зависит, а движка ГОСТ в CI нет."""
+
+    def __init__(self, tmp_path):
+        if shutil.which("openssl") is None:
+            pytest.skip("openssl нужен, чтобы поднять тестовый TLS")
+        self.cert = tmp_path / "c4-pin-cert.pem"
+        self.key = tmp_path / "c4-pin-key.pem"
+        subprocess.check_call(
+            [
+                "openssl", "req", "-x509", "-newkey", "rsa:2048",
+                "-keyout", str(self.key), "-out", str(self.cert),
+                "-days", "1", "-nodes", "-subj", "/CN=localhost",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        der = ssl.PEM_cert_to_DER_cert(self.cert.read_text(encoding="ascii"))
+        self.pin = hashlib.sha256(der).hexdigest()
+        self.payloads = []
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        sock = socket.socket()
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(8)
+        sock.settimeout(0.2)
+        self._sock = sock
+        self.host, self.port = sock.getsockname()
+        ctx = ssl.SSLContext(getattr(ssl, "PROTOCOL_TLS_SERVER", ssl.PROTOCOL_TLS))
+        if hasattr(ssl, "TLSVersion"):
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+            ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+        else:
+            ctx.options |= getattr(ssl, "OP_NO_TLSv1", 0) | getattr(ssl, "OP_NO_TLSv1_1", 0)
+        ctx.load_cert_chain(str(self.cert), str(self.key))
+        self._ctx = ctx
+        self._thread = threading.Thread(target=self._serve)
+        self._thread.daemon = True
+        self._thread.start()
+
+    def _serve(self):
+        while not self._stop.is_set():
+            try:
+                conn, _addr = self._sock.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            try:
+                self._handle(conn)
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    def _handle(self, conn):
+        buf = b""
+        tls = None
+        try:
+            tls = self._ctx.wrap_socket(conn, server_side=True)
+            tls.settimeout(2)
+            while len(buf) < 1024 * 1024:
+                piece = tls.recv(65536)
+                if not piece:
+                    break
+                buf += piece
+                if b"\r\n\r\n" in buf:
+                    tls.sendall(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                        b"Content-Length: 2\r\nConnection: close\r\n\r\n{}"
+                    )
+                    break
+        except Exception:
+            pass
+        finally:
+            if tls is not None:
+                try:
+                    tls.close()
+                except Exception:
+                    pass
+            else:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            with self._lock:
+                self.payloads.append(buf)
+
+    def wait(self, count, timeout=5):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            with self._lock:
+                if len(self.payloads) >= count:
+                    return list(self.payloads)
+            time.sleep(0.05)
+        with self._lock:
+            return list(self.payloads)
+
+    def close(self):
+        self._stop.set()
+        try:
+            self._sock.close()
+        except OSError:
+            pass
+        self._thread.join(timeout=2)
+
+
+def _allow_plain_tls(monkeypatch, tmp_path):
+    """Подмена проверки ГОСТ и конфига: в CI нет gost.so, а пин от шифра не зависит."""
+    monkeypatch.setattr(continent4, "_process_has_gost", lambda: True)
+    path = tmp_path / "neutral-openssl.cnf"
+    path.write_text("openssl_conf = openssl_init\n\n[openssl_init]\n", encoding="utf-8")
+    monkeypatch.setattr(continent4.Continent4Transport, "_prepare_conf", lambda self: str(path))
+
+
+def _pinned_transport(tmp_path, server, methods, pin):
+    transport = continent4.Continent4Transport(
+        _config(
+            tmp_path,
+            host=server.host,
+            port=server.port,
+            pin_sha256=pin,
+            tls=list(methods),
+            timeout=5,
+            connect_timeout=3,
+        ),
+    )
+    transport.bind_builtin()
+    transport._password = PASSWORD
+    return transport
+
+
+@pytest.mark.parametrize("method", ["in-process", "python", "openssl"])
+def test_pin_mismatch_sends_no_authorization(tmp_path, monkeypatch, method):
+    server = _RecordingTLS(tmp_path)
+    _allow_plain_tls(monkeypatch, tmp_path)
+    transport = _pinned_transport(tmp_path, server, [method], "ab" * 32)
+    try:
+        with pytest.raises(continent4.Continent4Error, match="не совпал с pin_sha256") as exc:
+            transport._get("/api-v1-objects/config")
+        text = str(exc.value)
+        assert "ab" * 32 in text
+        assert server.pin in text
+        payloads = server.wait(1)
+        _assert_no_credentials(payloads)
+        assert len(payloads) == 1
+    finally:
+        transport.close()
+        server.close()
+
+
+@pytest.mark.parametrize("method", ["in-process", "python", "openssl"])
+def test_pin_match_still_sends_the_request(tmp_path, monkeypatch, method):
+    server = _RecordingTLS(tmp_path)
+    _allow_plain_tls(monkeypatch, tmp_path)
+    transport = _pinned_transport(tmp_path, server, [method], server.pin)
+    try:
+        body = transport._get("/api-v1-objects/config")
+        assert body == b"{}"
+        payloads = server.wait(1)
+        assert len(payloads) == 1
+        assert b"Authorization: Basic " in payloads[0]
+        assert _basic_token() in payloads[0]
+    finally:
+        transport.close()
+        server.close()
+
+
+def test_pin_mismatch_does_not_open_another_tls_method(tmp_path, monkeypatch):
+    server = _RecordingTLS(tmp_path)
+    _allow_plain_tls(monkeypatch, tmp_path)
+    transport = _pinned_transport(tmp_path, server, ["in-process", "openssl", "curl"], "cd" * 32)
+    try:
+        with pytest.raises(continent4.Continent4Error, match="не совпал с pin_sha256"):
+            transport._get("/api-v1-objects/config")
+        payloads = server.wait(1)
+        _assert_no_credentials(payloads)
+        assert len(payloads) == 1
+    finally:
+        transport.close()
+        server.close()
+
+
+def test_pin_mismatch_cli_exits_2_without_sending_authorization(tmp_path, monkeypatch, capsys):
+    server = _RecordingTLS(tmp_path)
+    _allow_plain_tls(monkeypatch, tmp_path)
+    secret = _secret(tmp_path)
+    try:
+        code = continent4.main([
+            "--host", server.host,
+            "--user", "hardening-ro",
+            "--password-file", str(secret),
+            "--port", str(server.port),
+            "--tls", "in-process",
+            "--pin-sha256", "cd" * 32,
+            "--connect-timeout", "3",
+            "--timeout", "5",
+        ])
+        captured = capsys.readouterr()
+        assert code == 2
+        assert "не совпал с pin_sha256" in captured.err
+        assert PASSWORD not in captured.out and PASSWORD not in captured.err
+        assert captured.out.strip() == ""
+        payloads = server.wait(1)
+        _assert_no_credentials(payloads)
+    finally:
+        server.close()
+
+
+@pytest.mark.parametrize("method", ["in-process", "python", "openssl"])
+def test_show_pin_prints_digest_and_sends_no_credentials(tmp_path, monkeypatch, capsys, method):
+    server = _RecordingTLS(tmp_path)
+    _allow_plain_tls(monkeypatch, tmp_path)
+    secret = _secret(tmp_path)
+    try:
+        code = continent4.main([
+            "--host", server.host,
+            "--user", "hardening-ro",
+            "--password-file", str(secret),
+            "--port", str(server.port),
+            "--tls", method,
+            "--show-pin",
+            "--connect-timeout", "3",
+            "--timeout", "5",
+        ])
+        captured = capsys.readouterr()
+        assert code == 0, captured.err
+        assert captured.out.strip() == server.pin
+        assert PASSWORD not in captured.out and PASSWORD not in captured.err
+        payloads = server.wait(1)
+        _assert_no_credentials(payloads)
+    finally:
+        server.close()
+
+
+def test_show_pin_mismatch_exits_2_and_sends_nothing(tmp_path, monkeypatch, capsys):
+    server = _RecordingTLS(tmp_path)
+    _allow_plain_tls(monkeypatch, tmp_path)
+    secret = _secret(tmp_path)
+    try:
+        code = continent4.main([
+            "--host", server.host,
+            "--user", "hardening-ro",
+            "--password-file", str(secret),
+            "--port", str(server.port),
+            "--tls", "openssl",
+            "--show-pin",
+            "--pin-sha256", "ab" * 32,
+            "--connect-timeout", "3",
+            "--timeout", "5",
+        ])
+        captured = capsys.readouterr()
+        assert code == 2
+        assert "не совпал с pin_sha256" in captured.err
+        assert captured.out.strip() == ""
+        assert PASSWORD not in captured.err
+        payloads = server.wait(1)
+        _assert_no_credentials(payloads)
+    finally:
+        server.close()
