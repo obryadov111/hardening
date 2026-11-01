@@ -36,12 +36,16 @@
 
 1. `GET /api/organizations/{org}/manual-scans/packs` — список паков и вопросов (`manual_packs`). Читать может любой участник организации.
 2. Человек выбирает пак, имя хоста, окружение, при желании IP, критичность, метку и отвечает.
-3. Отправка — `POST /api/organizations/{org}/manual-scans`. Нужна роль администратора организации (`create_manual_scan` в `api/routes/manual_scans.py`). Наблюдатель и аудитор видят форму, кнопка у них выключена: страница смотрит `my-role`.
+3. Отправка — `POST /api/organizations/{org}/manual-scans`. Функция `submit_manual_scan` в `api/routes/manual_scans.py` требует `require_org_admin`. Наблюдатель и аудитор видят вопросы: `ManualScan.jsx` читает `GET …/my-role` и включает кнопку только при `role === "admin"`. Иначе на странице текст «Сохранять ответы может только администратор организации».
 4. Сервер вызывает `ingest_payload` с источником `manual`. В `collection` пишутся `answered_by`, `answered_at` и список `unanswered`.
 
 Дальше это обычный снимок: те же статусы, тот же процент, тот же принятый риск. В отчёте PDF и Excel источник подписан как опрос, а не как живой хост (`source_label` в `services/snapshot_export.py`).
 
 Пример из `kontinent-4-local`: вопрос «пароль загрузчика сменён?» сравнивается с `eq yes`. Вопрос про тайм-аут — число, `between` от 10 до 900 секунд. Пропущенный тайм-аут не становится нулём и не считается соблюдением.
+
+Тело запроса — модель `ManualScanIn`: `pack`, `hostname`, `environment` (по умолчанию `network`), необязательные `ip_address`, `criticality` (`low|medium|high|critical`, по умолчанию `medium`), `scan_label`, словарь `answers` и отдельно `firmware_version`. Ответ на вопрос — `ManualAnswer`: `value` и `comment` не длиннее 1000 символов. Список вопросов отдаёт `list_manual_packs`: объект `{"packs": ...}` из `manual_packs`.
+
+Если пак не `manual` или его нет, ответ 422. `firmware_software` берёт версию из `firmware_version`, а не из ответов на проверки, и кладёт её в `software`.
 
 ## Где хранится
 

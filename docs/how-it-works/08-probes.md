@@ -49,7 +49,7 @@
 
 ## Команды и sysctl
 
-`cmd_regex` (`probe_cmd_regex`). Локальная команда — список аргументов, не строка shell. Исполняемый файл ищется в `SAFE_PATH`. На Windows это System32. Окружение процесса — только `PATH` и `LANG=C`. Таймаут `COMMAND_TIMEOUT` = 15 секунд.
+`cmd_regex` (`probe_cmd_regex`). Локальная команда — список аргументов, не строка shell. Исполняемый файл ищется в `SAFE_PATH`. На Windows это System32. Окружение процесса — `PATH` (константа `SAFE_PATH`), `LANG=C` и `LC_ALL=C`. На Windows поиск идёт в `WINDOWS_SYSTEM32` и каталоге PowerShell, не в PATH пользователя. Таймаут `COMMAND_TIMEOUT` = 15 секунд.
 
 Белый список `LOCAL_COMMAND_POLICY`:
 

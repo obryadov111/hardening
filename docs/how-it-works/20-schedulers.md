@@ -23,6 +23,17 @@
 
 Fail2ban и ротация журналов — службы хоста, не код «Харденинга». Их конфиг в `deploy/fail2ban/` только описывает, какой журнал банить.
 
+Что легко принять за планировщик сервера, но им не является:
+
+- `ENV WEB_CONCURRENCY=2` в `src/backend/Dockerfile` — число процессов uvicorn, не расписание.
+- Повтор при 503 — паузы в `ServerConnection` того же запуска агента, не отдельная служба.
+- `refresh_findings` — функция внутри HTTP-запроса страницы уязвимостей или методики.
+- `record_org_report` — та же транзакция, что приём или смена риска.
+- `deploy/publish_agent.sh` и `python -m app.commands.bdu` — команды человека. В репозитории нет unit-файла, который вызывал бы их по cron.
+- `seed_demo_data` — разовая команда засева, не фон.
+
+Таймер Linux читается целиком из `agent/deploy/hardening-agent@.timer`: `OnCalendar=daily`, `RandomizedDelaySec=1h`, `Persistent=yes`. Неделя не прописана в этом файле. Её добавляет drop-in Ansible, и drop-in перебивает календарь. Задача Windows задаётся в `gpo-startup.ps1`: ежедневно или `-Schedule Weekly`, 03:00, `RandomDelay` один час, лимит 30 минут, `StartWhenAvailable`.
+
 ## Ограничения
 
 - Забытый `update_bdu.sh` означает устаревшую копию БДУ. Страница честно показывает время последней строки `bdu_imports`. Сама она архив не скачивает.
