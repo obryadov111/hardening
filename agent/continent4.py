@@ -14,6 +14,15 @@
 текст команд show continent …, без полей password*, pasword* (опечатка схемы), community,
 ключей и подписей.
 
+pin_sha256 — это SHA-256 всего сертификата ЦУС в DER, не отпечаток открытого ключа (SPKI).
+Если он задан, сверка делается сразу после рукопожатия TLS, в каждом способе, который
+умеет прочитать сертификат. Пока отпечаток не совпал, на провод не уходят ни пароль, ни
+байты HTTP-запроса; несовпадение останавливает опрос (код 2), без перехода к следующему
+способу. curl так сверить не может: --pinnedpubkey хеширует SPKI, а из хеша всего
+сертификата ключ не восстановить, и запрос curl отправил бы в том же вызове. При заданном
+пине curl пропускается. --show-pin печатает отпечаток после рукопожатия и тоже ничего
+не отправляет.
+
 Живой опрос — три GET и только они (белый список в коде и в подписанном манифесте):
 /api-v1-objects/config, /api-v1-objects/config/active/cgw,
 /api-v1-server/config/active/export-config-for-cgw/{hwserial}?view=full.
@@ -287,6 +296,26 @@ def cert_sha256(der):
     if not der:
         return ""
     return hashlib.sha256(der).hexdigest()
+
+
+def enforce_pin(expected, digest):
+    """Сверка pin_sha256. Пустой expected — проверка выключена.
+
+    Вызывается сразу после рукопожатия и до первой записи запроса в сокет или stdin.
+    Повторно — на родителе, когда способ уже вернул отпечаток.
+    """
+    expected = (expected or "").strip().lower()
+    if not expected:
+        return
+    got = (digest or "").strip().lower()
+    if not got:
+        raise Continent4Error("не удалось получить сертификат ЦУС для сверки pin_sha256")
+    if got != expected:
+        raise Continent4Error(
+            "отпечаток сертификата ЦУС не совпал с pin_sha256 (получен {0}, ожидался {1})".format(
+                got, expected,
+            )
+        )
 
 
 def find_gost_engine(explicit=None):
@@ -788,9 +817,13 @@ def _request_bytes(host, port, path, user, password):
     return text.encode("ascii")
 
 
-def http_get(host, port, path, user, password, timeout, connect_timeout, ciphers=_GOST_CIPHERS):
-    """Один GET по TLS. Сертификат не проверяется цепочкой (у ЦУС он самоподписанный ГОСТ);
-    сверка отпечатка — снаружи. Возвращает (status, body, der)."""
+def http_get(host, port, path, user, password, timeout, connect_timeout, ciphers=_GOST_CIPHERS, pin="", send_request=True):
+    """Один GET по TLS. Цепочка сертификата не проверяется (у ЦУС он самоподписанный ГОСТ).
+
+    pin — ожидаемый SHA-256 DER. Если он задан, сверка выполняется сразу после рукопожатия,
+    до сборки и отправки HTTP. send_request=False — только рукопожатие (для --show-pin):
+    запрос и Authorization не отправляются. Возвращает (status, body, der).
+    """
     try:
         sock = socket.create_connection((host, port), connect_timeout)
     except socket.timeout:
@@ -809,7 +842,11 @@ def http_get(host, port, path, user, password, timeout, connect_timeout, ciphers
         except OSError as exc:
             raise TlsUnavailable("рукопожатие TLS: {0}".format(exc))
         try:
-            der = tls.getpeercert(True)
+            der = tls.getpeercert(True) or b""
+            # Пароль ещё не превращён в запрос: несовпадение пина обрывает сокет до sendall.
+            enforce_pin(pin, cert_sha256(der))
+            if not send_request:
+                return 0, b"", der
             tls.settimeout(timeout)
             tls.sendall(_request_bytes(host, port, path, user, password))
             raw = _read_bounded(tls, timeout)
@@ -1072,6 +1109,7 @@ class Continent4Transport:
         self._peer_sha256 = ""
         self._reported = False
         self._load_error = None  # ошибка чтения ЦУС: повторять GET на каждую проверку нельзя
+        self._cert_only = False  # --show-pin: рукопожатие без HTTP-запроса и без пароля на проводе
         self._workdir = None
         self.missing = set()
         if config:
@@ -1252,6 +1290,8 @@ class Continent4Transport:
                     continue
                 raise
             self._peer_sha256 = (digest or "").lower()
+            # Способ, который ходил в сеть, уже сверил пин до отправки запроса.
+            # Здесь остаётся отказ, если отпечаток пустой или его подменил тестовый runner.
             self._check_pin(digest)
             if status in (401, 403):
                 # Пароль или роль не подошли. Это не сбой ГОСТ: следующий способ
@@ -1279,22 +1319,43 @@ class Continent4Transport:
                 "Это не отсутствие движка ГОСТ. Укажите --tls python или --tls openssl "
                 "(либо python,openssl), чтобы сверить pin_sha256.".format(detail)
             )
+        if self._cert_only and errors and all("без HTTP-запроса" in item for item in errors):
+            raise Continent4Error(
+                "Отпечаток не получен: {0} "
+                "curl отправляет запрос вместе с рукопожатием и для --show-pin не используется.".format(detail)
+            )
         raise Continent4Error("нет ГОСТ TLS к {0}:{1}. {2} Попытки: {3}".format(
             self.host, self.config.get("port") or 444, _GOST_HINT, detail,
         ))
 
     def _check_pin(self, digest):
-        expected = self.config.get("pin_sha256") or ""
-        if not expected:
-            return
-        if not digest:
-            raise Continent4Error("не удалось получить сертификат ЦУС для сверки pin_sha256")
-        if digest.lower() != expected.lower():
-            raise Continent4Error(
-                "отпечаток сертификата ЦУС не совпал с pin_sha256 (получен {0}, ожидался {1})".format(
-                    digest.lower(), expected.lower(),
-                )
-            )
+        enforce_pin(self.config.get("pin_sha256") or "", digest)
+
+    def fetch_peer_sha256(self):
+        """Рукопожатие и отпечаток сертификата. Запрос и Authorization не отправляются.
+
+        Так работает --show-pin. Если pin_sha256 задан и не совпал — то же исключение,
+        что у обычного опроса, и тоже без байтов запроса на проводе.
+        """
+        errors = []
+        self._cert_only = True
+        try:
+            for name in self.config.get("tls") or _TLS_ORDER:
+                try:
+                    _status, _body, digest = self._call_tls(name, "/api-v1-objects/config")
+                except Continent4Error as exc:
+                    if isinstance(exc, TlsUnavailable):
+                        errors.append("{0}: {1}".format(name, scrub_text(str(exc), [self._password])))
+                        continue
+                    raise
+                self._peer_sha256 = (digest or "").lower()
+                self._check_pin(digest)
+                if not self._peer_sha256:
+                    raise Continent4Error("сертификат ЦУС не получен")
+                return self._peer_sha256
+            self._raise_tls_exhausted(errors)
+        finally:
+            self._cert_only = False
 
     def _call_tls(self, name, path):
         if name == "in-process":
@@ -1315,6 +1376,8 @@ class Continent4Transport:
         status, body, der = self._http_get(
             self.host, self.config["port"], path, self.config["user"], self._password,
             self.config["timeout"], self.config["connect_timeout"], _GOST_CIPHERS,
+            pin=self.config.get("pin_sha256") or "",
+            send_request=not self._cert_only,
         )
         return status, body, cert_sha256(der)
 
@@ -1336,6 +1399,9 @@ class Continent4Transport:
             "password": self._password,
             "timeout": self.config["timeout"],
             "connect_timeout": self.config["connect_timeout"],
+            "pin": self.config.get("pin_sha256") or "",
+            # False у --show-pin: дочерний процесс не собирает и не шлёт HTTP.
+            "send_request": not self._cert_only,
         }).encode("utf-8")
         code, out, err = self._runner(
             [sys.executable, script], env, job, self.config["timeout"] + self.config["connect_timeout"] + 5,
@@ -1358,9 +1424,16 @@ class Continent4Transport:
         return int(payload.get("status") or 0), body, str(payload.get("cert_sha256") or "")
 
     def _tls_curl(self, path):
+        # --pinnedpubkey хеширует SPKI (как HPKP), а pin_sha256 — весь сертификат DER.
+        # Из нашего хеша curl не восстановит ключ, а запрос с Basic ушёл бы в том же вызове,
+        # до того как родитель увидел бы сертификат. Поэтому пин и --show-pin curl не используют.
         if self.config.get("pin_sha256"):
             raise TlsUnavailable(
                 "curl не сверяет отпечаток сертификата ЦУС (pin_sha256 задан); нужен python или openssl s_client"
+            )
+        if self._cert_only:
+            raise TlsUnavailable(
+                "curl не получает сертификат ЦУС без HTTP-запроса; для --show-pin нужен python или openssl s_client"
             )
         if shutil.which("curl") is None:
             raise TlsUnavailable("curl не установлен")
@@ -1420,10 +1493,24 @@ class Continent4Transport:
             "-cipher", _GOST_CIPHERS,
             "-showcerts",
         ]
-        request = _request_bytes(self.host, self.config["port"], path, self.config["user"], self._password)
+        # В --show-pin запрос не собирается: в stdin s_client пароль не попадает даже в памяти процесса openssl.
+        if self._cert_only:
+            request = b""
+        else:
+            request = _request_bytes(self.host, self.config["port"], path, self.config["user"], self._password)
         env = _child_env(conf)
-        out, err = _openssl_exchange(argv, env, request, self.config["timeout"], self._runner)
+        out, err = _openssl_exchange(
+            argv, env, request, self.config["timeout"], self._runner,
+            self.config.get("pin_sha256") or "",
+        )
         der = _pem_leaf_der(out)
+        if self._cert_only:
+            if not der:
+                message = err.decode("utf-8", "replace").strip()
+                raise TlsUnavailable(
+                    scrub_text(message or "openssl s_client не показал сертификат", [self._password])[:400]
+                )
+            return 0, b"", cert_sha256(der)
         http_at = out.find(b"HTTP/")
         if http_at < 0:
             message = err.decode("utf-8", "replace").strip()
@@ -1477,8 +1564,10 @@ class Continent4Transport:
         return self._workdir
 
 
-def http_get_default(host, port, path, user, password, timeout, connect_timeout, ciphers):
-    return http_get(host, port, path, user, password, timeout, connect_timeout, ciphers)
+def http_get_default(host, port, path, user, password, timeout, connect_timeout, ciphers, pin="", send_request=True):
+    return http_get(
+        host, port, path, user, password, timeout, connect_timeout, ciphers, pin, send_request,
+    )
 
 
 def _process_has_gost():
@@ -1537,9 +1626,15 @@ def _run_process(argv, env, input_bytes, timeout):
     return proc.returncode, out, err
 
 
-def _openssl_exchange(argv, env, request, timeout, runner):
+def _openssl_exchange(argv, env, request, timeout, runner, pin=""):
     """s_client не закрываем по EOF stdin: выгрузка ЦУС занимает около 10 с, а EOF оборвал бы TLS.
-    runner в тестах подменяет процесс целиком и возвращает (code, stdout, stderr)."""
+
+    Если задан pin или request пуст (--show-pin), сертификат читается из stdout сразу
+    после рукопожатия, и только потом запрос пишется в stdin. Несовпадение пина
+    закрывает процесс без этой записи. runner в тестах подменяет процесс целиком
+    и возвращает (code, stdout, stderr): паузу между рукопожатием и запросом он не
+    видит, поэтому регрессию пина проверяет живой s_client.
+    """
     if runner is not _run_process:
         code, out, err = runner(argv, env, request, timeout)
         if code not in (0, None) and not out:
@@ -1555,9 +1650,16 @@ def _openssl_exchange(argv, env, request, timeout, runner):
     err_chunks = []
 
     def _pump(stream, sink):
+        # BufferedReader.read(n) копит n байт и не отдаёт сертификат, пока s_client
+        # не закроется. os.read возвращает то, что уже лежит в трубе: сертификат
+        # виден до записи запроса в stdin.
+        fd = stream.fileno()
         try:
             while True:
-                piece = stream.read(65536)
+                try:
+                    piece = os.read(fd, 65536)
+                except OSError:
+                    break
                 if not piece:
                     break
                 sink.append(piece)
@@ -1573,11 +1675,45 @@ def _openssl_exchange(argv, env, request, timeout, runner):
     for thread in readers:
         thread.daemon = True
         thread.start()
+
+    def _finish():
+        try:
+            proc.stdin.close()
+        except OSError:
+            pass
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+        for thread in readers:
+            thread.join(timeout=1)
+        return b"".join(out_chunks), b"".join(err_chunks)
+
+    # Пустой request — --show-pin. Заданный pin — не писать Basic, пока сертификат не совпал.
+    if pin or not request:
+        deadline = time.time() + timeout
+        der = None
+        while time.time() < deadline:
+            der = _pem_leaf_der(b"".join(out_chunks))
+            if der:
+                break
+            if proc.poll() is not None:
+                break
+            time.sleep(0.05)
+        if der and pin:
+            try:
+                enforce_pin(pin, cert_sha256(der))
+            except Continent4Error:
+                _finish()
+                raise
+        if not request or (pin and not der):
+            # --show-pin, либо пин задан, а сертификат так и не пришёл.
+            # Запрос в stdin не пишем: пароль не уходит на непроверенный узел.
+            return _finish()
     try:
         proc.stdin.write(request)
         proc.stdin.flush()
     except OSError as exc:
-        proc.kill()
+        _finish()
         raise TlsUnavailable("openssl stdin: {0}".format(exc))
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -1587,29 +1723,20 @@ def _openssl_exchange(argv, env, request, timeout, runner):
         if proc.poll() is not None:
             break
         time.sleep(0.05)
-    try:
-        proc.stdin.close()
-    except OSError:
-        pass
-    if proc.poll() is None:
-        proc.kill()
-    proc.wait()
-    for thread in readers:
-        thread.join(timeout=1)
-    return b"".join(out_chunks), b"".join(err_chunks)
+    return _finish()
 
 
 # Рабочий процесс: OPENSSL_CONF уже в окружении на старте, поэтому import ssl подхватывает ГОСТ.
 # Пароль приходит в stdin и в argv не записывается. Модуль continent4 здесь не импортируется:
 # родитель уже мог загрузить ssl без движка, а этот файл тянет probes.
 _WORKER_SCRIPT = r'''
-import base64, json, os, socket, ssl, sys, time, re
+import base64, hashlib, json, os, socket, ssl, sys, time, re
 
 MAX_BODY = 8 * 1024 * 1024
 
 def fail(message, code=2):
-    # 2 — нет ГОСТ (следующий способ ещё можно пробовать). 3 — сеть или обрыв уже после
-    # рукопожатия: это не «нет движка», родитель не должен звать curl.
+    # 2 — нет ГОСТ (следующий способ ещё можно пробовать). 3 — сеть, обрыв уже после
+    # рукопожатия или несовпадение pin: это не «нет движка», родитель не должен звать curl.
     sys.stderr.write(message[:500])
     raise SystemExit(code)
 
@@ -1621,6 +1748,8 @@ def main():
     host, port, path = job["host"], int(job["port"]), job["path"]
     user, password = job["user"], job["password"]
     timeout, connect_timeout = int(job["timeout"]), int(job["connect_timeout"])
+    pin = (job.get("pin") or "").strip().lower()
+    send_request = job.get("send_request", True)
     try:
         sock = socket.create_connection((host, port), connect_timeout)
     except socket.timeout:
@@ -1646,24 +1775,39 @@ def main():
         tls = ctx.wrap_socket(sock, server_hostname=host)
     except ssl.SSLError as exc:
         fail("рукопожатие TLS: {0}".format(exc))
+    digest = ""
+    raw = None
     try:
-        der = tls.getpeercert(True)
-        tls.settimeout(timeout)
-        token = base64.b64encode("{0}:{1}".format(user, password).encode("utf-8")).decode("ascii")
-        host_header = host if port in (443, 80) else "{0}:{1}".format(host, port)
-        request = (
-            "GET {path} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Basic {token}\r\n"
-            "Accept: application/json\r\nConnection: close\r\n\r\n"
-        ).format(path=path, host=host_header, token=token)
-        tls.sendall(request.encode("ascii"))
-        chunks, total = [], 0
-        while total < MAX_BODY:
-            piece = tls.recv(65536)
-            if not piece:
-                break
-            chunks.append(piece)
-            total += len(piece)
-        raw = b"".join(chunks)
+        der = tls.getpeercert(True) or b""
+        digest = hashlib.sha256(der).hexdigest() if der else ""
+        # Сверка до сборки Authorization. Код 3 — родитель не перебирает следующий способ.
+        if pin:
+            if not digest:
+                fail("не удалось получить сертификат ЦУС для сверки pin_sha256", 3)
+            if digest != pin:
+                fail(
+                    "отпечаток сертификата ЦУС не совпал с pin_sha256 (получен {0}, ожидался {1})".format(
+                        digest, pin,
+                    ),
+                    3,
+                )
+        if send_request:
+            tls.settimeout(timeout)
+            token = base64.b64encode("{0}:{1}".format(user, password).encode("utf-8")).decode("ascii")
+            host_header = host if port in (443, 80) else "{0}:{1}".format(host, port)
+            request = (
+                "GET {path} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Basic {token}\r\n"
+                "Accept: application/json\r\nConnection: close\r\n\r\n"
+            ).format(path=path, host=host_header, token=token)
+            tls.sendall(request.encode("ascii"))
+            chunks, total = [], 0
+            while total < MAX_BODY:
+                piece = tls.recv(65536)
+                if not piece:
+                    break
+                chunks.append(piece)
+                total += len(piece)
+            raw = b"".join(chunks)
     except socket.timeout:
         fail("таймаут чтения", 3)
     except ssl.SSLError as exc:
@@ -1675,6 +1819,10 @@ def main():
             tls.close()
         except Exception:
             pass
+    if not send_request:
+        result = {"status": 0, "cert_sha256": digest, "body_b64": ""}
+        sys.stdout.buffer.write(json.dumps(result).encode("ascii"))
+        return
     head, sep, body = raw.partition(b"\r\n\r\n")
     if not sep:
         fail("ответ без HTTP", 4)
@@ -1695,7 +1843,7 @@ def main():
             pass
     result = {
         "status": status,
-        "cert_sha256": __import__("hashlib").sha256(der).hexdigest() if der else "",
+        "cert_sha256": digest,
         "body_b64": base64.b64encode(body).decode("ascii"),
     }
     sys.stdout.buffer.write(json.dumps(result).encode("ascii"))
@@ -1798,12 +1946,14 @@ def main(argv=None):
         return 2
     try:
         if args.show_pin:
+            # Файл пароля по-прежнему обязателен и проверяется, но в запрос не попадает:
+            # fetch_peer_sha256 делает только рукопожатие.
             transport._password = read_password(args.password_file)
-            transport._get("/api-v1-objects/config")
-            if not transport._peer_sha256:
+            digest = transport.fetch_peer_sha256()
+            if not digest:
                 print("Ошибка: сертификат ЦУС не получен", file=sys.stderr)
                 return 2
-            print(transport._peer_sha256)
+            print(digest)
             return 0
         rows, version = evaluate_rendered(transport)
     except Continent4Error as exc:
