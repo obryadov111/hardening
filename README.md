@@ -14,11 +14,13 @@
 > конфигурации) и проверяет, правильно ли они заданы. Дополнительно версии установленного ПО
 > сопоставляются с Банком данных угроз ФСТЭК.
 
-📖 **Полное описание проекта** — как работает каждая функция, интеграция и технический момент:
-[`docs/project-description.md`](docs/project-description.md).
+📖 **Как это работает** — справочник для защиты: откуда данные, что с чем сравнивается, как
+получается оценка: [`docs/how-it-works.md`](docs/how-it-works.md) и каталог
+[`docs/how-it-works/`](docs/how-it-works/README.md).
 
-🌐 **Сетевое оборудование и средства защиты** — производители, проверки, уязвимости по БДУ,
-рекомендации по харденингу: [`docs/network-devices.md`](docs/network-devices.md).
+📖 **Полное описание проекта** — [`docs/project-description.md`](docs/project-description.md).
+
+🌐 **Сетевое оборудование и средства защиты** — [`docs/network-devices.md`](docs/network-devices.md).
 
 ---
 
@@ -27,12 +29,13 @@
 - **Контент-паки вместо кода.** Платформа описывается YAML-файлом: как её распознать, что прочитать,
   с чем сравнить, критичность, рекомендация, ссылки на пункты методики ФСТЭК. Новая платформа —
   новые данные, агент обновлять не нужно.
-- **Агент только читает, сервер оценивает.** Два файла на Python без зависимостей (Linux, Python 3.6+)
-  или один `.exe` (Windows). Подписанные манифесты, белые списки команд, запрет чтения секретов,
-  служба systemd с ФС только на чтение.
-- **Три способа сбора:** на самом хосте; сетевое устройство по SSH с джамп-хоста (только команды на
-  чтение); **по выгрузке конфигурации** — агентом (`--offline-dir`) или загрузкой файлов в интерфейсе,
-  для устройств без доступа и вендоров без стенда.
+- **Агент только читает, сервер оценивает.** Четыре файла на Python без зависимостей (`collector.py`,
+  `probes.py`, `usergate.py`, `continent4.py`; Linux, Python 3.6+) или один `.exe` (Windows).
+  Подписанные манифесты, белые списки команд, запрет чтения секретов, служба systemd с ФС только на чтение.
+- **Сбор:** на самом хосте; устройство по SSH с джамп-хоста (только команды на чтение); UserGate
+  (XML-RPC, затем SSH) и Континент 4 (API ЦУС по ГОСТ TLS) тем же установленным агентом; **по выгрузке
+  конфигурации** — агентом (`--offline-dir`) или загрузкой файлов в интерфейсе; опрос там, где настройки
+  в файле не лежат.
 - **Честная оценка.** Соответствие = соблюдено / (соблюдено + нарушено); «не проверено» не
   засчитывается ни в плюс, ни в минус и показывается отдельно как покрытие.
 - **Снимки и сравнение** любых двух сканов: исправлено, ухудшилось, появилось, риск принят.
@@ -51,22 +54,42 @@
 
 ## Платформы
 
-| Пак | Платформы | Проверок | Уровень |
-|---|---|---|---|
-| `ubuntu-server` | Ubuntu 20.04 / 22.04 / 24.04 | 25 | **baseline** — реальный хост |
-| `debian-server` | Debian 11 / 12 / 13 | 25 | draft — контейнеры в CI |
-| `astra-linux` | Astra Linux SE 1.8 | 25 | draft — контейнер в CI |
-| `alt-linux` | Альт p10 / p11 | 14 | draft — контейнеры в CI |
-| `rhel-family` | РЕД ОС 7.3 / 8, Rocky, Alma, Oracle Linux, CentOS Stream, RHEL | 19 | draft — контейнеры в CI |
-| `windows-server` | Windows Server 2022 / 2025 | 40 | **baseline** — настоящие серверы в CI |
-| `windows-client` | Windows 10 / 11 | 39 | draft — образцы |
-| `docker` | Docker Engine | 11 | **baseline** — реальный хост |
-| `postgresql` | PostgreSQL | 9 | draft — образцы |
-| `cisco-ios` | Cisco IOS / IOS XE (SSH или выгрузка) | 12 | draft — образцы |
-| `samba` | Samba | 1 | draft — образцы |
+Подсчёт актуальных версий **1 ноября 2026**: 26 паков, 353 проверки (ещё 17 файлов — прошлые версии
+тех же паков). Полная таблица с транспортом и тем, где пак подтверждён, —
+[`docs/how-it-works/07-packs.md`](docs/how-it-works/07-packs.md).
 
-11 паков, 220 проверок, 18 систем в CI. `baseline` — подтверждено на реальной системе, `draft` —
-в контейнерах или на образцах вывода.
+| Пак | Платформа и сбор | Проверок | Уровень |
+|---|---|---|---|
+| `ubuntu-server` 1.4.0 | Ubuntu 20.04 / 22.04 / 24.04, агент на хосте | 25 | **baseline** — Ubuntu 24.04.4 |
+| `debian-server` 1.1.0 | Debian 11 / 12 / 13 | 25 | draft — контейнеры в CI |
+| `astra-linux` 1.2.0 | Astra Linux SE 1.8 | 25 | draft — контейнер в CI |
+| `alt-linux` 1.1.0 | Альт p10 / p11 | 14 | draft — контейнеры в CI |
+| `rhel-family` 1.1.0 | РЕД ОС 7.3 / 8, Rocky, Alma, Oracle, CentOS Stream | 19 | draft — контейнеры в CI |
+| `windows-server` 1.0.0 | Windows Server 2022 / 2025 | 40 | **baseline** — настоящие серверы в CI |
+| `windows-client` 1.0.0 | Windows 10 / 11 | 39 | draft — образцы |
+| `windows-dc` 1.0.0 | контроллер домена | 26 | draft |
+| `docker` 1.2.0 | Docker Engine | 11 | **baseline** — хост проекта |
+| `postgresql` 1.1.0 | файлы PostgreSQL | 9 | draft — образцы |
+| `samba` 1.0.0 | Samba | 1 | draft — образцы |
+| `cisco-ios` 1.3.0 | Cisco IOS / IOS XE, SSH или выгрузка | 12 | draft — образцы |
+| `eltex-esr` 1.0.0 | Eltex ESR, SSH или выгрузка | 16 | draft |
+| `eltex-mes` 1.0.0 | Eltex MES, SSH или выгрузка | 10 | draft |
+| `qtech-qsw` 1.0.0 | Qtech QSW, SSH или выгрузка | 10 | draft |
+| `snr-switch` 1.0.0 | SNR, SSH или выгрузка | 10 | draft |
+| `vipnet-coordinator` 1.0.0 | ViPNet Coordinator, SSH или выгрузка | 6 | draft |
+| `s-terra-gate` 1.0.0 | С-Терра Шлюз, SSH или выгрузка | 7 | draft |
+| `usergate-ngfw` 1.1.0 | UserGate NGFW, XML-RPC и SSH или выгрузка | 12 | draft — формат сверен с лабораторным 7.4.1 |
+| `infowatch-arma-ngfw` 1.0.0 | InfoWatch ARMA, SSH или выгрузка | 7 | draft |
+| `dionis-nx` 1.0.0 | Dionis-NX, SSH или выгрузка | 9 | draft |
+| `pt-ngfw` 1.0.0 | PT NGFW, SSH, только версия | 0 | inventory |
+| `pt-ngfw-settings` 1.0.0 | PT NGFW, опрос | 5 | draft |
+| `kontinent-4` 1.1.0 | Континент 4, API ЦУС или выгрузка JSON | 6 | draft — формат сверен с лабораторным 4.2.1 |
+| `kontinent-4-local` 1.0.0 | Континент 4, опрос BIOS и локального меню | 3 | draft |
+| `ideco-ngfw` 1.0.0 | Ideco NGFW, опрос | 6 | draft |
+
+`baseline` требует заполненного `verified_on`. Лабораторные стенды UserGate и Континента дали формат
+проверок и фикстуры; в YAML уровень оставлен `draft`, потому что `verified_on` пуст. В CI агент
+запускается в 16 Linux-образах и на Windows Server 2022 и 2025.
 
 ## Архитектура
 
@@ -79,15 +102,18 @@
 
 ```mermaid
 flowchart LR
-    B[Браузер] -->|":80"| N["frontend<br/>nginx: статика + /api"]
-    RA[Удалённый агент] -->|":80 /api"| N
-    N --> BE["backend<br/>FastAPI + пробы агента"]
+    B[Браузер] -->|":443 HTTPS"| N["frontend nginx"]
+    RA[Удалённый агент] -->|":443 /api"| N
+    N --> BE["backend FastAPI"]
     LA[Агент на сервере] -->|"127.0.0.1:8000"| BE
     BE --> DB[("PostgreSQL")]
 ```
 
+Порт 80 после включения HTTPS только перенаправляет на 443 (`deploy/enable_https.sh`). До включения
+домена nginx слушает 80 без TLS. Агент на не-localhost по HTTP не ходит без явного `--allow-http`.
+
 ```text
-agent/                  агент: collector.py, probes.py, служба systemd (deploy/), тесты
+agent/                  агент: collector.py, probes.py, usergate.py, continent4.py, служба (deploy/), тесты
 src/                    интерфейс: pages/, components/, api/, utils/
 src/backend/app/        сервер: api/routes/, models/, services/, packs/ (YAML), commands/
 src/backend/alembic/    миграции схемы
@@ -126,6 +152,10 @@ sudo systemctl enable --now hardening-agent@local.timer # ежедневно
 python3 agent/collector.py --api-url https://… --environment net --use-packs \
   --ssh-host 10.0.0.1 --ssh-user audit --ssh-key ~/.ssh/audit_ed25519
 
+# UserGate или Континент 4: JSON цели, пароль лежит отдельно и в аргументы не попадает
+python3 agent/collector.py --api-url https://… --environment net --use-packs \
+  --device-config /etc/hardening-agent/usergate.json
+
 # по выгрузке конфигурации (show_running-config.txt, show_version.txt … в каталоге)
 python3 agent/collector.py --api-url https://… --environment net --use-packs \
   --offline-dir ./export-sw-core-01 --hostname sw-core-01
@@ -143,9 +173,13 @@ cd src/backend && python -m app.commands.pack validate && python -m app.commands
 npm run lint && npm run test:unit && npm run build                    # интерфейс: линтер, утилиты, сборка
 
 # сквозные тесты интерфейса (Playwright): бэкенд и Vite поднимаются сами, БД — своя одноразовая,
-# не та, что у pytest (засев стирает её): каждая страница, кнопка и роль, ~125 тестов
+# не та, что у pytest (засев стирает её): каждая страница, кнопка и роль.
+# Подсчёт 1 ноября 2026: 134 теста (70 вызовов test(), часть раскрывается циклами ролей и страниц)
 E2E_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5433/app_e2e_db npm run test:e2e
 ```
+
+Подсчёт тестов на 1 ноября 2026 по дереву репозитория (не запуск pytest в документации): бэкенд
+629 кейсов, агент 300, утилиты интерфейса 7. Как считали — [`docs/how-it-works/23-tests-ci.md`](docs/how-it-works/23-tests-ci.md).
 
 Нагрузка: `tools/loadtest/ui_load.py` — засев N хостов (ПО как на хосте, настоящие пробы агента) и замер
 API каждой страницы; приём отчётов от 1000 хостов — заметка «Агент на 1000+ хостов» в репозитории диплома.
@@ -165,7 +199,7 @@ docker build --build-context agent=./agent -t hardening-backend:latest ./src/bac
 docker run --rm --network diplom-hardening_default --env-file ./src/backend/.env hardening-backend:latest alembic upgrade head
 ./deploy/restart_backend.sh
 
-# интерфейс: nginx без root на порту 80
+# интерфейс: nginx без root. После enable_https.sh снаружи 443, порт 80 только перенаправляет
 ./deploy/restart_frontend.sh
 
 # копия БДУ ФСТЭК и данных Ubuntu (OVAL)
