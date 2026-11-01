@@ -252,6 +252,16 @@ def _int(value):
         return 0
 
 
+def parse_tls_list(text):
+    """Пустая строка — все четыре способа. Иначе список через запятую из _TLS_ORDER."""
+    if text is None or str(text).strip() == "":
+        return list(_TLS_ORDER)
+    items = [part.strip() for part in str(text).split(",") if part.strip()]
+    if not items or any(item not in _TLS_ORDER for item in items):
+        raise ValueError("--tls: список из in-process, python, curl, openssl через запятую")
+    return items
+
+
 def parse_pin(value):
     """SHA-256 сертификата ЦУС: hex, sha256:<hex> или sha256//<base64 дайджеста>."""
     if value is None or value == "":
@@ -293,6 +303,18 @@ def find_gost_engine(explicit=None):
         if os.path.isfile(path) and not os.path.islink(path):
             return path
     return None
+
+
+def conf_mentions_gost(path):
+    """Файл похож на конфиг движка ГОСТ, а не на чужой OPENSSL_CONF."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            text = handle.read().lower()
+    except OSError:
+        return False
+    if "gost.so" in text:
+        return True
+    return re.search(r"engine_id\s*=\s*gost\b", text) is not None
 
 
 def openssl_conf_text(engine_path):
@@ -1049,6 +1071,7 @@ class Continent4Transport:
         self._tls_name = None
         self._peer_sha256 = ""
         self._reported = False
+        self._load_error = None  # ошибка чтения ЦУС: повторять GET на каждую проверку нельзя
         self._workdir = None
         self.missing = set()
         if config:
@@ -1162,36 +1185,45 @@ class Continent4Transport:
         raise Continent4Error("политика аудита Windows недоступна на ЦУС Континент 4")
 
     def _ensure_rendered(self):
+        # Успех и ошибка кэшируются: иначе каждая проверка заново делает три GET.
+        # Повторный 401 блокирует IP агента на ЦУС (лимит неверных входов — три).
+        if self._load_error is not None:
+            raise self._load_error
         if self._rendered is not None:
             return
+        try:
+            self._load_rendered()
+        except Continent4Error as exc:
+            message = scrub_text(str(exc), [self._password])
+            self._load_error = Continent4Error(message)
+            self._report(message)
+            raise self._load_error
+        finally:
+            self._password = None
+
+    def _load_rendered(self):
         if not self._bound:
             raise Continent4Error("белый список путей ЦУС не задан манифестом пака")
         for path in C4_READONLY_PATHS:
             if path not in self._allowed:
                 raise Continent4Error("пак не разрешает чтение {0}".format(path))
         self._password = read_password(self.config["password_file"])
-        try:
-            config_body = self._get_json("/api-v1-objects/config")
-            if classify_document(config_body) != "config":
-                raise Continent4Error("ответ /api-v1-objects/config не похож на список конфигураций ЦУС")
-            cgw_body = self._get_json("/api-v1-objects/config/active/cgw")
-            node = select_node(cgw_nodes(cgw_body), self.config.get("hwserial"))
-            serial = str(node.get("hwserial"))
-            export_path = _EXPORT_PREFIX + serial + "?view=full"
-            export = self._get_json(export_path)
-            if not _is_export(export):
-                raise Continent4Error("ответ export-config-for-cgw не похож на выгрузку УБ")
-            export = sanitize(export)
-            node = sanitize(merge_node(node, export))
-            self._rendered = render_commands(export, node)
-            if not self.config.get("hostname") and node.get("name"):
-                self.asset_hostname = one_line(node.get("name"))
-            self._node = node
-        except Continent4Error as exc:
-            self._report(scrub_text(str(exc), [self._password]))
-            raise Continent4Error(scrub_text(str(exc), [self._password]))
-        finally:
-            self._password = None
+        config_body = self._get_json("/api-v1-objects/config")
+        if classify_document(config_body) != "config":
+            raise Continent4Error("ответ /api-v1-objects/config не похож на список конфигураций ЦУС")
+        cgw_body = self._get_json("/api-v1-objects/config/active/cgw")
+        node = select_node(cgw_nodes(cgw_body), self.config.get("hwserial"))
+        serial = str(node.get("hwserial"))
+        export_path = _EXPORT_PREFIX + serial + "?view=full"
+        export = self._get_json(export_path)
+        if not _is_export(export):
+            raise Continent4Error("ответ export-config-for-cgw не похож на выгрузку УБ")
+        export = sanitize(export)
+        node = sanitize(merge_node(node, export))
+        self._rendered = render_commands(export, node)
+        if not self.config.get("hostname") and node.get("name"):
+            self.asset_hostname = one_line(node.get("name"))
+        self._node = node
 
     def _report(self, message):
         if not self._reported:
@@ -1221,18 +1253,34 @@ class Continent4Transport:
                 raise
             self._peer_sha256 = (digest or "").lower()
             self._check_pin(digest)
-            if self._tls_name is None:
-                self._tls_name = name
-                self._report("ГОСТ TLS через {0}".format(name))
+            if status in (401, 403):
+                # Пароль или роль не подошли. Это не сбой ГОСТ: следующий способ
+                # отправил бы тот же Basic и добил бы лимит неверных входов на ЦУС.
+                raise Continent4Error(
+                    "ЦУС ответил HTTP {0} на {1} — неверный логин, пароль или роль. "
+                    "Повторная попытка не выполняется.".format(status, path.split("?", 1)[0])
+                )
             if status != 200:
                 raise Continent4Error("ЦУС ответил HTTP {0} на {1}".format(status, path.split("?", 1)[0]))
             if len(body) > _MAX_BODY:
                 raise Continent4Error("ответ ЦУС больше {0} байт".format(_MAX_BODY))
+            if self._tls_name is None:
+                self._tls_name = name
+                self._report("ГОСТ TLS через {0}".format(name))
             return body
-        hint = _GOST_HINT
+        self._raise_tls_exhausted(errors)
+
+    def _raise_tls_exhausted(self, errors):
         detail = "; ".join(errors) if errors else "ни один способ не вызван"
+        pin_only = errors and all("не сверяет отпечаток" in item for item in errors)
+        if pin_only:
+            raise Continent4Error(
+                "Подключение не выполнено: {0} "
+                "Это не отсутствие движка ГОСТ. Укажите --tls python или --tls openssl "
+                "(либо python,openssl), чтобы сверить pin_sha256.".format(detail)
+            )
         raise Continent4Error("нет ГОСТ TLS к {0}:{1}. {2} Попытки: {3}".format(
-            self.host, self.config.get("port") or 444, hint, detail,
+            self.host, self.config.get("port") or 444, _GOST_HINT, detail,
         ))
 
     def _check_pin(self, digest):
@@ -1293,8 +1341,12 @@ class Continent4Transport:
             [sys.executable, script], env, job, self.config["timeout"] + self.config["connect_timeout"] + 5,
         )
         if code != 0:
-            message = (err or out or b"").decode("utf-8", "replace").strip()
-            raise TlsUnavailable(scrub_text(message, [self._password])[:400] or "код {0}".format(code))
+            message = scrub_text((err or out or b"").decode("utf-8", "replace").strip(), [self._password])[:400]
+            # Код 2 — только «нет ГОСТ». Сеть, HTTP и прочие ошибки не перебирают следующий способ:
+            # иначе connection refused выглядит как отсутствие движка и запрос уходит в curl.
+            if code == 2:
+                raise TlsUnavailable(message or "нет ГОСТ TLS в подпроцессе Python")
+            raise Continent4Error(message or "подпроцесс Python завершился с кодом {0}".format(code))
         try:
             payload = json.loads(out.decode("utf-8"))
         except ValueError:
@@ -1307,7 +1359,9 @@ class Continent4Transport:
 
     def _tls_curl(self, path):
         if self.config.get("pin_sha256"):
-            raise TlsUnavailable("curl не сверяет отпечаток сертификата ЦУС; нужен python или openssl s_client")
+            raise TlsUnavailable(
+                "curl не сверяет отпечаток сертификата ЦУС (pin_sha256 задан); нужен python или openssl s_client"
+            )
         if shutil.which("curl") is None:
             raise TlsUnavailable("curl не установлен")
         conf = self._prepare_conf()
@@ -1385,15 +1439,29 @@ class Continent4Transport:
         if explicit:
             if not os.path.isfile(explicit):
                 raise Continent4Error("нет файла openssl_conf {0}".format(explicit))
+            if not conf_mentions_gost(explicit):
+                raise Continent4Error(
+                    "файл openssl_conf {0} не подключает движок ГОСТ. "
+                    "Укажите cnf с gost.so или уберите openssl_conf — агент найдёт движок сам.".format(explicit)
+                )
             return explicit
         env_conf = os.environ.get("OPENSSL_CONF")
-        if env_conf and os.path.isfile(env_conf) and not self.config.get("gost_engine"):
+        # Чужой OPENSSL_CONF (без ГОСТ) не должен прятать установленный gost.so.
+        if (
+            env_conf and os.path.isfile(env_conf) and conf_mentions_gost(env_conf)
+            and not self.config.get("gost_engine")
+        ):
             return env_conf
         try:
             engine = find_gost_engine(self.config.get("gost_engine"))
         except ValueError as exc:
             raise Continent4Error(str(exc))
         if not engine:
+            if env_conf and os.path.isfile(env_conf) and not conf_mentions_gost(env_conf):
+                raise TlsUnavailable(
+                    "OPENSSL_CONF={0} не подключает движок ГОСТ, и gost.so не найден "
+                    "(пакет libengine-gost-openssl). Уберите OPENSSL_CONF или укажите gost_engine.".format(env_conf)
+                )
             return None
         path = os.path.join(self._ensure_workdir(), "openssl-gost.cnf")
         if not os.path.exists(path):
@@ -1539,24 +1607,26 @@ import base64, json, os, socket, ssl, sys, time, re
 
 MAX_BODY = 8 * 1024 * 1024
 
-def fail(message):
+def fail(message, code=2):
+    # 2 — нет ГОСТ (следующий способ ещё можно пробовать). 3 — сеть или обрыв уже после
+    # рукопожатия: это не «нет движка», родитель не должен звать curl.
     sys.stderr.write(message[:500])
-    raise SystemExit(2)
+    raise SystemExit(code)
 
 def main():
     try:
         job = json.loads(sys.stdin.buffer.read().decode("utf-8"))
     except Exception as exc:
-        fail("задание не прочитано: {0}".format(exc))
+        fail("задание не прочитано: {0}".format(exc), 4)
     host, port, path = job["host"], int(job["port"]), job["path"]
     user, password = job["user"], job["password"]
     timeout, connect_timeout = int(job["timeout"]), int(job["connect_timeout"])
     try:
         sock = socket.create_connection((host, port), connect_timeout)
     except socket.timeout:
-        fail("таймаут соединения")
+        fail("таймаут соединения", 3)
     except OSError as exc:
-        fail(str(exc))
+        fail(str(exc), 3)
     sock.settimeout(connect_timeout)
     protocol = getattr(ssl, "PROTOCOL_TLS_CLIENT", ssl.PROTOCOL_TLS)
     ctx = ssl.SSLContext(protocol)
@@ -1595,9 +1665,11 @@ def main():
             total += len(piece)
         raw = b"".join(chunks)
     except socket.timeout:
-        fail("таймаут чтения")
+        fail("таймаут чтения", 3)
     except ssl.SSLError as exc:
-        fail("обрыв TLS: {0}".format(exc))
+        fail("обрыв TLS: {0}".format(exc), 3)
+    except OSError as exc:
+        fail(str(exc), 3)
     finally:
         try:
             tls.close()
@@ -1605,12 +1677,12 @@ def main():
             pass
     head, sep, body = raw.partition(b"\r\n\r\n")
     if not sep:
-        fail("ответ без HTTP")
+        fail("ответ без HTTP", 4)
     parts = head.split(None, 2)
     try:
         status = int(parts[1])
     except (IndexError, ValueError):
-        fail("нет кода HTTP")
+        fail("нет кода HTTP", 4)
     headers = {}
     for line in head.replace(b"\r\n", b"\n").split(b"\n")[1:]:
         if b":" in line:
@@ -1678,7 +1750,7 @@ def _live_transport(args):
         "pin_sha256": pin,
         "timeout": args.timeout,
         "connect_timeout": args.connect_timeout,
-        "tls": list(_TLS_ORDER),
+        "tls": parse_tls_list(args.tls),
         "gost_engine": args.gost_engine,
         "openssl_conf": args.openssl_conf,
     }
@@ -1708,6 +1780,10 @@ def _build_parser():
     parser.add_argument("--connect-timeout", type=int, default=10)
     parser.add_argument("--gost-engine", default=None, help="Путь к gost.so, если пакет лежит не в стандартном каталоге")
     parser.add_argument("--openssl-conf", default=None, help="Готовый OPENSSL_CONF с движком ГОСТ")
+    parser.add_argument(
+        "--tls", default="",
+        help="Способы ГОСТ TLS через запятую: in-process,python,curl,openssl. По умолчанию все четыре по порядку",
+    )
     parser.add_argument("--show-pin", action="store_true", help="Только напечатать отпечаток сертификата и выйти")
     return parser
 
@@ -1735,6 +1811,9 @@ def main(argv=None):
         return 2
     finally:
         transport.close()
+    if transport._load_error is not None:
+        # Уже напечатано один раз из транспорта. Строки проверок и пустой hwserial не дублируют её.
+        return 2
     node = transport._node or {}
     line = "node: {0}  hwserial: {1}  tls: {2}".format(
         one_line(node.get("name")) or transport.asset_hostname or args.host,

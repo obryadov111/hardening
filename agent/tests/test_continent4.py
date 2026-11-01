@@ -411,10 +411,8 @@ def test_device_config_kind_opens_continent_transport(tmp_path):
 
 
 def test_cli_prints_results_without_the_password(tmp_path, capsys, monkeypatch):
-    directory = tmp_path / "off"
-    directory.mkdir()
-    # Живой CLI ходит в сеть; здесь проверяем, что оценка фикстуры не печатает секрет,
-    # а разбор аргументов требует файл 0600.
+    monkeypatch.setattr(continent4, "_process_has_gost", lambda: False)
+    monkeypatch.setattr(continent4, "find_gost_engine", lambda explicit=None: None)
     secret = _secret(tmp_path)
     code = continent4.main([
         "--host", "127.0.0.1", "--user", "hardening-ro", "--password-file", str(secret),
@@ -423,4 +421,132 @@ def test_cli_prints_results_without_the_password(tmp_path, capsys, monkeypatch):
     assert code == 2
     captured = capsys.readouterr()
     assert PASSWORD not in captured.out and PASSWORD not in captured.err
-    assert "ГОСТ" in captured.err or "соединен" in captured.err
+    assert "ГОСТ" in captured.err
+    # Сбой чтения — одна строка и код 2, а не шесть проверок с тем же текстом.
+    assert captured.out.strip() == ""
+    assert "kontinent4." not in captured.err
+    assert captured.err.count("Континент 4 ") == 1
+
+
+def test_one_401_is_a_single_request_and_not_a_tls_fallback(tmp_path, monkeypatch):
+    calls = []
+
+    def http_get(host, port, path, user, password, timeout, connect_timeout, ciphers):
+        calls.append(path)
+        return 401, b'{"detail":"unauthorized"}', b"\x30"
+
+    monkeypatch.setattr(continent4, "_process_has_gost", lambda: True)
+    transport = continent4.Continent4Transport(
+        _config(tmp_path, tls=["in-process", "curl"]),
+        http_get=http_get,
+        runner=lambda *args: (_ for _ in ()).throw(AssertionError("curl не должен вызываться после 401")),
+    )
+    transport.bind_builtin()
+    rows, version = continent4.evaluate_rendered(transport)
+    assert calls == ["/api-v1-objects/config"]
+    assert all(row["status"] == "error" for row in rows)
+    assert all("HTTP 401" in (row["error"] or "") for row in rows)
+    assert "Повторная попытка не выполняется" in rows[0]["error"]
+    assert version.get("found") is False
+    assert "HTTP 401" in (version.get("error") or "")
+
+
+def test_python_network_error_does_not_fall_through_to_curl(tmp_path, monkeypatch):
+    engine = tmp_path / "gost.so"
+    engine.write_bytes(b"x")
+    monkeypatch.setattr(continent4, "find_gost_engine", lambda explicit=None: str(engine))
+    calls = []
+
+    def runner(argv, env, data, timeout):
+        calls.append(os.path.basename(argv[0]))
+        if "python" in os.path.basename(argv[0]):
+            return 3, b"", b"connection refused"
+        return 0, b"__C4_200", b""
+
+    transport = continent4.Continent4Transport(
+        _config(tmp_path, tls=["python", "curl"]),
+        runner=runner,
+    )
+    transport.bind_builtin()
+    transport._password = PASSWORD
+    with pytest.raises(continent4.Continent4Error, match="connection refused") as exc:
+        transport._get("/api-v1-objects/config")
+    assert "нет ГОСТ TLS" not in str(exc.value)
+    assert calls == [calls[0]]
+    assert "python" in calls[0]
+    assert "curl" not in calls
+
+
+def test_gost_failure_still_tries_the_next_method(tmp_path, monkeypatch):
+    engine = tmp_path / "gost.so"
+    engine.write_bytes(b"x")
+    monkeypatch.setattr(continent4, "find_gost_engine", lambda explicit=None: str(engine))
+    calls = []
+
+    def runner(argv, env, data, timeout):
+        calls.append(os.path.basename(argv[0]))
+        if "python" in os.path.basename(argv[0]):
+            return 2, b"", "рукопожатие TLS: no shared cipher".encode("utf-8")
+        return 0, b'{"ok":true}__C4_200', b""
+
+    transport = continent4.Continent4Transport(
+        _config(tmp_path, tls=["python", "curl"]),
+        runner=runner,
+    )
+    transport.bind_builtin()
+    transport._password = PASSWORD
+    body = transport._get("/api-v1-objects/config")
+    assert body.startswith(b'{"ok":true}')
+    assert calls[0].startswith("python") or "python" in calls[0]
+    assert calls[1] == "curl"
+
+
+def test_curl_with_pin_explains_the_pin_not_a_missing_engine(tmp_path):
+    transport = continent4.Continent4Transport(_config(tmp_path, tls=["curl"], pin_sha256="ab" * 32))
+    transport.bind_builtin()
+    transport._password = PASSWORD
+    with pytest.raises(continent4.Continent4Error, match="не сверяет отпечаток") as exc:
+        transport._get("/api-v1-objects/config")
+    text = str(exc.value)
+    assert "не отсутствие движка" in text
+    assert "libengine-gost-openssl" not in text
+
+
+def test_foreign_openssl_conf_does_not_hide_the_gost_engine(tmp_path, monkeypatch):
+    plain = tmp_path / "no-gost.cnf"
+    plain.write_text("openssl_conf = system_default\n[system_default]\nssl_conf = ssl_sect\n", encoding="utf-8")
+    engine = tmp_path / "gost.so"
+    engine.write_bytes(b"x")
+    monkeypatch.setenv("OPENSSL_CONF", str(plain))
+    monkeypatch.setattr(continent4, "find_gost_engine", lambda explicit=None: str(engine))
+    transport = continent4.Continent4Transport(_config(tmp_path))
+    path = transport._prepare_conf()
+    assert path != str(plain)
+    assert "gost.so" in Path(path).read_text(encoding="utf-8")
+    assert engine.name in Path(path).read_text(encoding="utf-8") or str(engine) in Path(path).read_text(encoding="utf-8")
+
+    monkeypatch.setattr(continent4, "find_gost_engine", lambda explicit=None: None)
+    with pytest.raises(continent4.TlsUnavailable, match="не подключает движок ГОСТ") as exc:
+        transport._prepare_conf()
+    assert str(plain) in str(exc.value)
+    assert "libengine-gost-openssl" in str(exc.value)
+
+
+def test_cli_tls_flag_selects_methods(tmp_path, capsys):
+    secret = _secret(tmp_path)
+    code = continent4.main([
+        "--host", "127.0.0.1", "--user", "hardening-ro", "--password-file", str(secret),
+        "--tls", "wget",
+    ])
+    assert code == 2
+    assert "--tls" in capsys.readouterr().err
+
+    code = continent4.main([
+        "--host", "127.0.0.1", "--user", "hardening-ro", "--password-file", str(secret),
+        "--tls", "curl", "--pin-sha256", "ab" * 32,
+    ])
+    assert code == 2
+    captured = capsys.readouterr()
+    assert "не сверяет отпечаток" in captured.err
+    assert captured.out.strip() == ""
+    assert "kontinent4." not in captured.out and "kontinent4." not in captured.err

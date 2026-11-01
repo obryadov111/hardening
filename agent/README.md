@@ -222,6 +222,8 @@ python3 collector.py --api-url https://hardening.example.com --environment net -
 python3 continent4.py --host 10.77.0.30 --user hardening-ro \
   --password-file /etc/hardening-agent/continent4.pass \
   --pin-sha256 <hex из --show-pin>
+# только один способ (или несколько через запятую): --tls python
+# допустимы in-process, python, curl, openssl; по умолчанию все четыре по порядку
 # код 0 — все автоматические проверки соблюдены, 1 — есть нарушения, 2 — нет ГОСТ TLS или ЦУС не ответил
 ```
 
