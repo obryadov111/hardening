@@ -162,6 +162,80 @@ stdin не закрывает раньше ответа; пустой вывод
 Команды `show` и методы XML-RPC — только чтение. Метод записи в паке агент не вызовет, даже если
 он подписан: белый список зашит в `usergate.py`.
 
+### Континент 4 (ЦУС)
+
+Узел безопасности читает не по SSH (там только локальное меню), а по HTTP API центра управления
+сетью: `https://<ЦУС>:444`, HTTP Basic, JSON. Порт принимает **только ГОСТ TLS 1.2**
+(GOST2012-KUZNYECHIK-KUZNYECHIKOMAC). Обычный `ssl` без движка ГОСТ к нему не подключится.
+
+На хосте агента (Debian/Ubuntu, OpenSSL 3):
+
+```bash
+sudo apt-get install -y libengine-gost-openssl openssl curl
+# gost.so обычно здесь:
+#   /usr/lib/x86_64-linux-gnu/engines-3/gost.so
+```
+
+Агент сам ищет `gost.so` и подставляет `OPENSSL_CONF` дочернему процессу. Python остаётся
+на стандартной библиотеке. Порядок, пока один способ не установит TLS:
+
+1. `ssl` этого процесса — только если движок уже загружен (`OPENSSL_CONF` был задан до запуска агента);
+2. отдельный `python` с `OPENSSL_CONF` на `gost.so` (основной способ);
+3. `curl` с тем же конфигом (отпечаток сертификата он не сверяет — при заданном `pin_sha256` пропускается);
+4. `openssl s_client` с тем же конфигом.
+
+Если движка нет, агент пишет, что нужен пакет `libengine-gost-openssl`, и данные не отправляет.
+
+Живой опрос — ровно три GET, они перечислены в подписанном паке (`c4_paths`) и зашиты в
+`continent4.py`. Запись не вызывается: lock, fork, commit, install-policy, set-password, любой
+POST/PUT/DELETE. Учётка — отдельная, роль **«Аудитор»**: привилегии `VIEW_*`, `STRUCTURE_ACCESS`,
+`STRUCTURE`, `STATISTICS`. На сборке 4.2.1-653 этих прав хватает на три GET, запись отвечает 403.
+IP хоста агента нужно внести в «Доступ к ЦУС» узла с ЦУС. Роль «Главный администратор» агенту не нужна.
+
+Пароль — файл `0600`, в JSON цели его нет. Отпечаток сертификата ЦУС (SHA-256 всего сертификата в DER)
+закрепляется в `pin_sha256`, когда он известен.
+
+```bash
+install -d -m 0750 -o root -g hardening-agent /etc/hardening-agent
+install -m 0600 -o hardening-agent -g hardening-agent /dev/null /etc/hardening-agent/continent4.pass
+printf '%s\n' 'пароль-аудитора' > /etc/hardening-agent/continent4.pass
+chown hardening-agent:hardening-agent /etc/hardening-agent/continent4.pass
+chmod 0600 /etc/hardening-agent/continent4.pass
+
+cp deploy/continent4.json.example /etc/hardening-agent/continent4.json
+# в json: kind=continent4, host, port, user, password_file, при нескольких УБ — hwserial
+# необязательно: pin_sha256, gost_engine, openssl_conf
+
+python3 continent4.py --host 10.77.0.30 --user hardening-ro \
+  --password-file /etc/hardening-agent/continent4.pass --show-pin
+# напечатанный hex — в pin_sha256
+
+export HARDENING_AGENT_API_KEY=<ключ площадки>
+export HARDENING_PACK_PUBLIC_KEY=<открытый ключ подписи паков>
+python3 collector.py --api-url https://hardening.example.com --environment net --use-packs \
+  --pack kontinent-4 --device-config /etc/hardening-agent/continent4.json
+```
+
+Проверка на живом ЦУС без отправки на сервер (печатает вердикт по каждой проверке, пароль и хэши не печатает):
+
+```bash
+python3 continent4.py --host 10.77.0.30 --user hardening-ro \
+  --password-file /etc/hardening-agent/continent4.pass \
+  --pin-sha256 <hex из --show-pin>
+# только один способ (или несколько через запятую): --tls python
+# допустимы in-process, python, curl, openssl; по умолчанию все четыре по порядку
+# код 0 — все автоматические проверки соблюдены, 1 — есть нарушения, 2 — нет ГОСТ TLS или ЦУС не ответил
+```
+
+Тот же JSON, что отдают `c4_config_exporter` и выгрузка из локального меню, можно положить в каталог
+(`export-config-for-cgw.json`, рядом по желанию `cgw.json` — в нём `update_version` для БДУ) и
+запустить `--offline-dir`. Загрузка этих файлов через «Проверка по выгрузке» работает тем же разбором.
+Пароль BIOS, пароль локального меню и тайм-аут неактивности ЛМ в API нет: их спрашивает пак
+`kontinent-4-local`.
+
+Версия ПО берётся из `update_version` узла (например `4.2.1-653`) и уходит в сопоставление с БДУ
+как у UserGate. Хвост после дефиса для БДУ — ревизия сборки, сравнивается `4.2.1`.
+
 Проверка по выгрузке конфигурации — без доступа к устройству (нет SSH-доступа, устройство изолировано,
 вендора нет на стенде). Вывод команд сохраняется в каталог, по файлу на команду; имя файла — команда,
 в которой пробелы и `/` заменены на `_`: `show_running-config.txt`, `show_version.txt`,
@@ -212,7 +286,7 @@ RHEL, Rocky Linux, AlmaLinux, Oracle Linux, CentOS Stream, **РЕД ОС 7.3 и 
 
 ```powershell
 pip install pyinstaller==6.11.1
-pyinstaller --onefile --name hardening-agent --paths agent --hidden-import probes --hidden-import usergate agent/collector.py
+pyinstaller --onefile --name hardening-agent --paths agent --hidden-import probes --hidden-import usergate --hidden-import continent4 agent/collector.py
 ```
 
 Запуск — только в режиме паков, **от имени администратора или SYSTEM**: `secedit` (политика паролей и

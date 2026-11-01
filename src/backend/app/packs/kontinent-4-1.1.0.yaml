@@ -1,0 +1,136 @@
+# Пак «Континент 4» (ООО «Код Безопасности»). Сбор — обычный агент с хоста в сети заказчика:
+# три GET к API ЦУС (:444, HTTP Basic, JSON) либо выгрузка того же JSON (c4_config_exporter или ЛМ).
+#
+# maturity: draft. Поля сверены с лабораторным ЦУС+УБ 4.2.1-653 (agent/tests/fixtures/continent4:
+# пара export до и после изменений). Живой прогон на стенде выполняет автор; до него пак не baseline.
+#
+# Версия ПО — cgw.update_version (поля version у узла нет), например 4.2.1-653. В БДУ хвост после
+# дефиса отрезается как ревизия сборки, сравнивается 4.2.1. Имя продукта — как в БДУ.
+#
+# Белый список c4_paths — только эти GET. lock, fork, commit, install-policy, set-password и любой
+# POST/PUT/DELETE агент не вызывает, даже если путь попал в подписанный манифест.
+#
+# SSH: в выгрузке у sshaccesscomponent есть is_enabled; разрешённые адреса — связи link на netobject.
+# Включённый SSH без таких связей считается неограниченным. Пароль BIOS, пароль локального меню и
+# тайм-аут неактивности ЛМ в API нет — они в паке kontinent-4-local (опрос).
+#
+# Учётка агента — роль «Аудитор»: привилегии VIEW_* плюс STRUCTURE_ACCESS, STRUCTURE, STATISTICS.
+# На 4.2.1-653 этих прав хватает на три GET; запись отвечает 403. IP хоста агента — в «Доступе к ЦУС».
+
+pack: kontinent-4
+version: 1.1.0
+maturity: draft
+tags: [network-device, security-gateway, firewall, securitycode, kontinent-4]
+transport: ssh
+asset_type: network-device
+
+c4_paths:
+  - /api-v1-objects/config
+  - /api-v1-objects/config/active/cgw
+  - /api-v1-server/config/active/export-config-for-cgw
+
+detect:
+  - probe:
+      type: cli_config
+      cmd: show continent version
+      require: '(?m)^product:'
+      match: '^product:\s*(\S+)'
+    equals: continent
+
+firmware:
+  vendor: ООО «Код Безопасности»
+  product: комплекс безопасности «континент». версия 4
+  version_probe:
+    type: cli_config
+    cmd: show continent version
+    require: '(?m)^update_version:'
+    match: '^update_version:\s*(\S+)'
+
+checks:
+  - id: kontinent4.password_min_length
+    title: Минимальная длина пароля администраторов не меньше 8 символов
+    probe:
+      type: cli_config
+      cmd: show continent password-policy
+      require: '(?m)^min_length:'
+      match: '^min_length:\s*(\d+)'
+    assert: { op: gte, value: 8 }
+    severity: medium
+    remediation: "Задать в политике безопасности учётных записей минимальную длину пароля не меньше 8 (лучше 12) и требования к сложности."
+    refs:
+      - { source: "Континент 4.2.1: Политика безопасности учетных записей" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.4" }
+
+  - id: kontinent4.lockout_enabled
+    title: Включена автоматическая блокировка после неверных попыток входа
+    probe:
+      type: cli_config
+      cmd: show continent password-policy
+      require: '(?m)^lockout:'
+      match: '^lockout:\s*(\S+)'
+    assert: { op: eq, value: "on" }
+    severity: medium
+    remediation: "Включить автоматическую блокировку (например, после 5 попыток на 15 минут): wrong_try_count не меньше 1 и ненулевые wrong_try_block или blocked_days."
+    refs:
+      - { source: "Континент 4.2.1: Политика безопасности учетных записей" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.6" }
+
+  - id: kontinent4.personal_admin_accounts
+    title: Администраторы работают под персональными учётными записями с ролями
+    probe:
+      type: cli_blocks
+      cmd: show continent administrators
+      block: '^login:'
+      has:
+        - '^enabled:\s*yes'
+        - '^autocreated:\s*no'
+        - '^primary:\s*no'
+        - '^role:\s*\S'
+      require: '(?m)^login:'
+    assert: { op: gte, value: 1 }
+    severity: medium
+    remediation: "Создать персональные учётные записи и роли с минимально необходимыми привилегиями; первичную учётку, созданную при инициализации ЦУС, использовать только для аварийного доступа."
+    refs:
+      - { source: "Континент 4.2.1: Администрирование комплекса, роли администраторов" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.5" }
+
+  - id: kontinent4.ssh_access_restricted
+    title: SSH-доступ к локальному меню выключен или ограничен адресами администраторов
+    probe:
+      type: cli_config
+      cmd: show continent ssh
+      require: '(?m)^state:'
+      match: '^state:\s*(.+)$'
+    assert: { op: in, value: ["выключен", "включён, адреса ограничены"] }
+    severity: high
+    remediation: "Выключить SSH или оставить в списке только сети администраторов; настройку из локального меню продублировать в МК и установить политику."
+    refs:
+      - { source: "Континент 4.2.1: Дистанционный доступ по протоколу SSH" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.5" }
+
+  - id: kontinent4.snmp_secure
+    title: SNMP выключен или работает по v3 с аутентификацией и шифрованием
+    probe:
+      type: cli_config
+      cmd: show continent snmp
+      require: '(?m)^state:'
+      match: '^state:\s*(.+)$'
+    assert: { op: in, value: ["SNMP выключен", "SNMP v3: аутентификация SHA и шифрование AES"] }
+    severity: medium
+    remediation: "Перейти на SNMP v3 с аутентификацией SHA и шифрованием AES или выключить SNMP."
+    refs:
+      - { source: "Континент 4.2.1: Контроль узлов безопасности по протоколу SNMP" }
+      - { source: "Методика анализа защищённости информационных систем, ФСТЭК России, 25.11.2025", id: "УСИ.8" }
+
+  - id: kontinent4.remote_syslog
+    title: Журналы отправляются на внешний syslog-сервер
+    probe:
+      type: cli_config
+      cmd: show continent syslog
+      require: '(?m)^remote:'
+      match: '^remote:\s*(\S+)'
+    assert: { op: eq, value: "yes" }
+    severity: low
+    remediation: "Настроить отправку журналов на внешний syslog-сервер. Пересылка на сам ЦУС (is_ncc_forward_enabled) внешним журналом не считается."
+    refs:
+      - { source: "Континент 4.2.1: Отправка журналов на syslog-сервер" }

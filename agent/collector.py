@@ -972,6 +972,35 @@ def sign_report(payload: dict, api_key: str) -> dict:
 # чтение) и отправляет результаты в POST /api/ingest как probe_results. Сравнение с
 # нормой делает сервер. Движок проб — рядом, в probes.py (при обычном запуске не нужен).
 
+def open_device_transport(path):
+    """Файл цели: UserGate, либо Континент 4 если в JSON задано kind=continent4."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError) as exc:
+        raise SystemExit("Ошибка: файл цели не читается: {0}".format(exc))
+    kind = ""
+    if isinstance(data, dict):
+        kind = str(data.get("kind") or "").strip().lower()
+    if kind in ("continent4", "kontinent-4", "kontinent4", "c4"):
+        try:
+            import continent4
+        except ImportError as exc:
+            raise SystemExit("Ошибка: для Континент 4 нужен файл continent4.py рядом с collector.py") from exc
+        try:
+            return continent4.Continent4Transport(continent4.load_config(path))
+        except ValueError as exc:
+            raise SystemExit("Ошибка: {0}".format(exc))
+    try:
+        import usergate
+    except ImportError as exc:
+        raise SystemExit("Ошибка: для --device-config нужен файл usergate.py рядом с collector.py") from exc
+    try:
+        return usergate.UserGateTransport(usergate.load_config(path))
+    except ValueError as exc:
+        raise SystemExit("Ошибка: {0}".format(exc))
+
+
 def fetch_manifests(conn: ServerConnection, transport_name: str) -> dict:
     try:
         return conn.request("GET", f"/api/agent/manifests?transport={transport_name}")
@@ -993,23 +1022,25 @@ def build_pack_payload(args: argparse.Namespace, probes_module, conn: "ServerCon
 
     if sum(bool(item) for item in (args.offline_dir, args.ssh_host, args.device_config)) > 1:
         raise SystemExit("Ошибка: --offline-dir, --ssh-host и --device-config взаимоисключающие — "
-                         "либо выгрузка, либо SSH по ключу, либо цель UserGate")
+                         "либо выгрузка, либо SSH по ключу, либо цель устройства (UserGate или Континент 4)")
     if args.offline_dir:
         if not args.hostname:
             raise SystemExit("Ошибка: для --offline-dir нужен --hostname (имя устройства, чья это выгрузка)")
         try:
-            transport = probes_module.OfflineConfigTransport(args.offline_dir)
-        except ValueError as exc:
-            raise SystemExit(f"Ошибка: {exc}")
-    elif args.device_config:
-        try:
-            import usergate
-        except ImportError as exc:
-            raise SystemExit("Ошибка: для --device-config нужен файл usergate.py рядом с collector.py") from exc
-        try:
-            transport = usergate.UserGateTransport(usergate.load_config(args.device_config))
+            import continent4
+            if continent4.directory_has_export(args.offline_dir):
+                transport = continent4.Continent4Transport.from_directory(args.offline_dir)
+            else:
+                transport = probes_module.OfflineConfigTransport(args.offline_dir)
         except ValueError as exc:
             raise SystemExit("Ошибка: {0}".format(exc))
+        except ImportError:
+            try:
+                transport = probes_module.OfflineConfigTransport(args.offline_dir)
+            except ValueError as exc:
+                raise SystemExit("Ошибка: {0}".format(exc))
+    elif args.device_config:
+        transport = open_device_transport(args.device_config)
     elif args.ssh_host:
         transport = probes_module.SshTransport(args.ssh_host, args.ssh_user, args.ssh_port, args.ssh_key)
     else:
@@ -1079,8 +1110,13 @@ def build_pack_payload(args: argparse.Namespace, probes_module, conn: "ServerCon
         }
         if hasattr(transport, "describe"):
             # Источник данных — в снимок: проверка по выгрузке не равна проверке живого устройства.
-            payload["collection"] = transport.describe()
-            payload["collection"]["declared_pack"] = any(not probes_module.matches_detect(transport, m["detect"]) for m in matched)
+            # Живой ЦУС describe() не отдаёт (None): это обычный опрос устройства, не файл.
+            described = transport.describe()
+            if described:
+                payload["collection"] = described
+                payload["collection"]["declared_pack"] = any(
+                    not probes_module.matches_detect(transport, m["detect"]) for m in matched
+                )
         return payload
     finally:
         # Сессия UserGate (XML-RPC logout, ssh) закрывается и при ошибке распознавания.
@@ -1136,8 +1172,8 @@ def parse_args(argv: "list[str]") -> argparse.Namespace:
     packs.add_argument("--ssh-port", type=int, default=22)
     packs.add_argument("--ssh-key", default=None, help="Путь к приватному ключу SSH (сам ключ в пак не попадает)")
     packs.add_argument("--device-config", default=os.environ.get("HARDENING_DEVICE_CONFIG"),
-                       help="JSON цели UserGate (адрес, пользователь, password_file, порты). Пароль в этот файл не входит; "
-                            "или HARDENING_DEVICE_CONFIG")
+                       help="JSON цели UserGate или Континент 4 (kind=continent4: адрес ЦУС, пользователь, password_file). "
+                            "Пароль в этот файл не входит; или HARDENING_DEVICE_CONFIG")
     packs.add_argument("--offline-dir", default=None,
                        help="Проверка по выгрузке конфигурации вместо живого устройства: каталог с выводом команд "
                             "(show_running-config.txt, show_version.txt …); нужен --hostname, без show_version — и --pack")

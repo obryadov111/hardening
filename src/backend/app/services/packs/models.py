@@ -47,13 +47,21 @@ USERGATE_XMLRPC_READONLY = frozenset({
 })
 _XMLRPC_METHOD_RE = re.compile(r"^[a-z][a-z0-9]*(\.[a-z][a-z0-9_]*)+$")
 _XMLRPC_WRITE_RE = re.compile(r"(^|\.)(add|update|delete|set|remove|start|stop|create|edit|import|execute)(\.|$)")
+# Пути HTTP API ЦУС «Континент 4» только на чтение. Тот же набор, что C4_READONLY_PATHS в agent/continent4.py:
+# агент не откроет путь вне списка, даже если он есть в подписанном манифесте. Запись (lock, fork, commit,
+# install-policy, set-password, любой POST/PUT/DELETE) сюда не входит и паком объявлена быть не может.
+C4_READONLY_PATHS = (
+    "/api-v1-objects/config",
+    "/api-v1-objects/config/active/cgw",
+    "/api-v1-server/config/active/export-config-for-cgw",
+)
 
 Severity = Literal["critical", "high", "medium", "low", "info"]
 # inventory — только обнаружение платформы; draft — проверки написаны по документации и НЕ подтверждены на
 # реальном оборудовании; baseline и выше — подтверждены (обязателен verified_on: на чём именно проверено).
 Maturity = Literal["inventory", "draft", "baseline", "full", "certified"]
-# manual — проверка по опросу: оборудование без машиночитаемой конфигурации (Континент 4: настройки только в
-# графическом Менеджере конфигурации), аудитор отвечает на вопросы по экранам системы управления.
+# manual — проверка по опросу: то, чего нет в конфигурации (для Континент 4 это пароль BIOS, пароль
+# локального меню и тайм-аут неактивности ЛМ — они не видны в API ЦУС).
 Transport = Literal["local", "ssh", "manual"]
 
 
@@ -481,6 +489,9 @@ class Pack(StrictModel):
     # Методы XML-RPC, которые агент имеет право вызвать для этого пака (только чтение, белый список).
     # Пусто у всех паков, кроме тех, где устройство отдаёт те же факты по API (UserGate).
     xmlrpc_methods: list[str] = Field(default_factory=list)
+    # Пути GET API ЦУС Континент 4. Пусто у всех паков, кроме kontinent-4: агент вызывает путь,
+    # только если он есть и здесь, и в его собственном списке чтения.
+    c4_paths: list[str] = Field(default_factory=list)
 
     @field_validator("pack")
     @classmethod
@@ -523,6 +534,13 @@ class Pack(StrictModel):
         ]
         if rejected:
             raise ValueError("xmlrpc_methods: только известные методы на чтение, отклонено: " + ", ".join(rejected))
+        if self.c4_paths and self.transport != "ssh":
+            raise ValueError("c4_paths допустимы только при transport: ssh")
+        unknown_paths = [path for path in self.c4_paths if path not in C4_READONLY_PATHS]
+        if unknown_paths:
+            raise ValueError(
+                "c4_paths: только три GET чтения конфигурации ЦУС, отклонено: " + ", ".join(unknown_paths)
+            )
         all_probes = [
             leaf
             for probe in [check.probe for check in self.checks] + [rule.probe for rule in self.detect]

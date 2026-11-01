@@ -1,0 +1,13 @@
+{
+ "data": [
+  {
+   "description": "",
+   "domain_level": 1,
+   "is_active": true,
+   "name": "",
+   "subtype": "master",
+   "type": "config",
+   "uuid": "1"
+  }
+ ]
+}

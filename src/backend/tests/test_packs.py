@@ -460,7 +460,8 @@ def test_shipped_packs_and_their_maturity():
         "eltex-esr": "draft", "eltex-mes": "draft", "qtech-qsw": "draft", "snr-switch": "draft",
         "vipnet-coordinator": "draft", "s-terra-gate": "draft", "usergate-ngfw": "draft",
         "pt-ngfw": "inventory",  # CLI только операционный: распознавание и версия для БДУ, без проверок
-        "kontinent-4": "draft",  # проверка по опросу: конфигурация только в графическом Менеджере конфигурации
+        "kontinent-4": "draft",  # API ЦУС: шесть проверок; живой прогон на стенде ещё не подтверждён
+        "kontinent-4-local": "draft",  # BIOS, пароль локального меню и тайм-аут ЛМ — только опрос
         "infowatch-arma-ngfw": "draft", "dionis-nx": "draft", "ideco-ngfw": "draft", "pt-ngfw-settings": "draft",
     }
     assert packs["cisco-ios"].verified_on == []
@@ -558,6 +559,55 @@ def test_usergate_xmlrpc_methods_are_read_only_and_match_the_agent():
     with pytest.raises(ValueError, match="только известные методы"):
         Pack.model_validate(_ssh_pack_with({"type": "cli_config", "cmd": "show version", "match": "x"}) | {
             "xmlrpc_methods": ["v2.core.administrator.add"],
+        })
+
+
+def test_continent4_paths_are_read_only_and_match_the_agent():
+    import sys
+    from pathlib import Path
+
+    from app.services.packs.models import C4_READONLY_PATHS
+
+    agent = Path(__file__).resolve().parents[3] / "agent"
+    sys.path.insert(0, str(agent))
+    import continent4
+
+    assert tuple(continent4.C4_READONLY_PATHS) == C4_READONLY_PATHS
+    packs_dir = Path(__file__).resolve().parents[1] / "app" / "packs"
+    pack = next(item for item in load_registry(packs_dir).latest() if item.pack == "kontinent-4")
+    assert pack.version == "1.1.0"
+    assert pack.transport == "ssh"
+    assert list(pack.c4_paths) == list(C4_READONLY_PATHS)
+    manifest = build_manifest(pack)
+    assert manifest["c4_paths"] == list(pack.c4_paths)
+    assert manifest["firmware"]["product"] == "комплекс безопасности «континент». версия 4"
+    assert "c4_paths" not in build_manifest(Pack.model_validate(make_pack()))
+
+    def slim(value):
+        if isinstance(value, dict):
+            return {key: slim(item) for key, item in value.items() if item not in (None, [], {})}
+        if isinstance(value, list):
+            return [slim(item) for item in value]
+        return value
+
+    assert slim(pack.detect[0].probe.model_dump(mode="json")) == slim(continent4.DETECT_PROBE)
+    assert pack.detect[0].equals == continent4.DETECT_EQUALS
+    assert slim(pack.firmware.version_probe.model_dump(mode="json")) == slim(continent4.VERSION_PROBE)
+    assert [check.id for check in pack.checks] == [item["id"] for item in continent4.CHECKS]
+    for check, item in zip(pack.checks, continent4.CHECKS, strict=True):
+        assert slim(check.probe.model_dump(mode="json")) == slim(item["probe"])
+        assert check.assertion.op == item["op"]
+        assert check.assertion.value == item["value"]
+    local = next(item for item in load_registry(packs_dir).latest() if item.pack == "kontinent-4-local")
+    assert local.transport == "manual"
+    assert [check.id for check in local.checks] == [
+        "kontinent4.loader_password_changed",
+        "kontinent4.bios_password_changed",
+        "kontinent4.inactivity_timeout",
+    ]
+    with pytest.raises(ValueError, match="только три GET"):
+        Pack.model_validate(_ssh_pack_with({"type": "cli_config", "cmd": "show version", "match": "x"}) | {
+            "c4_paths": ["/api-v1-server/config/active/install-policy"],
         })
 
 
