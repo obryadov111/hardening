@@ -1013,6 +1013,68 @@ def fetch_manifests(conn: ServerConnection, transport_name: str) -> dict:
         raise SystemExit(f"Не удалось получить манифесты: {exc}") from None
 
 
+def _fallback_command(manifest):
+    commands = []
+    for check in manifest.get("checks") or []:
+        cmd = (check.get("probe") or {}).get("cmd")
+        if isinstance(cmd, str) and cmd not in commands:
+            commands.append(cmd)
+    for name in ("show running-config", "show configuration commands", "show configuration"):
+        if name in commands:
+            return name
+    return commands[0] if commands else None
+
+
+def _open_offline_file(path, probes_module, manifests, explicit):
+    """Один файл → временный каталог и транспорт выгрузки. Каталог удаляет вызывающий."""
+    import shutil
+    import tempfile
+
+    import offline_split
+
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read(offline_split.MAX_TEXT_BYTES + 1)
+    except OSError as exc:
+        raise SystemExit("Ошибка: файл выгрузки не читается: {0}".format(exc))
+    if len(raw) > offline_split.MAX_TEXT_BYTES:
+        raise SystemExit("Ошибка: файл выгрузки больше {0} байт".format(offline_split.MAX_TEXT_BYTES))
+    fallback = None
+    if explicit:
+        named = [item for item in manifests if item.get("pack") == explicit]
+        fallback = _fallback_command(named[0]) if named else None
+    try:
+        split = offline_split.split_bytes(
+            raw, offline_split.commands_in_manifests(manifests),
+            filename=os.path.basename(path), fallback_command=fallback,
+        )
+        declared, recognized_by = offline_split.choose_declared(split, explicit, manifests)
+    except offline_split.SplitError as exc:
+        raise SystemExit("Ошибка: {0}".format(exc))
+    if not split.files:
+        raise SystemExit("Ошибка: в файле не найдено выводов команд")
+    directory = tempfile.mkdtemp(prefix="offline-file-")
+    try:
+        offline_split.write_directory(split, directory, probes_module.offline_file_name)
+        try:
+            import continent4
+        except ImportError:
+            continent4 = None
+        if split.mode == "json":
+            if continent4 is None or not continent4.directory_has_export(directory):
+                raise SystemExit("Ошибка: в файле нет JSON export-config-for-cgw Континент 4")
+            transport = continent4.Continent4Transport.from_directory(directory)
+        else:
+            transport = probes_module.OfflineConfigTransport(directory)
+    except SystemExit:
+        shutil.rmtree(directory, ignore_errors=True)
+        raise
+    except (OSError, ValueError) as exc:
+        shutil.rmtree(directory, ignore_errors=True)
+        raise SystemExit("Ошибка: {0}".format(exc))
+    return transport, directory, declared, recognized_by, split.kind
+
+
 def build_pack_payload(args: argparse.Namespace, probes_module, conn: "ServerConnection | None" = None) -> dict:
     """Payload ingest по результатам проб пака. Завершает работу (SystemExit) с понятной причиной,
     если манифест не прошёл проверку подписи или платформа не распознана однозначно."""
@@ -1020,10 +1082,20 @@ def build_pack_payload(args: argparse.Namespace, probes_module, conn: "ServerCon
         raise SystemExit("Ошибка: для --use-packs нужен открытый ключ подписи паков --pack-public-key "
                          "(HARDENING_PACK_PUBLIC_KEY) или старый общий ключ --pack-key (HARDENING_PACK_KEY)")
 
-    if sum(bool(item) for item in (args.offline_dir, args.ssh_host, args.device_config)) > 1:
-        raise SystemExit("Ошибка: --offline-dir, --ssh-host и --device-config взаимоисключающие — "
-                         "либо выгрузка, либо SSH по ключу, либо цель устройства (UserGate или Континент 4)")
-    if args.offline_dir:
+    offline_file = getattr(args, "offline_file", None)
+    if sum(bool(item) for item in (args.offline_dir, offline_file, args.ssh_host, args.device_config)) > 1:
+        raise SystemExit("Ошибка: --offline-dir, --offline-file, --ssh-host и --device-config взаимоисключающие — "
+                         "либо каталог выгрузки, либо один файл, либо SSH по ключу, либо цель устройства")
+    transport = None
+    manifest_transport = None
+    offline_cleanup = None
+    recognized_by = None
+    bundle_format = None
+    if offline_file:
+        if not args.hostname:
+            raise SystemExit("Ошибка: для --offline-file нужен --hostname (имя устройства, чья это выгрузка)")
+        manifest_transport = "ssh"
+    elif args.offline_dir:
         if not args.hostname:
             raise SystemExit("Ошибка: для --offline-dir нужен --hostname (имя устройства, чья это выгрузка)")
         try:
@@ -1053,7 +1125,7 @@ def build_pack_payload(args: argparse.Namespace, probes_module, conn: "ServerCon
         else:
             if conn is None or not conn.api_key:  # ключ хоста (host.json) или ключ площадки
                 raise SystemExit("Ошибка: нужен --api-key или переменная окружения HARDENING_AGENT_API_KEY")
-            response = fetch_manifests(conn, probes_module.pack_transport(transport))
+            response = fetch_manifests(conn, manifest_transport or probes_module.pack_transport(transport))
 
         try:
             public_key = probes_module.decode_public_key(args.pack_public_key) if args.pack_public_key else None
@@ -1061,13 +1133,20 @@ def build_pack_payload(args: argparse.Namespace, probes_module, conn: "ServerCon
         except probes_module.ManifestError as exc:
             raise SystemExit(f"Ошибка безопасности: {exc}")
 
+        declared = args.pack if args.offline_dir else None
+        if offline_file:
+            transport, offline_cleanup, declared, recognized_by, bundle_format = _open_offline_file(
+                offline_file, probes_module, manifests, args.pack,
+            )
         if args.pack:
             manifests = [m for m in manifests if m["pack"] == args.pack]
         # До detect: XML-RPC UserGate вызывает только методы, объявленные в подписанном манифесте.
         if hasattr(transport, "bind_manifests"):
             transport.bind_manifests(manifests)
-        matched = probes_module.select_manifests(transport, manifests, declared=args.pack if args.offline_dir else None)
+        matched = probes_module.select_manifests(transport, manifests, declared=declared if (args.offline_dir or offline_file) else None)
         if not matched:
+            if offline_file and not args.pack:
+                raise SystemExit("Платформа по файлу не распознана — укажите пак явно: --pack <id>")
             if args.offline_dir and not args.pack:
                 raise SystemExit("Платформа по выгрузке не распознана (нет выгрузки команды detect, например show_version.txt) — "
                                  "укажите пак явно: --pack <id>")
@@ -1114,12 +1193,25 @@ def build_pack_payload(args: argparse.Namespace, probes_module, conn: "ServerCon
             described = transport.describe()
             if described:
                 payload["collection"] = described
-                payload["collection"]["declared_pack"] = any(
+                described["declared_pack"] = any(
                     not probes_module.matches_detect(transport, m["detect"]) for m in matched
                 )
+                if recognized_by == "config":
+                    described["declared_pack"] = False
+                    described["recognized_by"] = "config"
+                elif bundle_format and described["declared_pack"]:
+                    described["recognized_by"] = "declared"
+                elif bundle_format:
+                    described["recognized_by"] = "detect"
+                if bundle_format:
+                    described["bundle_format"] = bundle_format
         return payload
     finally:
         # Сессия UserGate (XML-RPC logout, ssh) закрывается и при ошибке распознавания.
+        # Каталог одного файла удаляется после проб: транспорт уже прочитал байты.
+        if offline_cleanup:
+            import shutil
+            shutil.rmtree(offline_cleanup, ignore_errors=True)
         close = getattr(transport, "close", None)
         if close is not None:
             close()
@@ -1177,6 +1269,10 @@ def parse_args(argv: "list[str]") -> argparse.Namespace:
     packs.add_argument("--offline-dir", default=None,
                        help="Проверка по выгрузке конфигурации вместо живого устройства: каталог с выводом команд "
                             "(show_running-config.txt, show_version.txt …); нужен --hostname, без show_version — и --pack")
+    packs.add_argument("--offline-file", default=None,
+                       help="Один файл выгрузки вместо каталога: журнал сессии, бэкап Oxidized/RANCID, "
+                            "архив файлов --offline-dir или JSON Континент 4. Нужен --hostname; "
+                            "если платформа по файлу не узнана — ещё --pack")
     return parser.parse_args(argv)
 
 

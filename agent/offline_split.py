@@ -161,9 +161,15 @@ def choose_declared(split, explicit, manifests):
         return any(cmd in split.files for cmd in detect.get(pack) or [])
 
     recog = split.recognized_pack if split.mode == "commands" else None
+    known = {manifest.get("pack") for manifest in manifests or []}
+    if recog not in known:
+        recog = None
     if explicit and recog and explicit != recog and not present(recog):
         raise SplitError("по тексту конфигурации это {0}, а не {1}".format(recog, explicit))
     if explicit:
+        # Пак назван оператором и тем же паком читается сама конфигурация — это не догадка.
+        if recog and explicit == recog and not present(recog):
+            return explicit, "config"
         return explicit, None
     if recog and not present(recog):
         return recog, "config"
@@ -322,7 +328,8 @@ def _command_error(body):
 
 
 def _store(files, found, canon, body):
-    body = body.strip() if isinstance(body, str) else body
+    if isinstance(body, str):
+        body = body.strip("\n")
     if not canon or not str(body).strip():
         return
     previous = files.get(canon)

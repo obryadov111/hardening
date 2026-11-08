@@ -151,6 +151,63 @@ def test_too_large_file_is_rejected(client, org, monkeypatch):
     assert resp.status_code == 413
 
 
+def test_one_session_file_matches_separate_uploads(client, org):
+    log = (
+        "sw-core-01# terminal length 0\n"
+        "sw-core-01# sh ver | no-more\n"
+        "Cisco IOS Software, Version 15.2\n"
+        "sw-core-01# sh run\n" + RUNNING +
+        "sw-core-01#\n"
+    )
+    resp = client.post(
+        f"/api/organizations/{org['id']}/offline-scans",
+        headers=org["admin"],
+        data={"hostname": "sw-core-01"},
+        files=[("bundle", ("session.log", log.encode("utf-8"), "text/plain"))],
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["checks"] == {"total": 3, "passed": 1, "failed": 2, "errors": 0}
+
+
+def test_preview_names_pack_and_missing_command(client, org):
+    log = "sw-core-01# show version\nCisco IOS Software, Version 15.2\nsw-core-01#\n"
+    resp = client.post(
+        f"/api/organizations/{org['id']}/offline-scans/preview",
+        headers=org["admin"],
+        files=[("bundle", ("session.log", log.encode("utf-8"), "text/plain"))],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["pack"] == "cisco-test"
+    assert body["needs_declared"] is False
+    assert "show version" in body["found"]
+    assert "show running-config" in body["missing"]
+    assert client.post(
+        f"/api/organizations/{org['id']}/offline-scans/preview",
+        headers=org["viewer"],
+        files=[("bundle", ("session.log", log.encode("utf-8"), "text/plain"))],
+    ).status_code == 403
+
+
+def test_bundle_errors_are_russian(client, org):
+    url = f"/api/organizations/{org['id']}/offline-scans"
+    empty = client.post(url, headers=org["admin"], data={"hostname": "sw"},
+                        files=[("bundle", ("empty.txt", b" \n", "text/plain"))])
+    assert empty.status_code == 422 and "пуст" in empty.json()["detail"]
+    binary = client.post(url, headers=org["admin"], data={"hostname": "sw"},
+                         files=[("bundle", ("x.bin", b"\x00\x01\x02" * 40, "application/octet-stream"))])
+    assert binary.status_code == 422 and "двоич" in binary.json()["detail"]
+    both = client.post(
+        url, headers=org["admin"],
+        data={"hostname": "sw", "commands": ["show version"]},
+        files=[
+            ("bundle", ("a.txt", b"Cisco IOS Software\n", "text/plain")),
+            ("files", ("b.txt", b"Cisco IOS Software\n", "text/plain")),
+        ],
+    )
+    assert both.status_code == 422 and "один файл" in both.json()["detail"]
+
+
 def test_upload_stores_device_firmware_as_software_for_bdu(client, db, org, registry):
     """Модель и версия прошивки из поля firmware пака сохраняются как ПО актива — по ним работает сопоставление с БДУ."""
     data = _cisco_pack()
