@@ -121,11 +121,13 @@ def test_backup_pin_is_enough(server):
     ServerConnection(server.url, "k", ca_file=CERT, pins=[OTHER_PIN, PIN]).request("GET", "/health")
 
 
-def test_wrong_pin_is_a_security_error_not_a_retry(server):
+def test_wrong_pin_is_a_security_error_not_a_retry(server, capsys):
     """Подмена сервера (MITM с доверенным в сети корневым сертификатом): сертификат проходит проверку,
     но ключ другой — остановка, а не «сервер недоступен, отложим в очередь»."""
-    with pytest.raises(SystemExit, match="Ошибка безопасности.*закреплённым"):
+    with pytest.raises(SystemExit) as caught:
         ServerConnection(server.url, "k", ca_file=CERT, pins=[OTHER_PIN]).request("GET", "/health")
+    assert caught.value.code == 76
+    assert "TLS_PIN_MISMATCH" in capsys.readouterr().err
 
 
 def test_untrusted_certificate_is_a_security_error(server):
@@ -322,26 +324,165 @@ def test_pack_mode_fetches_manifests_with_host_key_alone(tmp_path, monkeypatch):
     assert used == ["host-key-1"]
 
 
-# ---------- перегрузка сервера ----------
+# ---------- перегрузка сервера и паузы ----------
 
-def test_overloaded_server_is_retried_with_a_pause(server, monkeypatch, capsys):
-    pauses = []
-    monkeypatch.setattr(collector.time, "sleep", pauses.append)
+class _Clock:
+    def __init__(self):
+        self.now = 0.0
+        self.pauses = []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.pauses.append(seconds)
+        self.now += seconds
+
+
+@pytest.fixture
+def retry_clock(monkeypatch):
+    """Повторы не ждут по-настоящему: сон сдвигает монотонные часы, бюджет считается по ним."""
+    clock = _Clock()
+    monkeypatch.setattr(collector.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(collector.time, "sleep", clock.sleep)
+    return clock
+
+
+@pytest.fixture(autouse=True)
+def _fast_network_retries(retry_clock):
+    """Мёртвый порт и 502 не должны занимать бюджет в 30 минут настоящего времени."""
+    return retry_clock
+
+
+def test_retry_caps_double_until_900():
+    assert [collector.retry_cap_seconds(i) for i in range(8)] == [15, 30, 60, 120, 240, 480, 900, 900]
+
+
+def test_full_jitter_uses_retry_after_as_a_floor_not_a_multiplier(monkeypatch):
+    monkeypatch.setattr(collector.random, "uniform", lambda a, b: b)
+    assert collector.compute_retry_pause(0, None) == 15
+    assert collector.compute_retry_pause(0, 7) == 15  # Retry-After меньше разброса — берётся разброс
+    assert collector.compute_retry_pause(0, 100) == 100  # Retry-After — нижняя граница, без умножения на 1.5
+    assert collector.compute_retry_pause(6, 10) == 900
+    monkeypatch.setattr(collector.random, "uniform", lambda a, b: 0)
+    assert collector.compute_retry_pause(1, None) == 0  # full jitter включает 0
+    assert collector.compute_retry_pause(1, 9) == 9
+
+
+def test_initial_jitter_is_uniform_up_to_the_cap(monkeypatch):
+    monkeypatch.setattr(collector.random, "uniform", lambda a, b: (a, b))
+    assert collector.initial_jitter_seconds(900) == (0, 900)
+    assert collector.initial_jitter_seconds(0) == 0
+    assert collector.initial_jitter_seconds(-3) == 0
+
+
+def test_overloaded_server_is_retried_with_full_jitter(server, monkeypatch, capsys, retry_clock):
+    monkeypatch.setattr(collector.random, "uniform", lambda a, b: 4)
     server.next_statuses = [429, 503]
     conn = ServerConnection(server.url, "k", ca_file=CERT)
     assert collector.send_ingest(conn, {"n": 1}) == {"ok": True}
     assert len(server.received) == 2  # 429 — без записи, 503 и успешный — записаны тестовым сервером
-    # Retry-After: 7 меньше первой паузы агента — берётся пауза агента; разброс до +50 %
-    first, second = collector.RETRY_DELAYS[:2]
-    assert first <= pauses[0] <= first * 1.5 and second <= pauses[1] <= second * 1.5
-    assert "сервер занят (HTTP 429)" in capsys.readouterr().err
+    # Retry-After: 7 выше разброса 4 — пауза 7; у 503 заголовка нет — пауза равна разбросу
+    assert retry_clock.pauses == [7, 4]
+    err = capsys.readouterr().err
+    assert "stage=retry code=429" in err and "stage=retry code=503" in err
 
 
-def test_overload_that_does_not_pass_goes_to_the_queue(server, monkeypatch):
+def test_network_code_none_is_retried_until_the_budget(monkeypatch, retry_clock):
+    monkeypatch.setattr(collector.random, "uniform", lambda a, b: b)
+    with pytest.raises(TransientError) as exc:
+        ServerConnection("https://127.0.0.1:9", "k", timeout=2).request("GET", "/health")
+    assert exc.value.code is None
+    assert retry_clock.pauses == [15, 30, 60, 120, 240, 480]
+    assert sum(retry_clock.pauses) <= collector.RETRY_BUDGET_SECONDS
+
+
+def test_internal_server_error_is_not_retried(server, retry_clock):
+    server.status = 500
+    with pytest.raises(TransientError) as exc:
+        collector.send_ingest(ServerConnection(server.url, "k", ca_file=CERT), {"x": 1})
+    assert exc.value.code == 500 and retry_clock.pauses == []
+
+
+def test_overload_that_does_not_pass_goes_to_the_queue(server, retry_clock):
     server.status = 503
     with pytest.raises(TransientError) as exc:
         collector.send_ingest(ServerConnection(server.url, "k", ca_file=CERT), {"n": 1})
-    assert exc.value.code == 503
+    assert exc.value.code == 503 and retry_clock.pauses
+
+
+def test_pin_mismatch_is_not_retried_and_does_not_weaken_trust(server, monkeypatch, capsys, retry_clock):
+    wrong = ("a" * 43 + "=", "b" * 43 + "=")
+    conn = ServerConnection(server.url, "k", ca_file=CERT, pins=["sha256//" + wrong[0], wrong[1]])
+    trusted = conn.pins
+    with pytest.raises(SystemExit) as caught:
+        conn.request("GET", "/health")
+    assert caught.value.code == 76 and retry_clock.pauses == []
+    err = capsys.readouterr().err
+    assert err.count("TLS_PIN_MISMATCH") == 1
+    assert "expected=sha256//{0},sha256//{1}".format(*wrong) in err
+    assert "received=sha256//{0}".format(PIN) in err
+    for field in ("subject=", "issuer=", "serial=", "san=", "notAfter="):
+        assert field in err
+    assert conn.pins == trusted and PIN not in conn.pins
+    with pytest.raises(SystemExit) as again:
+        conn.request("GET", "/health")
+    assert again.value.code == 76 and conn.pins == trusted
+
+
+def _mismatch_text(issuer, subject=""):
+    return collector.format_pin_mismatch(
+        ("expectedpin",), "receivedpin",
+        {"subject": subject, "issuer": issuer, "serial": "01", "san": "", "notAfter": "n/a"},
+    )
+
+
+@pytest.mark.parametrize("issuer,who", [
+    ("CN=Kaspersky Endpoint Security Personal Certification Authority,O=AO Kaspersky Lab",
+     "антивирусом Kaspersky Endpoint Security"),
+    ("CN=Dr.Web Certificate Authority,O=Doctor Web", "антивирусом Dr.Web"),
+    ("CN=ESET SSL Filter CA,O=ESET, spol. s r.o.", "антивирусом ESET"),
+    ("CN=Continent TLS Inspection,O=ООО «Код Безопасности»", "шлюзом Континент"),
+    ("CN=UserGate SSL Inspection,O=UserGate", "шлюзом UserGate"),
+])
+def test_known_tls_inspection_issuer_gets_a_hint_and_not_a_new_pin(issuer, who):
+    text = _mismatch_text(issuer)
+    assert text.startswith("TLS_PIN_MISMATCH")
+    assert "received=sha256//receivedpin" in text
+    assert "hint=сертификат подменён {0}, добавьте домен сервера в исключения проверки защищённых соединений".format(who) in text
+    # Подсказка не предлагает принять увиденный ключ.
+    assert "receivedpin" not in text.split("hint=", 1)[1]
+
+
+def test_unknown_issuer_has_metadata_without_an_inspection_hint():
+    text = _mismatch_text("CN=Let's Encrypt,O=Let's Encrypt")
+    assert "hint=" not in text
+    assert "issuer=CN=Let's Encrypt,O=Let's Encrypt" in text
+    assert "received=sha256//receivedpin" in text
+
+
+def test_enroll_and_first_collect_apply_initial_jitter_once(server, tmp_path, host_payload, monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(collector.time, "sleep", sleeps.append)
+    monkeypatch.setattr(collector.random, "uniform", lambda a, b: 8)
+    assert _run(server, tmp_path, "--initial-jitter-max", "900") == 0
+    assert sleeps == [8, 8]
+    err_marks = [name for name in os.listdir(tmp_path / "state") if name.startswith("jitter-")]
+    assert sorted(err_marks) == ["jitter-collect.done", "jitter-enroll.done"]
+    sleeps.clear()
+    assert _run(server, tmp_path, "--initial-jitter-max", "900") == 0
+    assert sleeps == []
+
+
+def test_enroll_only_jitters_once(server, tmp_path, monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(collector.time, "sleep", sleeps.append)
+    monkeypatch.setattr(collector.random, "uniform", lambda a, b: 12)
+    assert _run(server, tmp_path, "--enroll", "--hostname", "WS-42", "--initial-jitter-max", "900") == 0
+    assert sleeps == [12]
+    sleeps.clear()
+    assert _run(server, tmp_path, "--enroll", "--hostname", "WS-42", "--initial-jitter-max", "900") == 0
+    assert sleeps == []
 
 
 def test_rejection_is_not_retried(server, monkeypatch):

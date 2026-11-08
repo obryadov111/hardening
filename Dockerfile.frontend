@@ -9,6 +9,7 @@ COPY . .
 RUN npm run build
 
 FROM nginxinc/nginx-unprivileged:1.27-alpine
+COPY deploy/nginx/log-format.conf /etc/nginx/conf.d/00-log-format.conf
 COPY deploy/nginx/limits.conf /etc/nginx/conf.d/00-limits.conf
 COPY deploy/nginx/app.conf /etc/nginx/hardening-app.conf
 COPY deploy/nginx/admin-allow.conf /etc/nginx/hardening-admin-allow.conf
