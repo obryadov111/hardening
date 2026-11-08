@@ -26,8 +26,9 @@ ExecStart=/usr/bin/python3 /opt/hardening-agent/collector.py \
     --criticality ${HARDENING_CRITICALITY} \
     --scan-label ${HARDENING_SCAN_LABEL} \
     --use-packs $HARDENING_EXTRA_ARGS
-# сбор — секунды; запас — на повторы при перегрузке сервера (до ~10 мин, collector.py RETRY_DELAYS)
-TimeoutStartSec=30min
+# Сбор — секунды; запас — бюджет повторов одного запуска (30 мин, collector.py RETRY_BUDGET_SECONDS)
+# плюс первый сбор. 60 мин, чтобы процесс успел положить прогон в очередь, а не был убит на границе бюджета.
+TimeoutStartSec=60min
 
 # --- ужесточение: агенту нужно только читать систему и ходить в сеть ---
 NoNewPrivileges=yes

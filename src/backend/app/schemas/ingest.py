@@ -81,6 +81,10 @@ class IngestCollection(BaseModel):
     source: Literal["offline-config"]
     files: list[IngestCollectionFile] = Field(default_factory=list, max_length=50)
     declared_pack: bool = Field(default=False, description="Пак задан оператором (--pack), платформа по выгрузке не подтверждена")
+    recognized_by: Literal["detect", "config", "declared"] | None = Field(
+        default=None, description="detect — по выводу команды распознавания; config — по тексту конфигурации; declared — пак назвал оператор",
+    )
+    bundle_format: str | None = Field(default=None, max_length=32, description="Как нарезан один файл: session, archive, json, …")
 
 
 class IngestRequest(BaseModel):

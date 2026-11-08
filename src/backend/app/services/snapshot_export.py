@@ -218,7 +218,12 @@ def source_label(collection: dict | None) -> str:
                 when = ""
         if not times:
             when = " (дата выгрузки не указана)"
-        declared = "; пак задан оператором, платформа по выгрузке не подтверждена" if collection.get("declared_pack") else ""
+        if collection.get("recognized_by") == "config":
+            declared = "; платформа распознана по тексту конфигурации"
+        elif collection.get("declared_pack"):
+            declared = "; пак задан оператором, платформа по выгрузке не подтверждена"
+        else:
+            declared = ""
         uploaded = f"; загружена через интерфейс: {collection['uploaded_by']}" if collection.get("uploaded_by") else ""
         return f"Выгрузка конфигурации{when}, не живое устройство{declared}{uploaded}{_file_transfer(collection)}"
     if collection.get("source") == "manual":

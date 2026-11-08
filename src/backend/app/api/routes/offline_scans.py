@@ -19,10 +19,25 @@ from app.schemas.ingest import (
     IngestResponse,
     IngestSoftwareIn,
 )
-from app.services.offline_scan import MAX_FILE_BYTES, MAX_FILES, OfflineScanError, offline_packs, run_offline
+from app.services.offline_scan import (
+    MAX_FILE_BYTES,
+    MAX_FILES,
+    OfflineScanError,
+    offline_packs,
+    preview_bundle,
+    run_offline,
+    run_offline_bundle,
+)
 from app.services.packs.registry import PackRegistry
 
 router = APIRouter(tags=["offline-scans"])
+
+
+async def _read_upload(upload: UploadFile) -> bytes:
+    content = await upload.read(MAX_FILE_BYTES + 1)
+    if len(content) > MAX_FILE_BYTES:
+        raise HTTPException(status_code=413, detail=f"Файл {upload.filename} больше {MAX_FILE_BYTES // 1_000_000} МБ")
+    return content
 
 CRITICALITY = {"low", "medium", "high", "critical"}
 
@@ -37,12 +52,29 @@ def list_offline_packs(
     return {"max_files": MAX_FILES, "max_file_bytes": MAX_FILE_BYTES, "packs": offline_packs(registry)}
 
 
+@router.post("/organizations/{organization_id}/offline-scans/preview")
+async def preview_offline_scan(
+    organization_id: str,
+    bundle: UploadFile = File(..., description="Один файл: журнал, бэкап, конфигурация, архив или JSON"),
+    pack: str | None = Form(None, max_length=100),
+    _: User = Depends(require_org_admin),
+    registry: PackRegistry = Depends(get_pack_registry),
+):
+    """Что узнано в одном файле: пак, найденные команды, чего не хватает. Снимок не создаётся."""
+    raw = await _read_upload(bundle)
+    try:
+        return preview_bundle(registry, raw, bundle.filename or "", pack or None)
+    except OfflineScanError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/organizations/{organization_id}/offline-scans", response_model=IngestResponse)
 async def upload_offline_scan(
     organization_id: str,
     hostname: str = Form(..., min_length=1, max_length=255),
-    commands: list[str] = Form(..., description="Команда для каждого файла, в том же порядке, что files"),
-    files: list[UploadFile] = File(...),
+    commands: list[str] | None = Form(None, description="Команда для каждого файла, в том же порядке, что files"),
+    files: list[UploadFile] | None = File(None),
+    bundle: UploadFile | None = File(None, description="Один файл выгрузки вместо файла на каждую команду"),
     environment: str = Form("network", min_length=1, max_length=100),
     pack: str | None = Form(None, max_length=100),
     ip_address: str | None = Form(None, max_length=64),
@@ -54,10 +86,10 @@ async def upload_offline_scan(
     db: Session = Depends(get_db),
     registry: PackRegistry = Depends(get_pack_registry),
 ):
-    if len(commands) != len(files):
-        raise HTTPException(status_code=422, detail="Для каждого файла нужна команда, чью выгрузку он содержит")
-    if len(files) > MAX_FILES:
-        raise HTTPException(status_code=422, detail=f"Не больше {MAX_FILES} файлов за раз")
+    commands = list(commands or [])
+    files = list(files or [])
+    if bundle is not None and (commands or files):
+        raise HTTPException(status_code=422, detail="Либо один файл выгрузки, либо файл на каждую команду")
     if criticality not in CRITICALITY:
         raise HTTPException(status_code=422, detail="Критичность: low, medium, high или critical")
     now = datetime.now(UTC)
@@ -66,27 +98,39 @@ async def upload_offline_scan(
         if exported_at > now:
             raise HTTPException(status_code=422, detail="Дата выгрузки не может быть в будущем")
 
-    data: dict[str, bytes] = {}
     names: dict[str, str] = {}
-    for command, upload in zip(commands, files, strict=True):
-        command = command.strip()
-        if command in data:
-            raise HTTPException(status_code=422, detail=f"Выгрузка команды {command!r} загружена дважды")
-        content = await upload.read(MAX_FILE_BYTES + 1)
-        if len(content) > MAX_FILE_BYTES:
-            raise HTTPException(status_code=413, detail=f"Файл {upload.filename} больше {MAX_FILE_BYTES // 1_000_000} МБ")
-        data[command], names[command] = content, (upload.filename or "")[:255]
-
-    try:
-        run = run_offline(registry, data, pack or None)
-    except OfflineScanError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if bundle is not None:
+        raw = await _read_upload(bundle)
+        try:
+            run = run_offline_bundle(registry, raw, bundle.filename or "", pack or None)
+        except OfflineScanError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        names_default = (bundle.filename or "")[:255]
+    else:
+        if not files:
+            raise HTTPException(status_code=422, detail="не загружено ни одного файла")
+        if len(commands) != len(files):
+            raise HTTPException(status_code=422, detail="Для каждого файла нужна команда, чью выгрузку он содержит")
+        if len(files) > MAX_FILES:
+            raise HTTPException(status_code=422, detail=f"Не больше {MAX_FILES} файлов за раз")
+        data: dict[str, bytes] = {}
+        for command, upload in zip(commands, files, strict=True):
+            command = command.strip()
+            if command in data:
+                raise HTTPException(status_code=422, detail=f"Выгрузка команды {command!r} загружена дважды")
+            content = await _read_upload(upload)
+            data[command], names[command] = content, (upload.filename or "")[:255]
+        try:
+            run = run_offline(registry, data, pack or None)
+        except OfflineScanError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        names_default = ""
 
     collection = run.collection
     for entry in collection["files"]:
         # Время файла во временном каталоге — момент загрузки, а не выгрузки: подменяется датой выгрузки.
         entry["modified"] = exported_at.strftime("%Y-%m-%dT%H:%M:%SZ") if exported_at else None
-        entry["uploaded_name"] = names.get(entry["command"], "")
+        entry["uploaded_name"] = names.get(entry["command"], names_default)
     collection["uploaded_by"] = current_user.email
     collection["uploaded_at"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 

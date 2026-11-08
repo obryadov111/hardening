@@ -10,7 +10,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from app.services.packs.authoring import load_agent_probes
+from app.services.packs.authoring import AGENT_DIR, load_agent_probes
 from app.services.packs.manifest import build_manifest
 from app.services.packs.models import Pack, leaf_probes
 from app.services.packs.registry import PackRegistry
@@ -50,6 +50,8 @@ def offline_packs(registry: PackRegistry) -> list[dict]:
         result.append({
             "pack": pack.pack, "version": pack.version, "maturity": pack.maturity, "tags": list(pack.tags),
             "asset_type": pack.asset_type,
+            "single_file": True,
+            "single_file_hint": _SINGLE_FILE_HINTS.get(pack.pack, _SINGLE_FILE_HINT),
             "commands": [
                 {"command": c, "file": agent.offline_file_name(c), "detect": c in detect, "checks": c in checks}
                 for c in detect + [c for c in checks if c not in detect]
@@ -152,3 +154,154 @@ def run_offline(registry: PackRegistry, files: dict[str, bytes], declared_pack: 
             raise OfflineScanError("платформа по выгрузке не распознана: выберите пак явно или загрузите выгрузку "
                                    "команды распознавания (например, show version)")
         return _finish(agent, packs, manifests, transport, matched)
+
+
+_SINGLE_FILE_HINT = (
+    "Один журнал сессии (приглашение hostname# или user@host:~$), бэкап Oxidized/RANCID "
+    "или архив файлов из каталога --offline-dir. Если в файле только конфигурация и платформа "
+    "по ней узнаётся (например строка version у Cisco IOS), пак выберется сам. Иначе подтвердите его."
+)
+_SINGLE_FILE_HINTS = {
+    "usergate-ngfw": (
+        "Журнал CLI (приглашение Admin@узел# или >), архив файлов show_….txt или JSON вида {команда: текст}. "
+        "Ответы XML-RPC агент в один файл не складывает — их на этой странице не разобрать."
+    ),
+    "kontinent-4": (
+        "Один JSON export-config-for-cgw или bundle {export, cgw}, архив каталога --offline-dir "
+        "либо журнал команд show continent. Версия для БДУ берётся из cgw, если он в том же файле."
+    ),
+    "qtech-qsw": (
+        "Журнал сессии, бэкап или архив. Одного show running-config мало, чтобы отличить Qtech от SNR: подтвердите пак."
+    ),
+    "snr-switch": (
+        "Журнал сессии, бэкап или архив. Одного show running-config мало, чтобы отличить SNR от Qtech: подтвердите пак."
+    ),
+}
+
+
+@functools.cache
+def offline_split():
+    """Общий с агентом разборщик одного файла. Грузится по пути, как пробы."""
+    import importlib.util
+
+    path = AGENT_DIR / "offline_split.py"
+    if not path.exists():
+        raise OfflineScanError("на сервере нет разборщика выгрузки (offline_split.py)")
+    spec = importlib.util.spec_from_file_location("hardening_agent_offline_split", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _primary_command(pack: dict) -> str | None:
+    checks = [item["command"] for item in pack["commands"] if item["checks"]]
+    for name in ("show running-config", "show configuration commands", "show configuration"):
+        if name in checks:
+            return name
+    if checks:
+        return checks[0]
+    return pack["commands"][0]["command"] if pack["commands"] else None
+
+
+def _manifests_for_split(packs: list[dict]) -> list[dict]:
+    return [
+        {"pack": pack["pack"], "detect": [{"probe": {"cmd": item["command"]}} for item in pack["commands"] if item["detect"]]}
+        for pack in packs
+    ]
+
+
+def _annotate(run: OfflineRun, split, recognized_by: str | None) -> OfflineRun:
+    if recognized_by == "config":
+        run.collection["declared_pack"] = False
+    run.collection["recognized_by"] = recognized_by or ("declared" if run.collection.get("declared_pack") else "detect")
+    run.collection["bundle_format"] = split.kind
+    return run
+
+
+def split_bundle(registry: PackRegistry, raw: bytes, filename: str, declared_pack: str | None):
+    """Один файл → разбор. declared_pack задаёт, куда положить безымянный текст, если пак уже выбран."""
+    splitter = offline_split()
+    packs = offline_packs(registry)
+    commands: list[str] = []
+    by_pack = {}
+    for pack in packs:
+        by_pack[pack["pack"]] = pack
+        for item in pack["commands"]:
+            if item["command"] not in commands:
+                commands.append(item["command"])
+    fallback = _primary_command(by_pack[declared_pack]) if declared_pack and declared_pack in by_pack else None
+    try:
+        return splitter.split_bytes(raw, commands, filename=filename or "", fallback_command=fallback)
+    except splitter.SplitError as exc:
+        raise OfflineScanError(str(exc)) from exc
+
+
+def run_offline_bundle(registry: PackRegistry, raw: bytes, filename: str, declared_pack: str | None) -> OfflineRun:
+    """Один файл выгрузки: журнал, бэкап, конфигурация, архив или JSON. Пробы те же, что у набора файлов."""
+    split = split_bundle(registry, raw, filename, declared_pack)
+    if split.mode == "json":
+        # На сервере continent4.py грузит свой экземпляр probes.py. Ошибка «это не команда ЦУС»
+        # не является ProbeError того модуля, которым select_manifests ловит промахи detect.
+        # Поэтому кандидатов сразу сужаем до kontinent-4: файл уже узнан как JSON ЦУС.
+        if _continent4() is None:
+            raise OfflineScanError("JSON Континент 4 на этом сервере не разбирается")
+        if not split.files:
+            raise OfflineScanError("в файле не найдено выводов команд")
+        if declared_pack and declared_pack != "kontinent-4":
+            raise OfflineScanError(f"по файлу это JSON Континент 4, а не {declared_pack}")
+        run = run_offline(registry, split.files, declared_pack or "kontinent-4")
+        return _annotate(run, split, "detect" if not run.collection.get("declared_pack") else "declared")
+    if not split.files:
+        raise OfflineScanError("в файле не найдено выводов команд")
+    packs = offline_packs(registry)
+    try:
+        effective, recognized_by = offline_split().choose_declared(split, declared_pack, _manifests_for_split(packs))
+    except offline_split().SplitError as exc:
+        raise OfflineScanError(str(exc)) from exc
+    run = run_offline(registry, split.files, effective)
+    return _annotate(run, split, recognized_by)
+
+
+def preview_bundle(registry: PackRegistry, raw: bytes, filename: str, declared_pack: str | None) -> dict:
+    """Что узнали в файле, без записи снимка. Неузнанная платформа — не ошибка, а просьба подтвердить пак."""
+    split = split_bundle(registry, raw, filename, declared_pack)
+    packs = offline_packs(registry)
+    try:
+        run = run_offline_bundle(registry, raw, filename, declared_pack)
+    except OfflineScanError as exc:
+        text = str(exc)
+        if "не распознана" not in text and "выберите пак" not in text:
+            raise
+        return _preview(split, packs, None, declared_pack, text)
+    pack_id = run.packs[0][0].pack if run.packs else None
+    return _preview(split, packs, pack_id, declared_pack, None, run.collection.get("recognized_by"))
+
+
+def _preview(split, packs, pack_id, declared_pack, error, recognized_by=None) -> dict:
+    info = next((pack for pack in packs if pack["pack"] == pack_id), None)
+    if info is None and declared_pack:
+        info = next((pack for pack in packs if pack["pack"] == declared_pack), None)
+    found = list(split.found)
+    missing = []
+    rows = []
+    if info is not None:
+        if split.mode == "json":
+            found = [item["command"] for item in info["commands"]]
+        for item in info["commands"]:
+            present = item["command"] in found or item["command"] in split.files
+            rows.append({**item, "found": present})
+            if not present:
+                missing.append(item["command"])
+    needs = recognized_by == "declared" or (pack_id is None and error is not None)
+    return {
+        "format": split.kind,
+        "format_label": split.label(),
+        "pack": pack_id,
+        "recognized_by": recognized_by,
+        "needs_declared": bool(needs),
+        "found": found,
+        "missing": missing,
+        "commands": rows,
+        "ambiguous_packs": list(split.ambiguous_packs),
+        "notes": list(split.notes) + ([error] if error else []),
+    }

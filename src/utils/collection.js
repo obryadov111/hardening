@@ -22,6 +22,7 @@ export function collectionSource(collection) {
     return {
       short: "по выгрузке",
       text: `По выгрузке конфигурации${times.length ? ` от ${formatDateTime(times[0])}` : " (дата выгрузки не указана)"}, не живое устройство`
+        + (collection.recognized_by === "config" ? "; платформа распознана по тексту конфигурации" : "")
         + (collection.declared_pack ? "; пак задан оператором, платформа не подтверждена" : "")
         + (collection.uploaded_by ? `; загружена через интерфейс: ${collection.uploaded_by}` : "")
         + transfer,

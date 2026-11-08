@@ -13,6 +13,7 @@
 | Прогон агента Linux | `hardening-agent@.timer`, `OnCalendar=daily`, сдвиг до 1 часа | запускает `collector.py` |
 | Раз в неделю | drop-in Ansible `OnCalendar=weekly` | заменяет ежедневный календарь у экземпляра |
 | Прогон Windows | задача «Hardening agent», 03:00, `RandomDelay` 1 час, либо понедельник при `-Schedule Weekly` | запускает exe |
+| Регистрация Windows | задача «Hardening agent bootstrap», каждые 15–30 минут, пока нет `host.json` | ставится автозагрузкой GPO сразу, до успешного enroll |
 | Досылка очереди | тот же запуск агента, `spool_flush` | не отдельный демон |
 | Обновление БДУ | `deploy/update_bdu.sh` вручную | скачивает zip и OVAL, грузит в базу |
 | Публикация агента | `deploy/publish_agent.sh` вручную | архив, exe из CI, `version.json` |
@@ -34,7 +35,7 @@ Fail2ban и ротация журналов — службы хоста, не к
 - `deploy/publish_agent.sh` и `python -m app.commands.bdu` — команды человека. В репозитории нет unit-файла, который вызывал бы их по cron.
 - `seed_demo_data` — разовая команда засева, не фон.
 
-Таймер Linux читается целиком из `agent/deploy/hardening-agent@.timer`: `OnCalendar=daily`, `RandomizedDelaySec=1h`, `Persistent=yes`. Неделя не прописана в этом файле. Её добавляет drop-in Ansible, и drop-in перебивает календарь. Задача Windows задаётся в `gpo-startup.ps1`: ежедневно или `-Schedule Weekly`, 03:00, `RandomDelay` один час, лимит 30 минут, `StartWhenAvailable`.
+Таймер Linux читается целиком из `agent/deploy/hardening-agent@.timer`: `OnCalendar=daily`, `RandomizedDelaySec=1h`, `Persistent=yes`. Неделя не прописана в этом файле. Её добавляет drop-in Ansible, и drop-in перебивает календарь. Задача сбора Windows задаётся в `gpo-startup.ps1`: ежедневно или `-Schedule Weekly`, 03:00, `RandomDelay` один час, лимит 1 час, `StartWhenAvailable`, один экземпляр. До регистрации живёт вторая задача, «Hardening agent bootstrap»: её автозагрузка создаёт сразу и выходит, не дожидаясь сети. Повтор — 15 минут плюс случайные 0–15 минут. После `host.json` bootstrap снимается.
 
 ## Ограничения
 

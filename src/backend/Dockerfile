@@ -18,6 +18,8 @@ COPY alembic.ini .
 # сервер выполняет тот же код, что агент с --offline-dir. Каталог agent/ вне контекста сборки бэкенда,
 # поэтому он подаётся отдельным контекстом: docker build --build-context agent=./agent ./src/backend
 COPY --from=agent probes.py /app/agent/probes.py
+COPY --from=agent offline_split.py /app/agent/offline_split.py
+COPY --from=agent continent4.py /app/agent/continent4.py
 ENV HARDENING_AGENT_DIR=/app/agent
 
 # Два процесса uvicorn — по числу CPU контейнера (deploy/restart_backend.sh: --cpus 2): разбор отчёта агента

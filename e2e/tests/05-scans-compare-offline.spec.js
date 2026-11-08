@@ -175,18 +175,17 @@ test('выгрузка: наблюдатель не загружает', async (
   await expect(page.getByRole('button', { name: 'Проверить выгрузку' })).toBeDisabled()
 })
 
-test('выгрузка: Cisco — распознавание по show version, снимок создан, скан появился', async ({ page }) => {
+test('выгрузка: один журнал сессии, снимок создан, скан появился', async ({ page }) => {
   await loginAs(page, 'admin')
   await page.goto('/offline-scan')
   const submit = page.getByRole('button', { name: 'Проверить выгрузку' })
-  await page.getByRole('button', { name: /^cisco-ios/ }).click()
-  await expect(page.getByRole('button', { name: /^cisco-ios/ })).toHaveAttribute('aria-pressed', 'true')
-  await expect(submit).toBeDisabled()  // нет файлов и имени
-  await page.getByLabel('Файл выгрузки «show running-config»').setInputFiles(offline('running_weak.txt'))
-  await page.getByPlaceholder('sw-core-01').fill('sw-e2e-01')
-  // без show version — нужно явное подтверждение пака
   await expect(submit).toBeDisabled()
-  await page.getByLabel('Файл выгрузки «show version»').setInputFiles(offline('show_version.txt'))
+  await page.getByLabel('Файл выгрузки', { exact: true }).setInputFiles(offline('session_weak.txt'))
+  const parsed = page.locator('div.bg-zinc-950', { hasText: 'Формат:' })
+  await expect(parsed).toContainText('Пак:')
+  await expect(parsed.getByText('В файле:')).toContainText('show version')
+  await expect(parsed.getByText('В файле:')).toContainText('show running-config')
+  await page.getByPlaceholder('sw-core-01').fill('sw-e2e-01')
   await expect(submit).toBeEnabled()
   await page.getByPlaceholder('10.0.0.1').fill('10.0.0.7')
   await page.getByLabel('Критичность').selectOption('high')
@@ -203,12 +202,33 @@ test('выгрузка: Cisco — распознавание по show version, 
   await expect(host).toContainText(/выгрузк/i)
 })
 
-test('выгрузка: только running-config — подтверждение пака; чужая выгрузка — ошибка сервера', async ({ page }) => {
+test('выгрузка: только конфигурация узнаётся по version; чужой журнал — ошибка', async ({ page }) => {
+  await loginAs(page, 'admin')
+  await page.goto('/offline-scan')
+  const submit = page.getByRole('button', { name: 'Проверить выгрузку' })
+  await page.getByLabel('Файл выгрузки', { exact: true }).setInputFiles(offline('running_good.txt'))
+  const parsed = page.locator('div.bg-zinc-950', { hasText: 'Формат:' })
+  await expect(parsed).toContainText('узнана по тексту конфигурации')
+  await page.getByPlaceholder('sw-core-01').fill('sw-e2e-02')
+  await expect(submit).toBeEnabled()
+  await submit.click()
+  await expect(page.getByText(/Снимок создан/)).toBeVisible()
+
+  await page.getByLabel('Файл выгрузки', { exact: true }).setInputFiles(offline('session_not_cisco.txt'))
+  await expect(parsed).toContainText('не узнана')
+  await page.getByRole('checkbox').check()
+  await expect(submit).toBeEnabled()
+  await submit.click()
+  await expect(page.locator('.text-rose-300').last()).toBeVisible()
+})
+
+test('выгрузка: файл на команду — подтверждение без show version и отказ на чужой платформе', async ({ page }) => {
   await loginAs(page, 'admin')
   await page.goto('/offline-scan')
   await page.getByRole('button', { name: /^cisco-ios/ }).click()
+  await page.getByText('Файл на каждую команду').click()
   const submit = page.getByRole('button', { name: 'Проверить выгрузку' })
-  await page.getByPlaceholder('sw-core-01').fill('sw-e2e-02')
+  await page.getByPlaceholder('sw-core-01').fill('sw-e2e-03')
   await page.getByLabel('Файл выгрузки «show running-config»').setInputFiles(offline('running_good.txt'))
   await expect(submit).toBeDisabled()
   await page.getByRole('checkbox').check()
@@ -216,8 +236,7 @@ test('выгрузка: только running-config — подтверждени
   await submit.click()
   await expect(page.getByText(/Снимок создан/)).toBeVisible()
 
-  // show version не от Cisco: сервер отказывает, ошибка видна
-  await page.getByRole('button', { name: /^cisco-ios/ }).click()  // повторный выбор — форма файлов с чистого листа
+  await page.getByText('Файл на каждую команду').click()
   await page.getByLabel('Файл выгрузки «show version»').setInputFiles(offline('not_cisco.txt'))
   await page.getByLabel('Файл выгрузки «show running-config»').setInputFiles(offline('running_good.txt'))
   await submit.click()
