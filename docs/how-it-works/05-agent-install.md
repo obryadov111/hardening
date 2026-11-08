@@ -33,7 +33,7 @@
 
 ## Windows
 
-Сценарий `agent/deploy/windows/gpo-startup.ps1` рассчитан на автозагрузку компьютера через GPO, от SYSTEM. Сама автозагрузка сеть не ждёт и вход пользователя не держит.
+Сценарий `deploy/windows/gpo/gpo-startup.ps1` рассчитан на автозагрузку компьютера через GPO, от SYSTEM. Сама автозагрузка сеть не ждёт и вход пользователя не держит. Пошаговая раскатка на домен и пакет со страницы «Агенты» — [gpo-rollout.md](../gpo-rollout.md). После создания ключа площадки страница собирает строку параметров сама: `-Server`, `-SiteKey`, `-PackPublicKey`, `-Pin` из `version.json`, `-Share`, `-InitialJitterMaxSeconds 900`, `-RetryBudgetSeconds 1800`, `-BootstrapEveryMinutes 15`, `-BootstrapRandomDelayMinutes 15`. Ключ в эту строку попадает один раз.
 
 Что делает запуск из GPO, ещё до успешной регистрации:
 
@@ -88,8 +88,9 @@ secedit, auditpol и чтение AD требуют прав администр�
 | Служба и таймер | `agent/deploy/hardening-agent@.service`, `hardening-agent@.timer` |
 | Еженедельно | `hardening_schedule` в `agent/deploy/ansible/hardening-agent.yml` |
 | Пример настроек | `agent/deploy/agent.env.example` |
-| Windows | `agent/deploy/windows/gpo-startup.ps1` |
-| Пошагово для домена | `docs/agent-domain-install.md`, `docs/agent-install.md` |
+| Windows | `deploy/windows/gpo/gpo-startup.ps1` |
+| Шаблон параметров | `deploy/windows/gpo/gpo-parameters.txt` |
+| Пошагово для домена | `docs/gpo-rollout.md`, `docs/agent-domain-install.md`, `docs/agent-install.md` |
 
 ## Ограничения
 

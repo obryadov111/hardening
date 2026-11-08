@@ -4,10 +4,12 @@ on:
   push:
     paths:
       - "agent/**"
+      - "deploy/windows/gpo/**"
       - ".github/workflows/agent-tests.yml"
   pull_request:
     paths:
       - "agent/**"
+      - "deploy/windows/gpo/**"
       - ".github/workflows/agent-tests.yml"
 
 jobs:
@@ -37,6 +39,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Agent tests on Rocky Linux 8 system Python 3.6
         run: |
-          docker run --rm -v "$PWD/agent:/agent:ro" rockylinux:8 sh -c '
+          # Сценарий GPO лежит вне agent/, в deploy/windows/gpo. Тест ищет его как
+          # соседний каталог скопированного дерева (/tmp/a/tests/../../deploy/...).
+          docker run --rm -v "$PWD/agent:/agent:ro" -v "$PWD/deploy/windows/gpo:/gpo:ro" rockylinux:8 sh -c '
             dnf -y -q install python3 python3-pip >/dev/null && pip3 install -q pytest==7.0.1 &&
-            cp -r /agent /tmp/a && cd /tmp/a && python3 --version && python3 -m pytest tests -q -p no:cacheprovider'
+            cp -r /agent /tmp/a && mkdir -p /tmp/deploy/windows && cp -a /gpo /tmp/deploy/windows/gpo &&
+            cd /tmp/a && python3 --version && python3 -m pytest tests -q -p no:cacheprovider'

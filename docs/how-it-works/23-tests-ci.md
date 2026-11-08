@@ -8,7 +8,7 @@
 - `pytest agent/tests --collect-only -q` напечатал `300 tests collected`.
 - `npx playwright test --list` напечатал `Total: 134 tests in 9 files`.
 
-Разбор AST дал те же 629 и 300. Утилиты интерфейса — 7 функций `test()` в `src/utils/utils.test.js`.
+Разбор AST дал те же 629 и 300. Утилиты интерфейса на ту дату — 7 функций `test()` в `src/utils/utils.test.js`. Пакет GPO проверяет отдельный файл `src/utils/gpoPackage.test.js` (строка параметров, архив, отказ при чужом SHA-256).
 
 | Набор | Как считали | Число |
 |---|---|---|
@@ -33,7 +33,8 @@
 | `e2e.yml` | `src/**`, `agent/**`, `e2e/**` | Playwright и Chromium против настоящего API и одноразовой базы. Ошибка в консоли или ответ 5xx роняют тест |
 | `shell.yml` | любые `*.sh` | shellcheck скриптов `deploy/` и `agent/deploy/install.sh` |
 | `linux-packs.yml` | агент и паки ОС | агент внутри контейнера, результат оценивает `pack evaluate` |
-| `windows-packs.yml` | агент и паки Windows | живой прогон на раннере, сборка exe, регистрация по подписанным манифестам, сценарий GPO |
+| `windows-packs.yml` | агент, паки Windows, `deploy/windows/gpo/**` | живой прогон на раннере, сборка exe, регистрация по подписанным манифестам, сценарий GPO |
+| `windows-release.yml` | теги `agent-*` и `v*`, не каждый push | собирает `hardening-agent.exe` и прикладывает его к GitHub Release. В git файла нет |
 
 Образы Linux в матрице `linux-packs.yml`, 16 строк:
 

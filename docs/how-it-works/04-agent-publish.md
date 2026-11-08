@@ -15,7 +15,7 @@
 3. Считает отпечаток открытого ключа сервера (SPKI, SHA-256, префикс `sha256//`). Сначала пробует `${HARDENING_DOMAIN}:443` с таймаутом 15 секунд. Если с самого сервера домен не открывается (нет обратного NAT), повторяет через `127.0.0.1:443` с тем же SNI. Пустой отпечаток — выход с ошибкой, файлы в каталоге загрузок не заменяются.
 4. Собирает `hardening-agent-linux.tar.gz` командой `git archive` из того коммита, не из рабочего каталога. В архив входят `collector.py`, `probes.py`, `usergate.py`, `continent4.py`, `agent/README.md`, `agent/deploy/` и инструкция установки.
 5. Ищет `hardening-agent.exe` в последней успешной сборке GitHub Actions workflow `windows-packs.yml` с тем же содержимым файлов агента. Сборку делает CI на Windows (PyInstaller). Если exe с этим кодом ещё нет, публикуется Linux-архив, а прежний exe остаётся. Скрипт об этом пишет и его можно запустить снова после сборки.
-6. Кладёт рядом `gpo-startup.ps1`.
+6. Кладёт рядом `gpo-startup.ps1` из `deploy/windows/gpo/gpo-startup.ps1` (коммит, который менял сам сценарий).
 7. Пишет `version.json`: время публикации, `server_url`, `server_pin`, список файлов с платформой, именем, версией, SHA-256 и размером.
 8. nginx раздаёт каталог как `/downloads/` (`deploy/nginx/app.conf`).
 
@@ -26,6 +26,8 @@
 Workflow `.github/workflows/windows-packs.yml`, job сборки на `windows-2022`. Команда по смыслу такая: PyInstaller `--onefile --name hardening-agent`, вход — `agent/collector.py`, рядом должны попасть `probes.py`, `usergate.py`, `continent4.py`. На Windows у заказчика Python не нужен.
 
 Linux-агент — это исходники на системном Python. Отдельного бинарника для Linux скрипт не собирает.
+
+Тот же exe по тегу `agent-*` или `v*` прикладывает к GitHub Release workflow `.github/workflows/windows-release.yml`. В репозиторий бинарник не коммитится. Для раскатки на домен берут файл с `/downloads/hardening-agent.exe` или из этого релиза. Пошагово — [gpo-rollout.md](../gpo-rollout.md).
 
 ## Что с чем сравнивается
 
@@ -46,8 +48,9 @@ Linux-агент — это исходники на системном Python. �
 |---|---|
 | Публикация | `deploy/publish_agent.sh` |
 | Раздача | `deploy/nginx/app.conf`, location `/downloads/` |
-| Проверка SHA при установке | `agent/deploy/windows/gpo-startup.ps1`, `agent/deploy/ansible/hardening-agent.yml` |
+| Проверка SHA при установке | `deploy/windows/gpo/gpo-startup.ps1`, `agent/deploy/ansible/hardening-agent.yml` |
 | Сборка exe | `.github/workflows/windows-packs.yml` |
+| Релиз exe по тегу | `.github/workflows/windows-release.yml` (теги `agent-*` и `v*`, файл релиза; в git бинарника нет) |
 | Скачивание в UI | `src/pages/AgentKeys.jsx`, `src/api/agentKeys.js` |
 
 ## Ограничения

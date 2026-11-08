@@ -20,8 +20,8 @@ cd "$(dirname "$0")/.."
 OUT=deploy/generated/downloads
 WORKFLOW=windows-packs.yml
 
-if [[ -n "$(git status --porcelain -- agent docs/agent-install.md)" ]]; then
-  echo "В agent/ или docs/agent-install.md есть незакоммиченные изменения — публикуется только закоммиченное" >&2
+if [[ -n "$(git status --porcelain -- agent docs/agent-install.md deploy/windows/gpo)" ]]; then
+  echo "В agent/, docs/agent-install.md или deploy/windows/gpo есть незакоммиченные изменения — публикуется только закоммиченное" >&2
   exit 1
 fi
 AGENT_COMMIT="$(git log -1 --format=%H -- agent)"
@@ -88,8 +88,10 @@ tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$(git log -1 --for
 install -m 0644 "$WORK/hardening-agent-linux.tar.gz" "$OUT/.linux.tmp" && mv -f "$OUT/.linux.tmp" "$OUT/hardening-agent-linux.tar.gz"
 LINUX_VERSION="$VERSION"
 echo "==> Linux: hardening-agent-linux.tar.gz, версия ${LINUX_VERSION}"
-# сценарий GPO для массовой установки на Windows — отдельным файлом: его кладут в общую папку домена
-git show "${AGENT_COMMIT}:agent/deploy/windows/gpo-startup.ps1" > "$OUT/.gpo.tmp" && chmod 0644 "$OUT/.gpo.tmp" \
+# сценарий GPO для массовой установки на Windows — отдельным файлом: его кладут в общую папку домена.
+# Берём коммит, который трогал сам сценарий: правка только deploy/windows/gpo не двигает AGENT_COMMIT.
+GPO_COMMIT="$(git log -1 --format=%H -- deploy/windows/gpo/gpo-startup.ps1)"
+git show "${GPO_COMMIT}:deploy/windows/gpo/gpo-startup.ps1" > "$OUT/.gpo.tmp" && chmod 0644 "$OUT/.gpo.tmp" \
   && mv -f "$OUT/.gpo.tmp" "$OUT/gpo-startup.ps1"
 
 # --- Windows: .exe из CI, собранный из того же кода агента ---

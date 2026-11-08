@@ -18,6 +18,7 @@ import {
 } from "../api/agentKeys";
 import { getCurrentUserRoleInOrganization } from "../api/users";
 import { formatDate, formatDateTime } from "../utils/datetime";
+import { buildGpoPackage, gpoParameterLine } from "../utils/gpoPackage";
 
 const INPUT = "w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500";
 const LABEL = "mb-1 block text-xs text-zinc-400";
@@ -93,6 +94,87 @@ function windowsSetup(key, publicKey, downloads) {
     'Register-ScheduledTask -TaskName "Hardening agent" -Action $action -Trigger (New-ScheduledTaskTrigger -Daily -At 03:00 -RandomDelay (New-TimeSpan -Hours 1)) -User SYSTEM -RunLevel Highest -Force | Out-Null',
     'Start-ScheduledTask -TaskName "Hardening agent"',
   ].join("\n");
+}
+
+/**
+ * Пакет для домена: строка параметров gpo-startup.ps1 и архив. Ключ есть только в этом блоке,
+ * пока администратор его не скрыл. В архиве ключ лежит в gpo-parameters.txt; README его не повторяет.
+ */
+function GpoRollout({ siteKey, packPublicKey, downloads }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [note, setNote] = useState("");
+  const server = serverUrl(downloads);
+  const pin = downloads?.server_pin || "";
+  const line = gpoParameterLine({ server, siteKey, packPublicKey: packPublicKey || "", pin });
+
+  async function download() {
+    setBusy(true);
+    setError("");
+    setNote("");
+    try {
+      const packed = await buildGpoPackage({
+        server,
+        siteKey,
+        packPublicKey: packPublicKey || "",
+        pin,
+        files: downloads?.files || [],
+      });
+      const url = URL.createObjectURL(new Blob([packed.zip], { type: "application/zip" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = packed.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      // Браузер забирает blob в загрузку не синхронно. Ранний revoke обрывает файл.
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setNote(packed.missing.length
+        ? `Архив скачан. В нём нет ${packed.missing.join(" и ")}: эти файлы сервер ещё не опубликовал. Параметры и README внутри. Сценарий и exe возьмите с /downloads после публикации или из релиза GitHub.`
+        : "Архив скачан: gpo-startup.ps1, hardening-agent.exe, gpo-parameters.txt и README.txt. Ключ площадки — в gpo-parameters.txt. Повторно страница его не покажет.");
+    } catch (err) {
+      setError(err.message || "Не удалось собрать архив");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+      <p className="text-sm text-white">Пакет для групповой политики</p>
+      <ol className="list-decimal space-y-1 pl-5 text-xs text-zinc-400">
+        <li>
+          До пилота исключите домен сервера из проверки защищённых соединений Kaspersky Endpoint Security в Kaspersky Security Center:{" "}
+          <a className="underline hover:text-white" href="https://support.kaspersky.com/KESWIN/12.8/ru-RU/175151.htm" target="_blank" rel="noreferrer">статья 175151</a>.
+          Если на пробных ПК остаётся <code>TLS_PIN_MISMATCH</code>, добавьте <code>hardening-agent.exe</code> в доверенные программы:{" "}
+          <a className="underline hover:text-white" href="https://support.kaspersky.com/keswin/11/ru-RU/123510.htm" target="_blank" rel="noreferrer">статья 123510</a>.
+          То же исключение домена нужно любому антивирусу и шлюзу, который подменяет сертификат. Периметровый экран — Континент 4: для этого домена инспекция TLS должна быть выключена.
+        </li>
+        <li>
+          Скачайте пакет и положите <code>gpo-startup.ps1</code> и <code>hardening-agent.exe</code> в <code>\\ДОМЕН\NETLOGON\Hardening</code>. В строке параметров замените <code>ДОМЕН</code>.
+        </li>
+        <li>
+          Политика: Конфигурация компьютера → Политики → Конфигурация Windows → Сценарии → Автозагрузка → вкладка «Сценарии PowerShell». Имя сценария — путь к <code>gpo-startup.ps1</code>, параметры — строка ниже.
+        </li>
+        <li>
+          Пилот на 10 ПК: <code>gpupdate /target:computer /force</code>. Дальше партии 50 и 100, между ними пауза 5 минут.
+        </li>
+        <li>
+          Проверка: <code>C:\ProgramData\HardeningAgent\gpo-startup.log</code>, задача «Hardening agent bootstrap», файл <code>host.json</code>, компьютер в блоке «Хосты» и в текущем прогоне.
+        </li>
+      </ol>
+      <p className="text-xs text-zinc-400">
+        Ключ в строке виден в SYSVOL. На ПК сценарий пишет его в <code>site.key</code> (только SYSTEM и администраторы) и удаляет файл после регистрации. В аргументы задачи «Hardening agent bootstrap» и в журнал ключ не входит.
+        {pin ? "" : " Отпечаток сервера в version.json пуст, поэтому -Pin в строке нет: допишите его, когда публикация снимет server_pin."}
+      </p>
+      <CopyBlock text={line} />
+      <button type="button" onClick={download} disabled={busy} className={BUTTON} aria-busy={busy}>
+        {busy ? "Собираю пакет…" : "Скачать пакет GPO"}
+      </button>
+      {error ? <p className="text-sm text-rose-300">{error}</p> : null}
+      {note ? <p className="text-xs text-emerald-200">{note}</p> : null}
+    </div>
+  );
 }
 
 function formatSize(bytes) {
@@ -429,14 +511,16 @@ export default function AgentKeys() {
                     Сохраните его сейчас — повторно он не показывается.
                   </p>
                   <CopyBlock text={created.key} />
+                  <GpoRollout siteKey={created.key} packPublicKey={data.pack_public_key} downloads={downloads} />
                   <p className="text-xs text-zinc-400">
                     Linux — файл <code>/etc/hardening-agent/local.env</code> для службы <code>hardening-agent@local</code>
                     (одинаковый на всех хостах площадки — раздаётся Ansible или образом ОС):
                   </p>
                   <CopyBlock text={agentConfig(created.key, data.pack_public_key, downloads)} />
                   <p className="text-xs text-zinc-400">
-                    Windows — PowerShell от администратора, после скачивания агента. Первая строка регистрирует хост; ключ
-                    площадки на хосте не сохраняется. Для сотен ПК те же команды — сценарием запуска в групповой политике (GPO):
+                    Один компьютер Windows без групповой политики — PowerShell от администратора, после скачивания агента.
+                    Первая строка регистрирует хост и на диск ключ не пишет. Для домена берите пакет GPO выше: у сценария
+                    другие параметры, ключ на время попыток лежит в <code>site.key</code>.
                   </p>
                   <CopyBlock text={windowsSetup(created.key, data.pack_public_key, downloads)} />
                   <button type="button" onClick={() => setCreated(null)} className="text-xs text-zinc-400 underline hover:text-white">

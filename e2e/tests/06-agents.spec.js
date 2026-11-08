@@ -1,6 +1,7 @@
 // «Агенты»: ключи площадок, регистрация хостов, отзыв и удаление, охват по списку из AD, отчёт из файла,
 // скачивание агента, права. Регистрация и отчёты — настоящими запросами агента к API.
 import { test, expect } from '@playwright/test'
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -33,7 +34,8 @@ test('ключ площадки: создание, показ один раз, �
   await expect(page.getByText(/Ключ «E2E Казань» создан, действует до \d\d\.\d\d\.\d{4}/)).toBeVisible()
   const key = (await page.locator('pre, code').filter({ hasText: /^[A-Za-z0-9_-]{30,}$/ }).first().textContent()).trim()
   expect(key.length).toBeGreaterThan(30)
-  await expect(page.getByText(`HARDENING_AGENT_API_KEY=${key}`).or(page.getByText(new RegExp(key)).nth(1))).toBeVisible()
+  await expect(page.getByText(`HARDENING_AGENT_API_KEY=${key}`)).toBeVisible()
+  await expect(page.getByText(`-SiteKey ${key}`)).toBeVisible()
   await expect(page.getByText(/--enroll/)).toBeVisible()
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   await page.getByRole('button', { name: /Скопировать|копировать/ }).first().click()
@@ -189,17 +191,22 @@ test('скачать агент: агент не опубликован — по
   await page.goto('/agents')
   await expect(page.getByText(/publish_agent\.sh|не опубликован/)).toBeVisible()
 
+  const ps1 = Buffer.from('param([string]$Server)\r\n')
+  const exe = Buffer.from('MZ-e2e-hardening-agent')
+  const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex')
   const version = {
     published_at: '2026-10-12T16:42:25+00:00',
     server_url: 'https://audit.example.com',
     server_pin: 'sha256//E2E+pin+value=',
     files: [
       { platform: 'linux', name: 'hardening-agent-linux.tar.gz', version: '2026.10.12-c126ac6', sha256: 'a'.repeat(64), size: 54041 },
-      { platform: 'windows', name: 'hardening-agent.exe', version: '2026.10.12-c126ac6', sha256: 'b'.repeat(64), size: 8986625 },
-      { platform: 'windows-gpo', name: 'gpo-startup.ps1', version: '2026.10.12-c126ac6', sha256: 'c'.repeat(64), size: 8338 },
+      { platform: 'windows', name: 'hardening-agent.exe', version: '2026.10.12-c126ac6', sha256: sha256(exe), size: exe.length },
+      { platform: 'windows-gpo', name: 'gpo-startup.ps1', version: '2026.10.12-c126ac6', sha256: sha256(ps1), size: ps1.length },
     ],
   }
   await page.route('**/downloads/version.json', (r) => r.fulfill({ json: version }))
+  await page.route('**/downloads/gpo-startup.ps1', (r) => r.fulfill({ body: ps1, contentType: 'application/octet-stream' }))
+  await page.route('**/downloads/hardening-agent.exe', (r) => r.fulfill({ body: exe, contentType: 'application/octet-stream' }))
   await page.reload()
   await expect(page.getByRole('link', { name: 'Скачать' }).first()).toHaveAttribute('href', '/downloads/hardening-agent-linux.tar.gz')
   await expect(page.getByRole('link', { name: 'Скачать' }).nth(1)).toHaveAttribute('href', '/downloads/hardening-agent.exe')
@@ -213,6 +220,32 @@ test('скачать агент: агент не опубликован — по
   await expect(page.getByText(/HARDENING_API_URL=https:\/\/audit\.example\.com/)).toBeVisible()
   await expect(page.getByText(/HARDENING_PIN_SHA256=sha256\/\/E2E\+pin\+value=/)).toBeVisible()
   await expect(page.getByText(/setx \/M HARDENING_PIN_SHA256 "sha256\/\/E2E\+pin\+value="/)).toBeVisible()
+  await expect(page.getByText(/-Server https:\/\/audit\.example\.com/)).toBeVisible()
+  await expect(page.getByText(/-Pin sha256\/\/E2E\+pin\+value=/)).toBeVisible()
+  await expect(page.getByText(/-InitialJitterMaxSeconds 900/)).toBeVisible()
+  await expect(page.getByText(/-RetryBudgetSeconds 1800/)).toBeVisible()
+  await expect(page.getByText(/-BootstrapEveryMinutes 15/)).toBeVisible()
+  await expect(page.getByText(/-BootstrapRandomDelayMinutes 15/)).toBeVisible()
+  await expect(page.getByText('site.key').first()).toBeVisible()
+  await expect(page.getByText(/те же команды/)).toHaveCount(0)
+  const key = (await page.locator('pre').filter({ hasText: /^[A-Za-z0-9_-]{30,}$/ }).first().textContent()).trim()
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: 'Скачать пакет GPO' }).click(),
+  ])
+  expect(download.suggestedFilename()).toBe('hardening-gpo.zip')
+  const zip = fs.readFileSync(await download.path())
+  expect(zip.subarray(0, 2).toString()).toBe('PK')
+  const packed = zip.toString('latin1')
+  expect(packed).toContain(`-SiteKey ${key}`)
+  expect(packed).toContain('-Pin sha256//E2E+pin+value=')
+  expect(packed).toContain('-InitialJitterMaxSeconds 900')
+  expect(packed).toContain('-RetryBudgetSeconds 1800')
+  expect(packed).toContain('param([string]$Server)')
+  expect(packed).toContain('MZ-e2e-hardening-agent')
+  const readmeAt = zip.indexOf(Buffer.from('Пакет групповой политики', 'utf8'))
+  expect(readmeAt).toBeGreaterThan(0)
+  expect(zip.subarray(readmeAt).includes(Buffer.from(key))).toBe(false)
   // чистим: отзываем созданный ключ
   page.once('dialog', (d) => d.accept())
   await page.getByRole('button', { name: 'Отозвать ключ «E2E с опубликованным агентом»' }).click()

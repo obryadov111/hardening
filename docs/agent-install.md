@@ -95,8 +95,9 @@ Start-ScheduledTask -TaskName "Hardening agent"
 
 ### Windows — групповая политика (GPO)
 
-Сценарий запуска компьютера `gpo-startup.ps1` (страница «Агенты» → «Скачать агент»; в архиве —
-`deploy/windows/`). Выполняется от SYSTEM при включении ПК, повторный запуск ничего не меняет:
+Сценарий запуска компьютера `gpo-startup.ps1` (в репозитории `deploy/windows/gpo/gpo-startup.ps1`,
+на сервере `/downloads/gpo-startup.ps1`, страница «Агенты» → «Скачать агент»). `hardening-agent.exe`
+в git нет: его собирает CI и отдаёт `/downloads/` либо релиз по тегу. Выполняется от SYSTEM при включении ПК, повторный запуск ничего не меняет:
 
 1. сразу, до регистрации, создаёт задачу «Hardening agent bootstrap» от SYSTEM (один экземпляр, повтор
    каждые 15–30 минут) и выходит — загрузку ПК не держит. Ключ площадки в аргументы этой задачи не попадает;
@@ -118,7 +119,10 @@ Start-ScheduledTask -TaskName "Hardening agent"
 2. Новый объект GPO, связать с OU компьютеров: «Конфигурация компьютера → Политики → Конфигурация Windows →
    Сценарии → Автозагрузка → Сценарии PowerShell» → `\\corp.local\NETLOGON\Hardening\gpo-startup.ps1`,
    параметры:
-   `-Server https://audit.<домен> -SiteKey <ключ площадки> -PackPublicKey <открытый ключ> -Share \\corp.local\NETLOGON\Hardening`
+   `-Server https://audit.<домен> -SiteKey <ключ площадки> -PackPublicKey <открытый ключ> -Pin sha256//<отпечаток> -Share \\corp.local\NETLOGON\Hardening -InitialJitterMaxSeconds 900 -RetryBudgetSeconds 1800 -BootstrapEveryMinutes 15 -BootstrapRandomDelayMinutes 15`
+
+   Страница «Агенты» подставляет эту строку сама в момент создания ключа. Пошагово для ~500 ПК —
+   [gpo-rollout.md](gpo-rollout.md).
 3. Перезагрузить 2–3 ПК пробной OU и проверить: «Агенты» → «Хосты» и «Охват»; на ПК —
    `C:\ProgramData\HardeningAgent\gpo-startup.log`.
 

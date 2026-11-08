@@ -2,7 +2,9 @@
 
 Обновлено 2026-10-30. Онлайн-версия с комментариями: https://claude.ai/artifact/LVUXBmJueVnTDTopfMzTx6
 
-Инструкция для администратора домена: как за один день поставить агент на сотни Windows-ПК через групповую политику и на Linux-машины через Ansible. Каждый шаг проверен на стенде: домен lab.local, Windows Server 2025 и Windows 11. Справочник по параметрам агента — [agent-install.md](agent-install.md).
+Инструкция для администратора домена: как за один день поставить агент на сотни Windows-ПК через групповую политику и на Linux-машины через Ansible. Каждый шаг проверен на стенде: домен lab.local, Windows Server 2025 и Windows 11. Справочник по параметрам агента — [agent-install.md](agent-install.md). Операционная раскатка на ~500 ПК, с пакетом со страницы «Агенты» и исключением Kaspersky — [gpo-rollout.md](gpo-rollout.md).
+
+Страница «Агенты» после «Создать ключ» собирает строку параметров сама: `-Server`, `-SiteKey`, `-PackPublicKey`, `-Pin` из `version.json`, путь `\\ДОМЕН\NETLOGON\Hardening` и паузы `-InitialJitterMaxSeconds 900`, `-RetryBudgetSeconds 1800`, `-BootstrapEveryMinutes 15`, `-BootstrapRandomDelayMinutes 15`. Кнопка «Скачать пакет GPO» отдаёт архив с этой строкой. Ключ показывается один раз.
 
 ## Как это устроено
 
