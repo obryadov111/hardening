@@ -204,3 +204,17 @@ severity: medium
 Следующий приём (`test_next_scan_records_accepted_risk_in_snapshot`) пишет в `scan_snapshots` `failed = 0`, `accepted_risks = 1`, `compliance_score = 100`, а в `scan_check_results` статус всё ещё `fail` и `risk_exception_id` заполнен.
 
 Процент стал 1 / 1 = 100, потому что единственный fail вынут из знаменателя. Нарушение на экране остаётся. Для боевого пака с `severity: high` срок у этой строки больше не показывается: `get_remediation` и `ResultRow.fix` для принятого риска возвращают пусто.
+
+## Д. Два хоста — один прогон, 2 и 3 ноября — одна волна
+
+Тест `test_backfill_puts_november_2_and_3_into_one_wave_and_keeps_the_latest_per_host` в `src/backend/tests/test_scan_runs.py` не ходит в базу. Он кормит `plan_backfill` тем же правилом, что миграция `f0c2a7e91b54`.
+
+176 снимков одной организации, первый 2 ноября 08:00 UTC, дальше каждые 10 минут (последний из них — 3 ноября днём), плюс повтор первого хоста 3 ноября 09:00 и один снимок 6 ноября.
+
+Окно волны — полночь суток первого снимка, двое суток и час: с 2 ноября 00:00 до 4 ноября 01:00. Все 176 плюс повтор попадают в первую волну. В прогоне 176 хостов: повтор вытеснил ранний снимок того же хоста, строка раннего снимка в список прогона не входит. Подпись волны — `02.11.2026–03.11.2026`. Снимок 6 ноября — прогон номер 2.
+
+Живой приём после миграции окно короче. `test_daily_window_keeps_the_hour_after_midnight_in_the_previous_run`: 8 ноября 15:00 — сутки 8 ноября, окно до 9 ноября 01:00. 9 ноября 00:30 ещё в этом прогоне (хвост RandomDelay). 9 ноября 01:00 — уже следующий.
+
+`test_two_hosts_share_one_run_and_a_repeat_keeps_only_the_latest` шлёт два хоста в одно окно через настоящий `POST /api/ingest`. Ответ обоих содержит один `scan_run_id`. Повтор web-01 оставляет в прогоне два снимка, не три; `GET /api/organizations/…/snapshots` по-прежнему отдаёт три строки. Сводка: web-01 оба pass, db-01 root нарушен — passed 3, failed 1, оценка 3/4 = 75. В `findings` одна строка `ssh.permit_root_login` и один хост.
+
+Сравнение следующего прогона (`test_next_day_opens_another_run_and_compare_shows_fixed_and_added_host`): root на web-01 стал `no` — в summary `fixed == 1`. db-01 есть только во втором прогоне — он в `hostsAdded`, его проверки в «новые нарушения» не подмешиваются.

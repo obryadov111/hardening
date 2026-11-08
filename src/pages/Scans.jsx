@@ -8,46 +8,33 @@ import OrgGate from "../components/OrgGate";
 import { SkeletonTable } from "../components/ui/Skeleton";
 import { getScoreTone } from "../utils/score";
 import { useOrganization } from "../context/OrganizationContext";
-import { getSnapshotsByOrganization } from "../api/snapshots";
-import { getAssetsByOrganization } from "../api/assets";
-import { downloadSnapshotExport } from "../api/exports";
+import {
+  closeScanRun, getEnvironments, getScanRuns, getScanSchedule, openScanRun, setScanSchedule,
+} from "../api/scanRuns";
+import { downloadRunExport } from "../api/exports";
+import { getCurrentUserRoleInOrganization } from "../api/users";
 import { formatDateTime } from "../utils/datetime";
-import { collectionSource } from "../utils/collection";
-
-function getStatusBadgeClass(status) {
-  switch (status) {
-    case "completed":
-      return "border-emerald-500/20 bg-emerald-500/10 text-emerald-300";
-    case "processing":
-      return "border-blue-500/20 bg-blue-500/10 text-blue-300";
-    case "pending":
-      return "border-amber-500/20 bg-amber-500/10 text-amber-300";
-    case "failed":
-      return "border-rose-500/20 bg-rose-500/10 text-rose-300";
-    default:
-      return "border-zinc-700 bg-zinc-800 text-zinc-300";
-  }
-}
-
-function getStatusLabel(status) {
-  switch (status) {
-    case "completed":
-      return "Завершён";
-    case "processing":
-      return "В обработке";
-    case "pending":
-      return "Ожидает";
-    case "failed":
-      return "Ошибка";
-    default:
-      return status || "—";
-  }
-}
 
 const PAGE_SIZE = 50;
 const PAGER = "rounded-xl border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40";
 const SELECT = "rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white outline-none";
-const EMPTY_SUMMARY = { total: 0, completed: 0, failed: 0, latest: null };
+const INPUT = "rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white outline-none";
+
+function statusLabel(status) {
+  if (status === "open") return "Открыт";
+  if (status === "closed") return "Закрыт";
+  return status || "—";
+}
+
+function statusClass(status) {
+  if (status === "open") return "border-blue-500/20 bg-blue-500/10 text-blue-300";
+  if (status === "closed") return "border-zinc-700 bg-zinc-800 text-zinc-300";
+  return "border-zinc-700 bg-zinc-800 text-zinc-300";
+}
+
+function scoreText(value) {
+  return value != null ? `${Math.round(value)}%` : "—";
+}
 
 export default function Scans() {
   const {
@@ -69,13 +56,13 @@ export default function Scans() {
         <div>
           <h1 className="text-2xl font-semibold text-white">Сканирования</h1>
           <p className="mt-1 text-sm text-zinc-400">
-            История сканирований организации{" "}
-            <span className="text-white">{selectedOrganization?.name || "—"}</span>.{" "}
-            Устройство без агента и SSH-доступа можно проверить{" "}
+            Прогоны организации{" "}
+            <span className="text-white">{selectedOrganization?.name || "—"}</span>.
+            Один прогон собирает снимки всех хостов за окно расписания агентов.
+            Устройство без агента можно проверить{" "}
             <Link to="/offline-scan" className="text-blue-300 underline hover:text-blue-200">по выгрузке конфигурации</Link>.
           </p>
         </div>
-        {/* key: смена организации — фильтр, страница и выбор для сравнения с чистого листа */}
         {selectedOrganizationId ? <ScansView key={selectedOrganizationId} organizationId={selectedOrganizationId} /> : null}
       </div>
     </OrgGate>
@@ -83,50 +70,71 @@ export default function Scans() {
 }
 
 function ScansView({ organizationId }) {
-  const [result, setResult] = useState({ key: null, items: [], total: 0, summary: EMPTY_SUMMARY, error: "" });
-  const [hosts, setHosts] = useState([]);
-  const [host, setHost] = useState("");
+  const [result, setResult] = useState({ key: null, items: [], total: 0, schedule: "daily", error: "" });
+  const [status, setStatus] = useState("");
   const [offset, setOffset] = useState(0);
+  const [role, setRole] = useState(null);
+  const [environments, setEnvironments] = useState([]);
+  const [selected, setSelected] = useState([]);
   const [busyKey, setBusyKey] = useState("");
   const [exportError, setExportError] = useState("");
-  // Два скана для сравнения, отмеченные пользователем (любые, не только соседние; выбор переживает смену страницы).
-  const [selected, setSelected] = useState([]);
+  const [actionError, setActionError] = useState("");
+  const [opening, setOpening] = useState(false);
+  const [form, setForm] = useState({ label: "", environment_id: "", closes_at: "" });
+  const [scheduleDraft, setScheduleDraft] = useState("daily");
   const navigate = useNavigate();
 
   useEffect(() => {
     let cancelled = false;
-    getAssetsByOrganization(organizationId)
-      .then((assets) => {
-        if (!cancelled) setHosts([...new Set((assets || []).map((a) => a.hostname))].sort((a, b) => a.localeCompare(b, "ru")));
-      })
-      .catch(() => { if (!cancelled) setHosts([]); });
+    Promise.all([
+      getCurrentUserRoleInOrganization(organizationId).catch(() => null),
+      getEnvironments(organizationId).catch(() => []),
+      getScanSchedule(organizationId).catch(() => ({ schedule: "daily" })),
+    ]).then(([nextRole, envs, schedule]) => {
+      if (cancelled) return;
+      setRole(nextRole);
+      setEnvironments(envs || []);
+      setScheduleDraft(schedule.schedule || "daily");
+    });
     return () => { cancelled = true; };
   }, [organizationId]);
 
-  const requestKey = JSON.stringify([host, offset]);
+  const requestKey = JSON.stringify([status, offset]);
   const loading = result.key !== requestKey;
+
+  function reload() {
+    return getScanRuns(organizationId, { status, limit: PAGE_SIZE, offset }).then((data) => {
+      setResult({
+        key: requestKey, items: data.items || [], total: data.total || 0,
+        schedule: data.schedule || "daily", error: "",
+      });
+      setScheduleDraft(data.schedule || "daily");
+    });
+  }
 
   useEffect(() => {
     let cancelled = false;
-    getSnapshotsByOrganization(organizationId, { host, limit: PAGE_SIZE, offset })
+    getScanRuns(organizationId, { status, limit: PAGE_SIZE, offset })
       .then((data) => {
-        if (!cancelled) setResult({ key: requestKey, items: data.items || [], total: data.total || 0, summary: data.summary || EMPTY_SUMMARY, error: "" });
+        if (!cancelled) {
+          setResult({
+            key: requestKey, items: data.items || [], total: data.total || 0,
+            schedule: data.schedule || "daily", error: "",
+          });
+        }
       })
       .catch((error) => {
         if (!cancelled) setResult((prev) => ({ ...prev, key: requestKey, error: error.message || "Не удалось получить данные" }));
       });
     return () => { cancelled = true; };
-  }, [organizationId, host, offset, requestKey]);
+  }, [organizationId, status, offset, requestKey]);
 
-  // Файл формируется на бэкенде на лету и скачивается авторизованным запросом: без хранилища
-  // и подписанных ссылок, у отчёта аудита нет публичного URL.
-  async function handleExport(snapshot, format) {
-    const key = `${snapshot.id}-${format}`;
+  async function handleExport(run, format) {
+    const key = `${run.id}-${format}`;
     setBusyKey(key);
     setExportError("");
-
     try {
-      const { blob, filename } = await downloadSnapshotExport(snapshot.id, format);
+      const { blob, filename } = await downloadRunExport(run.id, format);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -142,38 +150,84 @@ function ScansView({ organizationId }) {
     }
   }
 
-  const isSelected = (id) => selected.some((item) => item.id === id);
-
-  function toggleSelected(snapshot) {
+  function toggleSelected(run) {
     setSelected((current) => {
-      if (current.some((item) => item.id === snapshot.id)) return current.filter((item) => item.id !== snapshot.id);
-      // Третий отмеченный скан вытесняет отмеченный первым — выбранными всегда остаются два последних.
-      return [...current, snapshot].slice(-2);
+      if (current.some((item) => item.id === run.id)) return current.filter((item) => item.id !== run.id);
+      return [...current, run].slice(-2);
     });
   }
 
   function compareSelected() {
     const [a, b] = selected;
     if (!a || !b) return;
-    // «Было» — более ранний скан, «стало» — более поздний, в каком бы порядке их ни отметили.
-    const [before, after] = new Date(a.created_at) <= new Date(b.created_at) ? [a, b] : [b, a];
-    navigate(`/scan-compare?before=${before.id}&after=${after.id}`);
+    const [before, after] = new Date(a.opened_at) <= new Date(b.opened_at) ? [a, b] : [b, a];
+    navigate(`/scan-runs/compare?before=${before.id}&after=${after.id}`);
   }
 
-  const { summary, items: rows, error: loadError } = result;
+  async function handleOpen(event) {
+    event.preventDefault();
+    setOpening(true);
+    setActionError("");
+    try {
+      await openScanRun(organizationId, {
+        label: form.label.trim() || null,
+        environment_id: form.environment_id || null,
+        closes_at: form.closes_at ? new Date(form.closes_at).toISOString() : null,
+      });
+      setForm({ label: "", environment_id: "", closes_at: "" });
+      setOffset(0);
+      await reload();
+    } catch (error) {
+      setActionError(error.message);
+    } finally {
+      setOpening(false);
+    }
+  }
+
+  async function handleClose(run) {
+    setActionError("");
+    try {
+      await closeScanRun(run.id);
+      await reload();
+    } catch (error) {
+      setActionError(error.message);
+    }
+  }
+
+  async function handleSchedule(event) {
+    event.preventDefault();
+    setActionError("");
+    try {
+      const saved = await setScanSchedule(organizationId, scheduleDraft);
+      setScheduleDraft(saved.schedule);
+      setResult((prev) => ({ ...prev, schedule: saved.schedule }));
+    } catch (error) {
+      setActionError(error.message);
+    }
+  }
+
+  const rows = result.items;
   const firstLoad = result.key === null;
+  const openCount = rows.filter((item) => item.status === "open").length;
+  const latest = rows[0];
 
   return (
     <>
       <div className="grid gap-4 md:grid-cols-4">
-        <StatCard label="Всего сканов" value={summary.total} loading={firstLoad} hint="История сканирований" tone="info" />
-        <StatCard label="Завершено" value={summary.completed} loading={firstLoad} hint="Успешно обработанные" tone="success" />
-        <StatCard label="Ошибки" value={summary.failed} loading={firstLoad} hint="Неудачные запуски" tone="danger" />
+        <StatCard label="Всего прогонов" value={result.total} loading={firstLoad} hint="Волны сканирования" tone="info" />
+        <StatCard label="На странице открыто" value={openCount} loading={firstLoad} hint="Ещё принимают хосты" tone="success" />
         <StatCard
-          label="Последнее соответствие"
-          value={summary.latest?.compliance_score != null ? `${Math.round(summary.latest.compliance_score)}%` : "—"}
+          label="Хостов в последнем"
+          value={latest ? latest.hosts : "—"}
           loading={firstLoad}
-          hint="Последний скан"
+          hint="Последний прогон"
+          tone="default"
+        />
+        <StatCard
+          label="Оценка последнего"
+          value={latest ? scoreText(latest.compliance_score) : "—"}
+          loading={firstLoad}
+          hint="Соблюдено / проверенное"
           tone="default"
         />
       </div>
@@ -181,22 +235,72 @@ function ScansView({ organizationId }) {
       {exportError ? (
         <div className="flex items-start justify-between gap-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
           <span>{exportError}</span>
-          <button
-            type="button"
-            onClick={() => setExportError("")}
-            className="shrink-0 text-rose-300/70 hover:text-rose-200"
-          >
+          <button type="button" onClick={() => setExportError("")} className="shrink-0 text-rose-300/70 hover:text-rose-200">
             Закрыть
           </button>
         </div>
       ) : null}
+      {actionError ? (
+        <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">{actionError}</div>
+      ) : null}
 
-      <AppCard title="История сканирований" subtitle="Сравнение и экспорт по каждому запуску">
-        {summary.total > 1 ? (
+      <AppCard
+        title="Расписание агентов"
+        subtitle="Автопрогон: сутки или неделя в часовом поясе сервера плюс час случайной задержки. Уже открытый прогон не переписывается."
+      >
+        <form className="flex flex-wrap items-end gap-3" onSubmit={handleSchedule}>
+          <label className="text-sm text-zinc-400">
+            Расписание
+            <select
+              aria-label="Расписание агентов"
+              className={`${SELECT} mt-1 block`}
+              value={scheduleDraft}
+              disabled={role !== "admin"}
+              onChange={(event) => setScheduleDraft(event.target.value)}
+            >
+              <option value="daily">Ежедневно + 1 ч</option>
+              <option value="weekly">Еженедельно + 1 ч</option>
+            </select>
+          </label>
+          {role === "admin" ? (
+            <button type="submit" className="rounded-xl border border-zinc-700 px-3 py-2 text-sm text-white hover:bg-zinc-800">
+              Сохранить расписание
+            </button>
+          ) : (
+            <span className="pb-2 text-sm text-zinc-500">Меняет администратор организации.</span>
+          )}
+        </form>
+      </AppCard>
+
+      {role === "admin" ? (
+        <AppCard title="Открыть прогон" subtitle="Пока прогон открыт, новые снимки этой области попадают в него, а не в автоокно. Для волны GPO на несколько суток.">
+          <form className="grid items-end gap-3 md:grid-cols-4" onSubmit={handleOpen}>
+            <label className="text-sm text-zinc-400">
+              Метка
+              <input className={`${INPUT} mt-1 w-full`} value={form.label} maxLength={200} placeholder="Волна GPO" onChange={(event) => setForm({ ...form, label: event.target.value })} />
+            </label>
+            <label className="text-sm text-zinc-400">
+              Область
+              <select aria-label="Область прогона" className={`${SELECT} mt-1 w-full`} value={form.environment_id} onChange={(event) => setForm({ ...form, environment_id: event.target.value })}>
+                <option value="">Вся организация</option>
+                {environments.map((env) => <option key={env.id} value={env.id}>{env.name}</option>)}
+              </select>
+            </label>
+            <label className="text-sm text-zinc-400">
+              Закрыть автоматически
+              <input type="datetime-local" aria-label="Закрыть автоматически" className={`${INPUT} mt-1 w-full`} value={form.closes_at} onChange={(event) => setForm({ ...form, closes_at: event.target.value })} />
+            </label>
+            <button type="submit" disabled={opening} className="rounded-xl border border-blue-500/30 bg-blue-500/15 px-3 py-2 text-sm text-blue-200 hover:bg-blue-500/25 disabled:opacity-40">
+              {opening ? "Открываю…" : "Открыть прогон"}
+            </button>
+          </form>
+        </AppCard>
+      ) : null}
+
+      <AppCard title="Прогоны" subtitle="Сравнение — прогон с прогоном. Внутри прогона — все хосты.">
+        {result.total > 0 ? (
           <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950/70 px-4 py-3 text-sm">
-            <span className="text-zinc-400">
-              Отметьте два любых скана для сравнения: выбрано {selected.length} из 2
-            </span>
+            <span className="text-zinc-400">Отметьте два прогона для сравнения: выбрано {selected.length} из 2</span>
             <button
               type="button"
               disabled={selected.length !== 2}
@@ -206,47 +310,38 @@ function ScansView({ organizationId }) {
               Сравнить выбранные
             </button>
             {selected.length ? (
-              <button type="button" onClick={() => setSelected([])} className="text-xs text-zinc-400 underline hover:text-white">
-                сбросить
-              </button>
+              <button type="button" onClick={() => setSelected([])} className="text-xs text-zinc-400 underline hover:text-white">сбросить</button>
             ) : null}
             <select
-              aria-label="Хост"
+              aria-label="Состояние"
               className={`${SELECT} ml-auto`}
-              value={host}
-              onChange={(e) => { setHost(e.target.value); setOffset(0); }}
+              value={status}
+              onChange={(event) => { setStatus(event.target.value); setOffset(0); }}
             >
-              <option value="">Все хосты</option>
-              {hosts.map((name) => <option key={name} value={name}>{name}</option>)}
+              <option value="">Все прогоны</option>
+              <option value="open">Открытые</option>
+              <option value="closed">Закрытые</option>
             </select>
           </div>
         ) : null}
-        {loadError ? (
-          <ErrorState title="Ошибка загрузки" description={loadError} />
+        {result.error ? (
+          <ErrorState title="Ошибка загрузки" description={result.error} />
         ) : firstLoad ? (
           <SkeletonTable rows={6} cols={8} />
-        ) : summary.total === 0 ? (
-          <EmptyState
-            title="Нет сканирований"
-            description="Сканы появятся после первого отчёта агента или проверки по выгрузке."
-          />
-        ) : rows.length === 0 ? (
-          <div className="text-sm text-zinc-400">{loading ? "Загрузка…" : "У этого хоста сканов нет."}</div>
+        ) : result.total === 0 ? (
+          <EmptyState title="Нет прогонов" description="Прогон появится после первого отчёта агента или проверки по выгрузке." />
         ) : (
           <div className={`overflow-x-auto ${loading ? "opacity-60" : ""}`}>
             <table className="min-w-full text-sm">
               <thead className="border-b border-zinc-800 text-left text-zinc-400">
                 <tr>
                   <th className="px-4 py-3"><span className="sr-only">Выбрать для сравнения</span></th>
-                  <th className="px-4 py-3">Скан</th>
+                  <th className="px-4 py-3">Прогон</th>
+                  <th className="px-4 py-3">Окно</th>
+                  <th className="px-4 py-3">Состояние</th>
                   <th className="px-4 py-3">Хосты</th>
-                  <th className="px-4 py-3">Дата</th>
-                  <th className="px-4 py-3">Статус</th>
-                  <th className="px-4 py-3">Активы</th>
-                  <th className="px-4 py-3">ПО</th>
-                  <th className="px-4 py-3">Проверок</th>
                   <th className="px-4 py-3">Нарушено</th>
-                  <th className="px-4 py-3">Соответствие</th>
+                  <th className="px-4 py-3">Оценка</th>
                   <th className="px-4 py-3">PDF</th>
                   <th className="px-4 py-3">Excel</th>
                   <th className="px-4 py-3">С предыдущим</th>
@@ -254,111 +349,61 @@ function ScansView({ organizationId }) {
               </thead>
               <tbody>
                 {rows.map((item) => {
-                  // Предыдущий снимок того же актива (считает бэкенд): соседняя строка может быть про другой сервер.
-                  const previousId = item.previous_snapshot_id || null;
                   const pdfBusy = busyKey === `${item.id}-pdf`;
                   const excelBusy = busyKey === `${item.id}-excel`;
-
+                  const checked = selected.some((run) => run.id === item.id);
                   return (
-                    <tr
-                      key={item.id}
-                      className={`border-b border-zinc-800/60 text-zinc-200 transition hover:bg-zinc-800/40 ${
-                        isSelected(item.id) ? "bg-blue-500/10" : ""
-                      }`}
-                    >
+                    <tr key={item.id} className={`border-b border-zinc-800/60 text-zinc-200 hover:bg-zinc-800/40 ${checked ? "bg-blue-500/10" : ""}`}>
                       <td className="px-4 py-3">
                         <input
                           type="checkbox"
-                          aria-label={`Выбрать скан №${item.scan_number} для сравнения`}
-                          checked={isSelected(item.id)}
+                          aria-label={`Выбрать прогон №${item.run_number} для сравнения`}
+                          checked={checked}
                           onChange={() => toggleSelected(item)}
                           className="h-4 w-4 accent-blue-500"
                         />
                       </td>
                       <td className="px-4 py-3">
-                        <div className="font-medium text-white">
-                          {item.snapshot_label || `Скан №${item.scan_number}`}
+                        <Link to={`/scans/${item.id}`} className="font-medium text-white underline-offset-2 hover:underline" aria-label={`Открыть прогон №${item.run_number}`}>
+                          {item.label || `Прогон №${item.run_number}`}
+                        </Link>
+                        <div className="mt-1 text-xs text-zinc-500">
+                          №{item.run_number}
+                          {item.environment_name ? ` · ${item.environment_name}` : ""}
+                          {item.source === "manual" ? " · вручную" : ""}
                         </div>
-                        {collectionSource(item.collection) ? (
-                          <div
-                            className="mt-1 inline-block rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300"
-                            title={collectionSource(item.collection).text}
-                          >
-                            {collectionSource(item.collection).short}
-                          </div>
+                      </td>
+                      <td className="px-4 py-3 text-zinc-300">
+                        {formatDateTime(item.opened_at)}
+                        {item.window_ends_at ? <div className="text-xs text-zinc-500">до {formatDateTime(item.window_ends_at)}</div> : null}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`rounded-full border px-3 py-1 text-xs ${statusClass(item.status)}`}>{statusLabel(item.status)}</span>
+                        {role === "admin" && item.status === "open" ? (
+                          <button type="button" onClick={() => handleClose(item)} className="ml-2 text-xs text-zinc-400 underline hover:text-white" aria-label={`Закрыть прогон №${item.run_number}`}>
+                            Закрыть
+                          </button>
                         ) : null}
-                        {item.notes ? (
-                          <div className="mt-1 text-xs text-zinc-500">{item.notes}</div>
-                        ) : null}
                       </td>
-
+                      <td className="px-4 py-3">{item.hosts}</td>
+                      <td className="px-4 py-3">{item.failed}</td>
+                      <td className={`px-4 py-3 font-semibold ${getScoreTone(item.compliance_score).text}`}>{scoreText(item.compliance_score)}</td>
                       <td className="px-4 py-3">
-                        {item.hosts?.length ? (
-                          <span title={item.hosts.join(", ")}>
-                            {item.hosts.slice(0, 3).join(", ")}
-                            {item.hosts.length > 3 ? ` и ещё ${item.hosts.length - 3}` : ""}
-                          </span>
-                        ) : "—"}
-                      </td>
-
-                      <td className="px-4 py-3">
-                        {formatDateTime(item.created_at)}
-                      </td>
-
-                      <td className="px-4 py-3">
-                        <span
-                          className={`rounded-full border px-3 py-1 text-xs ${getStatusBadgeClass(
-                            item.status
-                          )}`}
-                        >
-                          {getStatusLabel(item.status)}
-                        </span>
-                      </td>
-
-                      <td className="px-4 py-3">{item.total_assets ?? 0}</td>
-                      <td className="px-4 py-3">{item.total_software ?? 0}</td>
-                      <td className="px-4 py-3">{item.total_checks ?? 0}</td>
-                      <td className="px-4 py-3">{item.failed ?? 0}</td>
-                      <td className={`px-4 py-3 font-semibold ${getScoreTone(item.compliance_score).text}`}>
-                        {item.compliance_score != null ? `${Math.round(item.compliance_score)}%` : "—"}
-                      </td>
-
-                      <td className="px-4 py-3">
-                        <button
-                          type="button"
-                          disabled={pdfBusy}
-                          aria-label={`Скачать PDF скана №${item.scan_number}`}
-                          onClick={() => handleExport(item, "pdf")}
-                          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800 disabled:opacity-50"
-                        >
+                        <button type="button" disabled={pdfBusy} aria-label={`Скачать PDF прогона №${item.run_number}`} onClick={() => handleExport(item, "pdf")} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800 disabled:opacity-50">
                           {pdfBusy ? "..." : "Скачать PDF"}
                         </button>
                       </td>
-
                       <td className="px-4 py-3">
-                        <button
-                          type="button"
-                          disabled={excelBusy}
-                          aria-label={`Скачать Excel скана №${item.scan_number}`}
-                          onClick={() => handleExport(item, "excel")}
-                          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800 disabled:opacity-50"
-                        >
+                        <button type="button" disabled={excelBusy} aria-label={`Скачать Excel прогона №${item.run_number}`} onClick={() => handleExport(item, "excel")} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800 disabled:opacity-50">
                           {excelBusy ? "..." : "Скачать Excel"}
                         </button>
                       </td>
-
                       <td className="px-4 py-3">
-                        {previousId ? (
-                          <Link
-                            to={`/scan-compare?before=${previousId}&after=${item.id}`}
-                            aria-label={`Сравнить скан №${item.scan_number} с предыдущим`}
-                            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800"
-                          >
+                        {item.previous_run_id ? (
+                          <Link to={`/scan-runs/compare?before=${item.previous_run_id}&after=${item.id}`} aria-label={`Сравнить прогон №${item.run_number} с предыдущим`} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-white hover:bg-zinc-800">
                             Сравнить
                           </Link>
-                        ) : (
-                          <span className="text-zinc-500">—</span>
-                        )}
+                        ) : <span className="text-zinc-500">—</span>}
                       </td>
                     </tr>
                   );
@@ -369,13 +414,9 @@ function ScansView({ organizationId }) {
         )}
         {result.total > PAGE_SIZE ? (
           <div className="mt-4 flex items-center gap-3 text-sm text-zinc-400">
-            <button type="button" className={PAGER} disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
-              Назад
-            </button>
+            <button type="button" className={PAGER} disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>Назад</button>
             <span>{offset + 1}–{Math.min(offset + PAGE_SIZE, result.total)} из {result.total}</span>
-            <button type="button" className={PAGER} disabled={offset + PAGE_SIZE >= result.total || loading} onClick={() => setOffset(offset + PAGE_SIZE)}>
-              Вперёд
-            </button>
+            <button type="button" className={PAGER} disabled={offset + PAGE_SIZE >= result.total || loading} onClick={() => setOffset(offset + PAGE_SIZE)}>Вперёд</button>
           </div>
         ) : null}
       </AppCard>

@@ -16,6 +16,7 @@ from app.api.routes.members import router as members_router
 from app.api.routes.offline_scans import router as offline_scans_router
 from app.api.routes.policies import router as policies_router
 from app.api.routes.risk_exceptions import router as risk_exceptions_router
+from app.api.routes.scan_runs import router as scan_runs_router
 from app.api.routes.snapshots import router as snapshots_router
 from app.api.routes.twofa import router as twofa_router
 from app.api.routes.vulnerabilities import router as vulnerabilities_router
@@ -38,6 +39,7 @@ app.include_router(ingest_router, prefix=settings.API_PREFIX)
 app.include_router(agent_router, prefix=settings.API_PREFIX)
 app.include_router(exports_router, prefix=settings.API_PREFIX)
 app.include_router(snapshots_router, prefix=settings.API_PREFIX)
+app.include_router(scan_runs_router, prefix=settings.API_PREFIX)
 app.include_router(policies_router, prefix=settings.API_PREFIX)
 app.include_router(risk_exceptions_router, prefix=settings.API_PREFIX)
 app.include_router(members_router, prefix=settings.API_PREFIX)

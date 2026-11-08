@@ -6,6 +6,7 @@ import ErrorState from "../components/ui/ErrorState";
 import { Skeleton } from "../components/ui/Skeleton";
 import { useOrganization } from "../context/OrganizationContext";
 import { getOfflinePacks, uploadOfflineScan } from "../api/offlineScans";
+import RunPicker from "../components/RunPicker";
 import { getCurrentUserRoleInOrganization } from "../api/users";
 
 const INPUT = "w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500";
@@ -34,6 +35,7 @@ export default function OfflineScan() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [result, setResult] = useState(null);
+  const [scanRunId, setScanRunId] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -94,6 +96,7 @@ export default function OfflineScan() {
         // Пак передаётся явно, только если оператор подтвердил это без выгрузки show version:
         // иначе сервер сам распознаёт платформу и откажет, если выгрузка не похожа на пак.
         pack: hasDetect ? "" : pack.pack,
+        scan_run_id: scanRunId,
         files: chosen.map((c) => ({ command: c.command, file: files[c.command] })),
       });
       setResult(response);
@@ -233,6 +236,7 @@ export default function OfflineScan() {
                   <span className={LABEL}>Когда снята выгрузка</span>
                   <input type="datetime-local" className={INPUT} value={form.exported_at} onChange={(e) => setField("exported_at", e.target.value)} />
                 </label>
+                <RunPicker organizationId={selectedOrganizationId} value={scanRunId} onChange={setScanRunId} disabled={!canUpload} />
                 <label>
                   <span className={LABEL}>Метка скана</span>
                   <input className={INPUT} value={form.scan_label} onChange={(e) => setField("scan_label", e.target.value)} placeholder="бэкап от 01.10" maxLength={200} />

@@ -38,6 +38,8 @@ const OfflineScan = page(() => import("./pages/OfflineScan"));
 const ManualScan = page(() => import("./pages/ManualScan"));
 const AgentKeys = page(() => import("./pages/AgentKeys"));
 const ScanCompare = page(() => import("./pages/ScanCompare"));
+const ScanRun = page(() => import("./pages/ScanRun"));
+const ScanRunCompare = page(() => import("./pages/ScanRunCompare"));
 const Vulnerabilities = page(() => import("./pages/Vulnerabilities"));
 const FstecCoverage = page(() => import("./pages/FstecCoverage"));
 
@@ -63,6 +65,8 @@ export default function App() {
               <Route path="project" element={<Navigate to="/assets" replace />} />
               <Route path="software" element={<SoftwareInventory />} />
               <Route path="scans" element={<Scans />} />
+              <Route path="scans/:runId" element={<ScanRun />} />
+              <Route path="scan-runs/compare" element={<ScanRunCompare />} />
               <Route path="offline-scan" element={<OfflineScan />} />
               <Route path="manual-scan" element={<ManualScan />} />
               <Route path="agents" element={<AgentKeys />} />

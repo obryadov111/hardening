@@ -50,15 +50,15 @@ USERS = {
 }
 ORG_MAIN, ORG_OTHER = "ООО «Альфа»", "ООО «Бета»"
 
-# Сценарий «до → после» для web-01 и по одному снимку остальных хостов: (хост, часов назад, [(образцы, случай)]).
-# Порядок — хронологический, как пришли бы отчёты: отчёт организации пересчитывается при каждом приёме.
-# db-01: ubuntu-server «нет файлов» — все проверки ОС «не проверено» (покрытие < 100 %).
+# Сценарий «до → после» для web-01 и по одному снимку остальных хостов: (хост, подпись, сдвиг от якоря, [(образцы, случай)]).
+# Якорь — вчерашний полдень UTC: три последних снимка в одном суточном прогоне, два ранних web-01 — в прошлых.
+# Порядок — хронологический. db-01: ubuntu-server «нет файлов» — проверки ОС «не проверено».
 SCANS = [
-    ("web-01", 144, [("ubuntu-server", 1), ("docker", 1)]),
-    ("web-01", 72, [("ubuntu-server", 3), ("docker", 2)]),
-    ("web-01", 24, [("ubuntu-server", 0), ("docker", 0)]),
-    ("db-01", 20, [("ubuntu-server", 5), ("postgresql", 1)]),
-    ("win-srv-01", 2, [("windows-server", 1)]),
+    ("web-01", "ранний", timedelta(days=-6), [("ubuntu-server", 1), ("docker", 1)]),
+    ("web-01", "средний", timedelta(days=-3), [("ubuntu-server", 3), ("docker", 2)]),
+    ("web-01", "последний", timedelta(0), [("ubuntu-server", 0), ("docker", 0)]),
+    ("db-01", "последний", timedelta(minutes=30), [("ubuntu-server", 5), ("postgresql", 1)]),
+    ("win-srv-01", "последний", timedelta(hours=1), [("windows-server", 1)]),
 ]
 HOST_META = {
     "web-01": {"ip_address": "10.10.0.11", "os": "Ubuntu 24.04", "asset_type": "linux-server", "criticality": "critical",
@@ -149,7 +149,12 @@ def main(out_path: str):
     agent, registry = load_agent_probes(), load_registry(BACKEND / "app" / "packs")
     host_keys = {}
     now = datetime.now(UTC)
-    for hostname, hours_ago, runs in SCANS:
+    # Полдень прошедших суток: +1 ч всё ещё внутри того же автоокна (сутки + час RandomDelay)
+    # и не попадает на границу 01:00, от которой зависит, какому прогону принадлежит снимок.
+    anchor = (now - timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
+    if anchor > now - timedelta(hours=2):
+        anchor -= timedelta(days=1)
+    for hostname, label, shift, runs in SCANS:
         meta = HOST_META[hostname]
         if hostname not in host_keys:
             resp = client.post("/api/agent/enroll", json={"hostname": hostname, "os": meta["os"]}, headers={"X-Agent-Api-Key": site_key})
@@ -161,9 +166,9 @@ def main(out_path: str):
             "software": SOFTWARE if meta["asset_type"] == "linux-server" else [],
             "platform_tags": meta["tags"],
             "packs": [probe_results(agent, registry, fixture, case) for fixture, case in runs],
-            "scan_label": f"e2e {hostname} −{hours_ago} ч",
+            "scan_label": f"e2e {hostname} {label}",
             "run_id": str(uuid.uuid4()),
-            "collected_at": (now - timedelta(hours=hours_ago)).isoformat(),
+            "collected_at": (anchor + shift).isoformat(),
         }
         resp = client.post("/api/ingest", json=payload, headers={"X-Agent-Api-Key": host_keys[hostname]})
         if resp.status_code != 200:

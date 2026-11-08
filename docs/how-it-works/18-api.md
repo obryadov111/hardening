@@ -61,7 +61,14 @@
 | GET | `/api/software` | ПО без фильтра организации, урезанный список |
 | GET | `/api/organizations/{org}/environments` | окружения |
 | GET | `/api/organizations/{org}/hardening` | проверки с фильтрами и страницами |
-| GET | `/api/organizations/{org}/snapshots` | снимки |
+| GET | `/api/organizations/{org}/snapshots` | снимки (как раньше, по одному на приём) |
+| GET | `/api/organizations/{org}/scan-runs` | прогоны, query `status`, `limit`, `offset` |
+| GET | `/api/organizations/{org}/scan-schedule` | `daily` или `weekly` |
+| GET | `/api/scan-runs/{id}` | шапка прогона и сводные суммы |
+| GET | `/api/scan-runs/{id}/hosts` | хосты прогона, query `q`, `status`, `environment_id`, страницы |
+| GET | `/api/scan-runs/{id}/findings` | нарушения по правилам и число хостов |
+| GET | `/api/scan-runs/compare` | два прогона, query `before_run_id`, `after_run_id` |
+| GET | `/api/exports/scan-runs/{id}/download` | Excel или PDF прогона |
 | GET | `/api/scan-snapshots` | снимки по доступным организациям |
 | GET | `/api/organizations/{org}/reports` | история процента организации |
 | GET | `/api/organizations/{org}/vulnerabilities` | находки, здесь же ленивый пересчёт |
@@ -91,8 +98,11 @@
 | POST | `/api/organizations/{org}/agent-reports` | загрузить файл `--out` |
 | POST | `/api/organizations/{org}/expected-hosts` | заменить список охвата |
 | DELETE | `/api/organizations/{org}/expected-hosts` | очистить список |
-| POST | `/api/organizations/{org}/offline-scans` | выгрузка файлами |
-| POST | `/api/organizations/{org}/manual-scans` | ответы анкеты |
+| POST | `/api/organizations/{org}/offline-scans` | выгрузка файлами; необязательное поле `scan_run_id` |
+| POST | `/api/organizations/{org}/manual-scans` | ответы анкеты; необязательное поле `scan_run_id` |
+| POST | `/api/organizations/{org}/scan-runs` | открыть прогон вручную |
+| POST | `/api/scan-runs/{id}/close` | закрыть прогон |
+| PUT | `/api/organizations/{org}/scan-schedule` | `daily` или `weekly` |
 
 ## Агент
 

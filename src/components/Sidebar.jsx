@@ -30,7 +30,7 @@ const menuItems = [
   { to: "/offline-scan", label: "Проверка по выгрузке", icon: FileUp },
   { to: "/manual-scan", label: "Проверка по опросу", icon: ClipboardList },
   { to: "/agents", label: "Агенты", icon: KeyRound },
-  { to: "/scan-compare", label: "Сравнение сканов", icon: GitCompareArrows },
+  { to: "/scan-runs/compare", label: "Сравнение прогонов", icon: GitCompareArrows },
 ];
 
 // NavLink подсвечивает раздел и вложенные адреса (/assets/<id> — «Активы») и ставит aria-current="page".

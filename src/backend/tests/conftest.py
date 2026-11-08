@@ -30,6 +30,8 @@ TRUNCATE_TABLES = [
     "ingestion_batches",
     "hardening_reports",
     "scan_snapshots",
+    "scan_runs",
+    "organization_scan_settings",
     "configs",
     "software",
     "asset_inventory",

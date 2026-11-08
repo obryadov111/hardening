@@ -38,3 +38,12 @@ class ScanSnapshot(Base):
     # Источник данных: NULL — живой хост/устройство; иначе {"source": "offline-config", "files": [...]}.
     collection: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Прогон организации. NULL — снимок вытеснен более поздним того же хоста в том же окне
+    # (строка остаётся: старые ручки по снимку её по-прежнему отдают).
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("public.scan_runs.id"), nullable=True
+    )
+    # Актив снимка. В приёме он один; колонка нужна, чтобы страница прогона не искала его по строкам проверок.
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("public.assets.id"), nullable=True
+    )

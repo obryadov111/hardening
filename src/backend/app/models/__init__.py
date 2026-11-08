@@ -14,6 +14,7 @@ from app.models.hardening import (
 )
 from app.models.organization import ClientOrganization
 from app.models.risk_exception import RiskException
+from app.models.scan_run import OrganizationScanSettings, ScanRun
 from app.models.scan_snapshot import ScanSnapshot
 from app.models.software import Software
 from app.models.user import User
@@ -33,8 +34,10 @@ __all__ = [
     "HardeningReport",
     "HardeningRule",
     "IngestionBatch",
+    "OrganizationScanSettings",
     "RiskException",
     "ScanCheckResult",
+    "ScanRun",
     "ScanSnapshot",
     "Software",
     "User",

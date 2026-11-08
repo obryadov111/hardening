@@ -89,6 +89,16 @@
 | `src/backend/alembic/versions/5bbca4cdfbaa_add_missing_fk_indexes.py` | 19 |
 | `src/backend/alembic/versions/91c43e6f135e_baseline_existing_schema.py` | 19 |
 | `src/backend/alembic/versions/a1d9c4f27e63_asset_inventory.py` | 19 |
+| `src/backend/alembic/versions/f0c2a7e91b54_scan_runs.py` | 11, 19 |
+| `src/backend/app/models/scan_run.py` | 11, 19 |
+| `src/backend/app/services/scan_runs.py` | 11, 16 |
+| `src/backend/app/services/scan_run_export.py` | 16 |
+| `src/backend/app/api/routes/scan_runs.py` | 11, 18 |
+| `src/backend/tests/test_scan_runs.py` | 11, 23 |
+| `src/api/scanRuns.js` | 17 |
+| `src/components/RunPicker.jsx` | 17 |
+| `src/pages/ScanRun.jsx` | 17 |
+| `src/pages/ScanRunCompare.jsx` | 16, 17 |
 | `src/backend/alembic/versions/a3f1c9d27b40_add_pack_result_columns.py` | 19 |
 | `src/backend/alembic/versions/a7d2e9c4f1b8_add_distro_cve_status.py` | 19 |
 | `src/backend/alembic/versions/b4e8d1f6a2c9_vulnerability_findings.py` | 19 |
