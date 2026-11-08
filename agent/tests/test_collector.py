@@ -444,6 +444,40 @@ def test_offline_dir_conflicts(pack_files, extra, message):
         collector.main(_pack_args(pack_files, "--dry-run", *extra))
 
 
+def test_offline_file_session_is_the_same_transport(tmp_path, capsys):
+    manifest = {
+        "schema": 1, "pack": "cisco-test", "version": "1.0.0", "maturity": "draft", "tags": ["network-device"],
+        "transport": "ssh", "asset_type": "network-device",
+        "detect": [{"probe": {"type": "cli_config", "cmd": "show version", "match": "(Cisco IOS)"}, "equals": "Cisco IOS"}],
+        "checks": [{"id": "http", "probe": {"type": "cli_config", "cmd": "show running-config", "match": "^ip http server"}}],
+    }
+    path = tmp_path / "manifests.json"
+    path.write_text(json.dumps({"manifests": [{"manifest": manifest, "signature": _signed(manifest)}]}), encoding="utf-8")
+    log = tmp_path / "session.log"
+    log.write_text(
+        "sw-core-01# terminal length 0\nsw-core-01# sh ver | no-more\nCisco IOS Software\n"
+        "sw-core-01# sh run\nip http server\nend\nsw-core-01#\n",
+        encoding="utf-8",
+    )
+    args = ["--api-url", "https://s", "--environment", "net", "--hostname", "sw-core-01",
+            "--use-packs", "--pack-key", "pack-key", "--manifests-file", str(path),
+            "--dry-run", "--offline-file", str(log)]
+    assert collector.main(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["packs"][0]["probe_results"]["http"]["value"] == "ip http server"
+    assert payload["collection"]["bundle_format"] == "session"
+    assert payload["collection"]["recognized_by"] == "detect"
+    assert payload["collection"]["declared_pack"] is False
+
+
+def test_offline_file_needs_hostname_and_excludes_ssh(pack_files):
+    with pytest.raises(SystemExit, match="нужен --hostname"):
+        collector.main(["--api-url", "https://s", "--environment", "prod", "--use-packs", "--pack-key", "pack-key",
+                        "--manifests-file", str(pack_files["path"]), "--dry-run", "--offline-file", "session.log"])
+    with pytest.raises(SystemExit, match="взаимоисключающие"):
+        collector.main(_pack_args(pack_files, "--dry-run", "--offline-file", "session.log", "--ssh-host", "10.0.0.1"))
+
+
 def test_offline_dir_needs_hostname(pack_files):
     args = ["--api-url", "https://s", "--environment", "prod", "--use-packs", "--pack-key", "pack-key",
             "--manifests-file", str(pack_files["path"]), "--dry-run", "--offline-dir", str(pack_files["dir"])]

@@ -250,13 +250,21 @@ python3 continent4.py --host 10.77.0.30 --user hardening-ro \
 ```bash
 python3 collector.py --api-url https://hardening.example.com --environment net --use-packs \
   --offline-dir ./export-sw-core-01 --hostname sw-core-01
+
+# один файл: журнал сессии, бэкап Oxidized/RANCID, архив каталога или JSON Континент 4
+python3 collector.py --api-url https://hardening.example.com --environment net --use-packs \
+  --offline-file ./session.log --hostname sw-core-01
+# Qtech и SNR по одному running-config неразличимы — пак называется явно:
+python3 collector.py --api-url https://hardening.example.com --environment net --use-packs \
+  --offline-file ./running-config.txt --hostname sw-acc-01 --pack qtech-qsw
 ```
 
 Применяются те же паки, что и по SSH, и те же пробы `cli_config`; ничего не выполняется, файлы только читаются
 (символические ссылки не открываются, пустой файл — отказ пробы, секреты в свидетельстве маскируются). Если
-выгрузки команды detect нет (обычно сохраняют только running-config), пак задаётся явно: `--pack cisco-ios`;
-если выгрузка есть и не совпадает с паком — данные не отправляются. Фильтры вывода (`| include …`) по выгрузке
-не поддерживаются: их выполняет само устройство.
+выгрузки команды detect нет (обычно сохраняют только running-config), пак задаётся явно: `--pack cisco-ios`,
+кроме платформ, которые узнаются по самой конфигурации (строка `version` у Cisco IOS и ещё несколько отпечатков
+в `offline_split.py`). Если выгрузка есть и не совпадает с паком — данные не отправляются. Разбор одного файла
+принимает сокращения (`sh run`) и хвост `| no-more` как имя команды; фильтр в тексте вывода не исполняется.
 
 В снимок уходит источник данных — имена файлов, SHA-256 и время изменения, а также признак «пак задан
 оператором». В интерфейсе снимок помечен «по выгрузке», в PDF/Excel — строка «Источник данных»: проверено

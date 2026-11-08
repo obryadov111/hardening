@@ -173,8 +173,19 @@ def ingest(
     check_agent_may_report(identity, payload.asset.hostname)
     return ingest_payload(
         db, registry, identity.organization_id, payload,
-        collection=payload.collection.model_dump() if payload.collection else None,
+        collection=_collection_dump(payload.collection),
     )
+
+
+def _collection_dump(collection):
+    """Новые необязательные поля одного файла не должны появляться как null в старых прогонах."""
+    if collection is None:
+        return None
+    data = collection.model_dump()
+    for key in ("recognized_by", "bundle_format"):
+        if data.get(key) is None:
+            data.pop(key, None)
+    return data
 
 
 def ingest_payload(

@@ -188,6 +188,15 @@ def main(out_path: str):
     (offline / "running_weak.txt").write_text(weak_cli["show running-config"], encoding="utf-8")
     (offline / "not_cisco.txt").write_text("Linux web-01 6.8.0-45-generic x86_64 GNU/Linux\n", encoding="utf-8")
 
+    def _session(version, config):
+        return "sw-core-01# show version\n{0}\nsw-core-01# show running-config\n{1}\nsw-core-01#\n".format(version, config)
+
+    (offline / "session_weak.txt").write_text(_session(base_cli["show version"], weak_cli["show running-config"]), encoding="utf-8")
+    (offline / "session_good.txt").write_text(_session(base_cli["show version"], base_cli["show running-config"]), encoding="utf-8")
+    (offline / "session_not_cisco.txt").write_text(
+        _session("Huawei Versatile Routing Platform\n", base_cli["show running-config"]), encoding="utf-8",
+    )
+
     # Отчёты агента «из файла» (агент --out): подписаны ключом площадки той же функцией, что у агента.
     sys.path.insert(0, str(BACKEND.parents[1] / "agent"))
     import collector  # noqa: PLC0415 — агент лежит вне пакета бэкенда

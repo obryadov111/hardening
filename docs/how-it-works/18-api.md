@@ -91,7 +91,8 @@
 | POST | `/api/organizations/{org}/agent-reports` | загрузить файл `--out` |
 | POST | `/api/organizations/{org}/expected-hosts` | заменить список охвата |
 | DELETE | `/api/organizations/{org}/expected-hosts` | очистить список |
-| POST | `/api/organizations/{org}/offline-scans` | выгрузка файлами |
+| POST | `/api/organizations/{org}/offline-scans/preview` | разобрать один файл, снимок не создавать |
+| POST | `/api/organizations/{org}/offline-scans` | выгрузка: `commands`+`files` или одно поле `bundle` |
 | POST | `/api/organizations/{org}/manual-scans` | ответы анкеты |
 
 ## Агент
