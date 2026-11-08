@@ -77,7 +77,8 @@ def _typed(command, abbreviate):
 def _session(cli, abbreviate=False):
     parts = ["sw-core-01# terminal length 0\n"]
     for command, text in cli.items():
-        parts.append("sw-core-01# {0} | no-more\n".format(_typed(command, abbreviate)))
+        typed = _typed(command, abbreviate)
+        parts.append(f"sw-core-01# {typed} | no-more\n")
         parts.append(text)
         parts.append("--More--\x08\x08\x08\x08\x08\x08\x08\x08\n")
     parts.append("sw-core-01#\n")
@@ -148,7 +149,7 @@ def test_continent_json_bundle_and_archive_match_two_files():
     fix = ROOT / "agent" / "tests" / "fixtures" / "continent4"
     export = (fix / "export-for-cgw-4210001.json").read_bytes()
     cgw = (fix / "cgw.json").read_bytes()
-    direct = run_offline(REGISTRY, {"export-config-for-cgw.json": export, "cgw.json": cgw}, None)
+    direct = run_offline(REGISTRY, {"export-config-for-cgw.json": export, "cgw.json": cgw}, "kontinent-4")
     raw = json.dumps({"export": json.loads(export), "cgw": json.loads(cgw)}).encode("utf-8")
     assert _signature(run_offline_bundle(REGISTRY, raw, "bundle.json", None)) == _signature(direct)
     buf = io.BytesIO()

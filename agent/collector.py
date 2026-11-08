@@ -1051,6 +1051,12 @@ def _open_offline_file(path, probes_module, manifests, explicit):
         declared, recognized_by = offline_split.choose_declared(split, explicit, manifests)
     except offline_split.SplitError as exc:
         raise SystemExit("Ошибка: {0}".format(exc))
+    if split.mode == "json":
+        # Иначе detect чужих паков зовёт show version, а транспорт ЦУС такую команду не читает.
+        if explicit and explicit != "kontinent-4":
+            raise SystemExit("Ошибка: по файлу это JSON Континент 4, а не {0}".format(explicit))
+        declared = explicit or "kontinent-4"
+        recognized_by = None
     if not split.files:
         raise SystemExit("Ошибка: в файле не найдено выводов команд")
     directory = tempfile.mkdtemp(prefix="offline-file-")

@@ -240,11 +240,16 @@ def run_offline_bundle(registry: PackRegistry, raw: bytes, filename: str, declar
     """Один файл выгрузки: журнал, бэкап, конфигурация, архив или JSON. Пробы те же, что у набора файлов."""
     split = split_bundle(registry, raw, filename, declared_pack)
     if split.mode == "json":
+        # На сервере continent4.py грузит свой экземпляр probes.py. Ошибка «это не команда ЦУС»
+        # не является ProbeError того модуля, которым select_manifests ловит промахи detect.
+        # Поэтому кандидатов сразу сужаем до kontinent-4: файл уже узнан как JSON ЦУС.
         if _continent4() is None:
             raise OfflineScanError("JSON Континент 4 на этом сервере не разбирается")
         if not split.files:
             raise OfflineScanError("в файле не найдено выводов команд")
-        run = run_offline(registry, split.files, declared_pack)
+        if declared_pack and declared_pack != "kontinent-4":
+            raise OfflineScanError(f"по файлу это JSON Континент 4, а не {declared_pack}")
+        run = run_offline(registry, split.files, declared_pack or "kontinent-4")
         return _annotate(run, split, "detect" if not run.collection.get("declared_pack") else "declared")
     if not split.files:
         raise OfflineScanError("в файле не найдено выводов команд")
