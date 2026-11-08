@@ -1,0 +1,47 @@
+# Сборка hardening-agent.exe и публикация его файлом релиза.
+# Бинарник в git не хранится. На сервере тот же exe забирает deploy/publish_agent.sh
+# из артефакта workflow «Windows packs» и кладёт в /downloads/. Этот workflow — запасной
+# источник для тега: GitHub Release, файл hardening-agent.exe.
+name: Windows agent release
+
+on:
+  push:
+    tags:
+      - "agent-*"
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  exe:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          pip install pyinstaller==6.11.1
+          pip install -r src/backend/requirements.txt
+
+      - name: Build hardening-agent.exe
+        run: pyinstaller --onefile --name hardening-agent --paths agent --hidden-import probes --hidden-import usergate --hidden-import continent4 agent/collector.py
+
+      - name: Attach exe to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $notes = "Файл hardening-agent.exe собран из тега $tag workflow Windows agent release. В git бинарник не хранится. На сервере его публикует deploy/publish_agent.sh в /downloads/hardening-agent.exe. Сценарий GPO — deploy/windows/gpo/gpo-startup.ps1, на сервере /downloads/gpo-startup.ps1. Инструкция — docs/gpo-rollout.md."
+          $ErrorActionPreference = "Continue"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title "Агент $tag" --notes $notes "dist/hardening-agent.exe"
+          } else {
+            gh release upload $tag "dist/hardening-agent.exe" --clobber
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

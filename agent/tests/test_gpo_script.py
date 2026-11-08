@@ -1,7 +1,9 @@
 """Статические гарантии сценария GPO: на Windows его гоняет CI, здесь — то, что нельзя потерять при правке."""
 import os
 
-SCRIPT = os.path.join(os.path.dirname(__file__), "..", "deploy", "windows", "gpo-startup.ps1")
+ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
+SCRIPT = os.path.join(ROOT, "deploy", "windows", "gpo", "gpo-startup.ps1")
+TEMPLATE = os.path.join(ROOT, "deploy", "windows", "gpo", "gpo-parameters.txt")
 
 
 def _text():
@@ -47,6 +49,20 @@ def test_pin_is_a_list_and_mismatch_does_not_retry_or_trust_version_json():
     assert "HARDENING_INITIAL_JITTER_MAX" in text
     assert "HARDENING_RETRY_BUDGET_SECONDS" in text
     assert "IgnoreNew" in text
+
+
+def test_parameter_template_uses_the_script_defaults_and_the_live_pin():
+    with open(TEMPLATE, encoding="utf-8") as fh:
+        text = fh.read()
+    assert "https://audit.hardening-audit.ru" in text
+    assert "sha256//F2IS+EuQnazu4oq6kt82+KkSARv4DiztB0hU9vOzdsU=" in text
+    assert "-InitialJitterMaxSeconds 900" in text
+    assert "-RetryBudgetSeconds 1800" in text
+    assert "-BootstrapEveryMinutes 15" in text
+    assert "-BootstrapRandomDelayMinutes 15" in text
+    assert "-Pin " in text and "-SiteKey " in text and "-Share " in text
+    assert "yak_" not in text
+    assert "site.key" in text
 
 
 def test_downloads_use_a_minute_timeout_and_skip_same_sha256():

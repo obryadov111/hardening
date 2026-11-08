@@ -192,7 +192,8 @@ flowchart TD
 
 ```
 agent/                       агент: collector.py, probes.py, tests/, deploy/ (systemd, install.sh,
-                             windows/gpo-startup.ps1, ansible/hardening-agent.yml)
+                             ansible/hardening-agent.yml)
+deploy/windows/gpo/          сценарий GPO gpo-startup.ps1 и шаблон параметров (exe в git нет)
 src/backend/                 сервер
   app/main.py                приложение FastAPI, подключение маршрутов
   app/api/routes/            ручки API (auth, twofa, data, ingest, agent, agent_keys, coverage,
@@ -570,7 +571,7 @@ sequenceDiagram
 
 ### 7.9 Массовая установка
 
-- **GPO** — `agent/deploy/windows/gpo-startup.ps1`, сценарий запуска компьютера (от SYSTEM, повторный
+- **GPO** — `deploy/windows/gpo/gpo-startup.ps1`, сценарий запуска компьютера (от SYSTEM, повторный
   запуск ничего не меняет). Автозагрузка сразу создаёт задачу «Hardening agent bootstrap» и не ждёт сеть:
   регистрация повторяется каждые 15–30 минут, первая регистрация и первый сбор — с паузой U(0, 900) с.
   `.exe` из общей папки или с сервера со сверкой SHA-256. Проверен в CI на Windows Server 2022 (PowerShell 5.1).

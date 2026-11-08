@@ -2,7 +2,7 @@
 
 Проверка полноты на 1 ноября 2026. В таблицу попали исходники бэкенда, агента, интерфейса, паки, фикстуры паков, тесты, скрипты `deploy/` и workflow CI. Бинарные образцы вывода в `agent/tests/fixtures/` в таблицу не включены: их читают тесты UserGate и Континента, глава 09.
 
-Всего строк карты: 327 вместе с `src/backend/.env.example`, контекстом интерфейса, хуком сортировки и главами 00 и 27 (шаблон переменных, глава 21). Неразнесённых среди исходников, паков, скриптов deploy и workflow: 0. Файл `.env.example` добавлен к сгенерированному списку отдельно, потому что у него нестандартное расширение.
+Всего строк карты: 332 вместе с `src/backend/.env.example`, контекстом интерфейса, хуком сортировки и главами 00 и 27 (шаблон переменных, глава 21). К прежним 327 добавлены сценарий и шаблон GPO, `gpoPackage.js` с тестом и workflow релиза. Неразнесённых среди исходников, паков, скриптов deploy и workflow: 0. Файл `.env.example` добавлен к сгенерированному списку отдельно, потому что у него нестандартное расширение.
 
 | Файл | Глава |
 |---|---|
@@ -15,6 +15,7 @@
 | `.github/workflows/linux-packs.yml` | 23 |
 | `.github/workflows/shell.yml` | 23 |
 | `.github/workflows/windows-packs.yml` | 23 |
+| `.github/workflows/windows-release.yml` | 04, 23 |
 | `Dockerfile.frontend` | 21 |
 | `agent/README.md` | 05, 06 |
 | `agent/collector.py` | 06, 15 |
@@ -24,7 +25,9 @@
 | `agent/deploy/hardening-agent@.service` | 05 |
 | `agent/deploy/hardening-agent@.timer` | 05, 20 |
 | `agent/deploy/install.sh` | 05 |
-| `agent/deploy/windows/gpo-startup.ps1` | 05 |
+| `deploy/windows/gpo/gpo-startup.ps1` | 05 |
+| `deploy/windows/gpo/gpo-parameters.txt` | 05 |
+| `deploy/windows/gpo/README.md` | 05 |
 | `agent/probes.py` | 08 |
 | `agent/tests/conftest.py` | 23 |
 | `agent/tests/test_collector.py` | 23 |
@@ -333,6 +336,8 @@
 | `src/pages/TwoFactor.jsx` | 17 |
 | `src/pages/Vulnerabilities.jsx` | 17 |
 | `src/utils/clipboard.js` | 17 |
+| `src/utils/gpoPackage.js` | 05, 17 |
+| `src/utils/gpoPackage.test.js` | 17, 23 |
 | `src/utils/collection.js` | 17 |
 | `src/utils/datetime.js` | 17 |
 | `src/utils/remediation.js` | 17 |

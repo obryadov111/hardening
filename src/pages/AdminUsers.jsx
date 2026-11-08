@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import AppCard from "../components/ui/AppCard";
 import CopyButton from "../components/ui/CopyButton";
 import ErrorState from "../components/ui/ErrorState";
@@ -181,7 +182,8 @@ export default function AdminUsers() {
         </form>
         {createdOrg ? (
           <div className="mt-3 text-sm text-emerald-300">
-            Организация «{createdOrg}» создана и выбрана. Ключ агента для неё — на странице «Агенты».
+            Организация «{createdOrg}» создана и выбрана. Ключ площадки и пакет GPO — на странице{" "}
+            <Link to="/agents" className="underline hover:text-white">Агенты</Link>.
           </div>
         ) : null}
       </AppCard>

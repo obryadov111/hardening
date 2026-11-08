@@ -164,6 +164,8 @@ python3 agent/collector.py --api-url https://… --environment net --use-packs \
 ```
 
 Подробно — [`agent/README.md`](agent/README.md), включая Windows.
+Раскатка на компьютеры домена через GPO — [`docs/gpo-rollout.md`](docs/gpo-rollout.md):
+исключение Kaspersky, Континент 4, NETLOGON, пакет со страницы «Агенты».
 
 ## Тесты
 

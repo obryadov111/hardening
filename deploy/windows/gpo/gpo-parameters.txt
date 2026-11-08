@@ -1,0 +1,14 @@
+# Параметры сценария gpo-startup.ps1 для автозагрузки компьютера.
+# Вкладка «Сценарии PowerShell»: имя сценария — путь к файлу в NETLOGON, эта строка — поле «Параметры».
+# На странице «Агенты» после создания ключа площадки строка собирается сама: адрес и -Pin
+# берутся из /downloads/version.json (server_url и server_pin), ключ подставляется один раз.
+#
+# Образец для https://audit.hardening-audit.ru на 8 ноября 2026.
+# Замените КЛЮЧ_ПЛОЩАДКИ, КЛЮЧ_ПАКОВ и ДОМЕН.
+# Пин ниже снят с боевого сертификата (SPKI SHA-256). Если сертификат сменят, берите server_pin
+# из version.json. Отпечаток, который ПК увидел через подмену сертификата, сюда не вписывают.
+#
+# Ключ площадки виден в SYSVOL. На ПК сценарий пишет его в site.key (только SYSTEM и администраторы)
+# и удаляет файл после регистрации. В аргументы задачи «Hardening agent bootstrap» ключ не входит.
+
+-Server https://audit.hardening-audit.ru -SiteKey КЛЮЧ_ПЛОЩАДКИ -PackPublicKey КЛЮЧ_ПАКОВ -Pin sha256//F2IS+EuQnazu4oq6kt82+KkSARv4DiztB0hU9vOzdsU= -Share \\ДОМЕН\NETLOGON\Hardening -InitialJitterMaxSeconds 900 -RetryBudgetSeconds 1800 -BootstrapEveryMinutes 15 -BootstrapRandomDelayMinutes 15

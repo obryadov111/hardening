@@ -13,6 +13,7 @@ on:
   push:
     paths:
       - "agent/**"
+      - "deploy/windows/gpo/**"
       - "src/backend/app/packs/windows-*"
       - "src/backend/app/services/packs/**"
       - "src/backend/app/commands/pack.py"
@@ -172,7 +173,7 @@ jobs:
           # Сервер ещё не слушает: автозагрузка не блокирует вход и уже создаёт постоянную задачу.
           $failState = "C:\ProgramData\HardeningAgentGpoFail"
           $failClock = [Diagnostics.Stopwatch]::StartNew()
-          $fail = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "agent\deploy\windows\gpo-startup.ps1",
+          $fail = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "deploy\windows\gpo\gpo-startup.ps1",
                     "-Server", "http://127.0.0.1:9", "-SiteKey", "ci-site-key", "-InstallDir", "C:\HardeningGpoFail",
                     "-StateDir", $failState, "-AllowHttp") + $fast
           powershell.exe @fail
@@ -199,7 +200,7 @@ jobs:
           $server = Start-Process python -ArgumentList ".github/scripts/agent_fake_server.py", "8799", "ci-manifests.json", "ci-requests.jsonl", "dist\hardening-agent.exe" -PassThru
           Start-Sleep -Seconds 3
           $edPublic = Get-Content ci-ed-public.txt -Raw
-          $gpo = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "agent\deploy\windows\gpo-startup.ps1", "-Server", "http://127.0.0.1:8799",
+          $gpo = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "deploy\windows\gpo\gpo-startup.ps1", "-Server", "http://127.0.0.1:8799",
                    "-SiteKey", "ci-site-key", "-PackPublicKey", $edPublic, "-Share", $share, "-InstallDir", $install, "-StateDir", $state, "-AllowHttp") + $fast
           powershell.exe @gpo
           if ($LASTEXITCODE -ne 0) { Get-Content "$state\gpo-startup.log"; exit 1 }

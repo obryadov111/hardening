@@ -15,7 +15,7 @@
 | 2 | [Организации, окружения, хосты](02-organizations-hosts.md) | Куда складываются активы и кто их видит |
 | 3 | [Ключи агента и enrollment](03-enrollment-keys.md) | Ключ площадки → ключ хоста |
 | 4 | [Публикация дистрибутива](04-agent-publish.md) | `publish_agent.sh`, `version.json`, `/downloads/` |
-| 5 | [Установка Linux и Windows](05-agent-install.md) | systemd, weekly, GPO, планировщик |
+| 5 | [Установка Linux и Windows](05-agent-install.md) | systemd, weekly, GPO, планировщик. Раскатка на домен — [gpo-rollout.md](../gpo-rollout.md) |
 | 6 | [Режимы агента](06-agent-modes.md) | Онлайн, очередь, файл, CLI |
 | 7 | [Паки](07-packs.md) | Формат YAML, каталог всех паков, подпись |
 | 8 | [Пробы](08-probes.md) | Каждый тип сборщика |
@@ -98,7 +98,7 @@ sequenceDiagram
 По шагам, со ссылками на главы:
 
 1. Администратор организации создаёт ключ площадки `yak_` на странице «Агенты». Сам ключ показывается один раз, в базе лежит SHA-256. [Ключи](03-enrollment-keys.md).
-2. На Linux `install.sh` или Ansible ставит службу. На Windows GPO ставит `hardening-agent.exe` и задачу планировщика. [Установка](05-agent-install.md). Дистрибутив перед этим публикует [publish_agent.sh](04-agent-publish.md).
+2. На Linux `install.sh` или Ansible ставит службу. На Windows GPO ставит `hardening-agent.exe` и задачу планировщика. Строку параметров и архив для ключа страница «Агенты» собирает при создании ключа. [Установка](05-agent-install.md), [раскатка](../gpo-rollout.md). Дистрибутив перед этим публикует [publish_agent.sh](04-agent-publish.md).
 3. Первый запуск с `--enroll` обменивает ключ площадки на ключ хоста `yah_`. Дальше агент ходит только им и только от своего имени. [Enrollment](03-enrollment-keys.md).
 4. Агент запрашивает манифесты актуальных паков нужного транспорта. Сервер подписывает канонический JSON ключом Ed25519. Неверная подпись останавливает весь прогон. [Паки](07-packs.md).
 5. `select_manifests` оставляет паки, у которых совпали **все** правила `detect`. Подходят все совпавшие сразу: ОС, Docker и PostgreSQL уходят одним запросом. [Режимы](06-agent-modes.md), [пробы](08-probes.md).

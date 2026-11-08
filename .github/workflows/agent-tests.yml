@@ -4,10 +4,12 @@ on:
   push:
     paths:
       - "agent/**"
+      - "deploy/windows/gpo/**"
       - ".github/workflows/agent-tests.yml"
   pull_request:
     paths:
       - "agent/**"
+      - "deploy/windows/gpo/**"
       - ".github/workflows/agent-tests.yml"
 
 jobs:
