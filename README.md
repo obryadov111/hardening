@@ -156,9 +156,11 @@ python3 agent/collector.py --api-url https://… --environment net --use-packs \
 python3 agent/collector.py --api-url https://… --environment net --use-packs \
   --device-config /etc/hardening-agent/usergate.json
 
-# по выгрузке конфигурации (show_running-config.txt, show_version.txt … в каталоге)
+# по выгрузке конфигурации: каталог файлов или один журнал/архив/JSON
 python3 agent/collector.py --api-url https://… --environment net --use-packs \
   --offline-dir ./export-sw-core-01 --hostname sw-core-01
+python3 agent/collector.py --api-url https://… --environment net --use-packs \
+  --offline-file ./session.log --hostname sw-core-01
 ```
 
 Подробно — [`agent/README.md`](agent/README.md), включая Windows.

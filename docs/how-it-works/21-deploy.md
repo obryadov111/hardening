@@ -12,7 +12,7 @@
 | Backend | образ из `src/backend/Dockerfile`, скрипт `deploy/restart_backend.sh` | `127.0.0.1:8000`, без root, два процесса uvicorn |
 | Frontend | nginx без root, `deploy/restart_frontend.sh` | с хоста 80 и, после HTTPS, 443 |
 
-В образ бэкенда из контекста `agent` копируется только `probes.py` (`COPY --from=agent probes.py` в `src/backend/Dockerfile`). `usergate.py` и `continent4.py` в образ не входят. Выгрузка обычных команд `show` на сервере идёт через `OfflineConfigTransport` из `probes.py`. JSON ЦУС `run_offline` читает через `continent4.py`, только если файл лежит в `HARDENING_AGENT_DIR`. В репозитории и в тестах он лежит. В образе, который собирает этот Dockerfile, его нет: `_continent4` вернёт пусто, и JSON ЦУС через интерфейс не разберётся. Живой опрос ЦУС делает агент на хосте заказчика, там `continent4.py` есть.
+В образ бэкенда из контекста `agent` копируются `probes.py`, `offline_split.py` и `continent4.py`. `usergate.py` в образ не входит: живой XML-RPC и SSH UserGate делает агент на хосте заказчика. Выгрузка команд `show` и один файл (журнал, архив, JSON ЦУС) на сервере идут через `OfflineConfigTransport` и, для JSON ЦУС, `Continent4Transport.from_uploads`. Живой опрос ЦУС по-прежнему делает агент, не сервер.
 
 Миграции — отдельный одноразовый контейнер `alembic upgrade head`, не команда при каждом старте.
 

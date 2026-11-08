@@ -8,16 +8,18 @@
 
 ## Как выбирается транспорт
 
-`build_pack_payload` в `agent/collector.py`. Флаги `--offline-dir`, `--ssh-host` и `--device-config` нельзя сочетать.
+`build_pack_payload` в `agent/collector.py`. Флаги `--offline-dir`, `--offline-file`, `--ssh-host` и `--device-config` нельзя сочетать.
 
 | Условие | Класс | `name` | Какие паки подходят |
 |---|---|---|---|
-| ничего из трёх | `LocalTransport` | `local` | `transport: local` |
+| ничего из этих флагов | `LocalTransport` | `local` | `transport: local` |
 | `--ssh-host` | `SshTransport` | `ssh` | `transport: ssh` |
 | `--device-config` без `kind` или не Континент | `UserGateTransport` | `ssh` | `transport: ssh` |
 | `--device-config` с `kind=continent4` (также `kontinent-4`, `kontinent4`, `c4`) | `Continent4Transport` | `ssh` | `transport: ssh` |
 | `--offline-dir` и в каталоге выгрузка Континента | `Continent4Transport.from_directory` | `offline-config` | паки ssh (`pack_transport`) |
 | `--offline-dir` иначе | `OfflineConfigTransport` | `offline-config` | паки ssh |
+| `--offline-file` и внутри JSON ЦУС | файл режется `offline_split.py`, затем `Continent4Transport.from_directory` | `offline-config` | паки ssh |
+| `--offline-file` иначе | тот же разбор, затем `OfflineConfigTransport` | `offline-config` | паки ssh |
 
 `pack_transport` в `agent/probes.py`: у выгрузки атрибут `pack_transport="ssh"`, поэтому выгрузка читается теми же паками, что и живое устройство.
 
@@ -26,7 +28,7 @@
 1. Манифесты с сервера (`GET /api/agent/manifests?transport=local|ssh`) или из `--manifests-file`.
 2. `load_verified_manifests`. Неверная подпись — `SystemExit` «Ошибка безопасности». Ни одна проба не выполняется.
 3. Если у транспорта есть `bind_manifests` (UserGate и Континент), ему передают белые списки методов и путей из подписанного манифеста.
-4. `select_manifests`: транспорт совпал и совпали все правила `detect`. Для выгрузки пак, явно указанный `--pack`, принимается и без detect, если файла команды detect нет. Если файл есть и detect не совпал, явное имя пак не продавливает.
+4. `select_manifests`: транспорт совпал и совпали все правила `detect`. Для выгрузки пак, явно указанный `--pack`, принимается и без detect, если файла команды detect нет. Если файл есть и detect не совпал, явное имя пак не продавливает. `--offline-file` может подставить пак сам, когда платформа читается из конфигурации (`recognized_by=config` в снимке, это не отметка «пак наугад»).
 5. Ни один пак не подошёл — выход «Платформа не распознана», на сервер ничего не уходит. Агент не угадывает платформу.
 6. Все совпавшие паки выполняются. Теги складываются. `asset_type` — первый непустой.
 7. На локальном хосте дополнительно собираются список ПО и паспорт железа. На устройстве вместо ПО — прошивка из поля `firmware` пака.
@@ -130,7 +132,7 @@
 | `--out` | Файл вместо POST |
 | `--ssh-host`, `--ssh-user`, `--ssh-port`, `--ssh-key` | Устройство по SSH |
 | `--device-config` | JSON UserGate или Континент 4. Пароль в этот JSON не входит |
-| `--offline-dir`, `--hostname` | Выгрузка |
+| `--offline-dir`, `--offline-file`, `--hostname` | Выгрузка каталогом или одним файлом. Без узнаваемой платформы ещё `--pack` |
 | `--collect-identity` | ПДн в паспорт. По умолчанию выключено |
 | `--no-spool` | Не сохранять прогон при обрыве |
 | `--show-server-pin` | Напечатать пин и выйти |

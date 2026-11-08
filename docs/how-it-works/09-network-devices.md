@@ -25,9 +25,21 @@
 |---|---|---|
 | SSH ключом | `--ssh-host`, `--ssh-user`, `--ssh-key` | живое устройство, `collection` пустой |
 | Файл цели | `--device-config` JSON | живое устройство. Для Континента `describe()` пустой |
-| Выгрузка | `--offline-dir` или страница «Проверка по выгрузке» | `collection.source = offline-config` |
+| Выгрузка | `--offline-dir`, `--offline-file` или страница «Проверка по выгрузке» | `collection.source = offline-config` |
 
-Выгрузка через интерфейс: `POST /api/organizations/{org}/offline-scans`, функция `upload_offline_scan`. Администратор организации. До 10 файлов по 5 МБ (`MAX_FILES`, `MAX_FILE_BYTES` в `services/offline_scan.py`). Команда файла должна встречаться в каком-нибудь ssh-паке, иначе `OfflineScanError`. Сервер грузит `agent/probes.py` (`load_agent_probes`) и для обычных команд вызывает `OfflineConfigTransport`. Если рядом лежит `continent4.py`, JSON ЦУС сначала пробует `Continent4Transport.from_uploads`. В текущем `Dockerfile` копируется только `probes.py`, поэтому в собранном образе этого шага нет. Дальше обычный `ingest_payload` с источником `offline-upload`. Тип актива — из пака, иначе у загрузки подставляется `network-device` в маршруте, если пак его не задал.
+Выгрузка через интерфейс: `POST /api/organizations/{org}/offline-scans`, функция `upload_offline_scan`. Администратор организации. До 10 файлов по 5 МБ (`MAX_FILES`, `MAX_FILE_BYTES` в `services/offline_scan.py`) либо одно поле `bundle` того же размера. Команда файла в многофайловом режиме должна встречаться в каком-нибудь ssh-паке, иначе `OfflineScanError`. Сервер грузит `agent/probes.py` и `agent/offline_split.py` и для обычных команд вызывает `OfflineConfigTransport`. Если рядом лежит `continent4.py`, JSON ЦУС сначала пробует `Continent4Transport.from_uploads`. Образ бэкенда копирует `probes.py`, `offline_split.py` и `continent4.py`. `usergate.py` в образ не входит: живой XML-RPC делает агент на хосте заказчика. Дальше обычный `ingest_payload` с источником `offline-upload`. Тип актива — из пака, иначе у загрузки подставляется `network-device` в маршруте, если пак его не задал.
+
+Один файл режет `split_bytes` в `agent/offline_split.py` (без зависимостей, тот же код у `--offline-file`):
+
+| Что принесли | Как режется |
+|---|---|
+| Журнал `host# show version`, `user@host:~$`, эхо `Admin@узел#` | приглашение — граница команды. `sh run`, `sh ver`, лишние пробелы и `\| no-more` сопоставляются с командой пака. `terminal length 0` пропускается. `--More--`, backspace и ANSI стираются |
+| Oxidized `! Command:` или закомментированный `show version` (`! Cisco IOS…`) и RANCID `!RANCID-CONTENT-TYPE:` | маркеры, не приглашение. Тело RANCID — конфигурация |
+| Только `show running-config` | пак по отпечатку текста, если он однозначный: `version 15.2` и `end` без ГОСТ — Cisco IOS; `crypto isakmp` и `gost` — С-Терра; `#!/usr/bin/clish` — Eltex ESR; `passwords complexity enable` — Eltex MES; `service ssh` — Dionis; `set system login` — ARMA. Qtech и SNR по конфигурации неразличимы: нужна галочка пака |
+| zip, tar, tar.gz | файлы с именами `offline_file_name` (`show_running-config.txt`). Путь с `..`, абсолютный путь и symlink отвергаются. Не больше 30 записей и 20 МБ распаковки |
+| JSON `{команда: текст}` или JSON ЦУС (`export` / bundle `{export, cgw}`) | команды либо `Continent4Transport` |
+
+Пустая выгрузка, двоичный файл и превышение размера — ответ 422 по-русски. `POST …/offline-scans/preview` показывает пак, найденные команды и пропуски, снимок не пишет. Пропущенная команда даёт проверкам «не проверено». Режим «файл на команду» в интерфейсе свёрнут, API полей `commands` и `files` не изменился.
 
 ## UserGate NGFW
 
@@ -45,7 +57,7 @@
 
 Способ, который не смог отдать команду, не отменяет остальные. Версия берётся из ответа `v2.core.login` или из `show system version`. В отчёт уходит продукт `usergate next-generation firewall (ngfw)` — так он назван в БДУ. Пароль и `auth_token` в свидетельстве вырезаются (`scrub`).
 
-Выгрузка тех же команд по-прежнему работает: файлы `show_settings_administrators_general.txt`, `show_network_zone_Untrusted.txt`, `show_system_version.txt`.
+Выгрузка тех же команд по-прежнему работает: файлы `show_settings_administrators_general.txt`, `show_network_zone_Untrusted.txt`, `show_system_version.txt`, один журнал CLI или архив этих файлов. Ответы XML-RPC агент в один файл не складывает — на странице выгрузки это сказано отдельно.
 
 Примеры сравнений пака:
 
@@ -83,7 +95,7 @@ POST, PUT, DELETE, lock, fork, commit, install-policy и set-password агент
 
 Учётка в комментарии пака — роль «Аудитор» комплекса: привилегии просмотра и структуры. На 4.2.1-653 этих прав хватает на три GET, запись отвечает 403. IP хоста агента должен быть в доступе к ЦУС.
 
-Та же выгрузка JSON (`c4_config_exporter` или локальное меню) читается офлайн: `--offline-dir` и загрузка через интерфейс. `directory_has_export` узнаёт каталог.
+Та же выгрузка JSON (`c4_config_exporter` или локальное меню) читается офлайн: `--offline-dir`, один JSON (export или bundle `{export, cgw}`), архив каталога и загрузка через интерфейс. `directory_has_export` узнаёт каталог.
 
 Проверки 1.1.0:
 

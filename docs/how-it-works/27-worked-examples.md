@@ -137,6 +137,8 @@ severity: medium
 
 Уровень пака `draft`: в YAML нет `verified_on`, хотя текст фикстуры взят с лабораторного ЦУС.
 
+Тот же JSON можно принести одним файлом: `{"export": <export-config-for-cgw>, "cgw": <список узлов>}` или архивом каталога `--offline-dir`. `run_offline_bundle` кладёт его в `Continent4Transport.from_uploads`. Проверки совпадают с двумя отдельными JSON. Журнал команд `show continent …` режется как обычная сессия, без API.
+
 ## В. Находка БДУ: OpenSSH 9.6p1
 
 Цифры — тест `test_api_lists_potential_vulnerabilities_with_criticality` и XML `SAMPLE_XML` в `src/backend/tests/test_bdu.py`. Это маленькая копия выгрузки, не боевые 90 тысяч записей. Алгоритм тот же, что у `import_bdu` и `refresh_findings`.
