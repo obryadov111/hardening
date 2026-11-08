@@ -1,6 +1,8 @@
 """Статические гарантии сценария GPO: на Windows его гоняет CI, здесь — то, что нельзя потерять при правке."""
 import os
 
+# Канонический сценарий — deploy/windows/gpo, на уровень выше каталога agent/.
+# Прогон Python 3.6 копирует этот каталог рядом с деревом агента: см. agent-tests.yml.
 ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
 SCRIPT = os.path.join(ROOT, "deploy", "windows", "gpo", "gpo-startup.ps1")
 TEMPLATE = os.path.join(ROOT, "deploy", "windows", "gpo", "gpo-parameters.txt")
