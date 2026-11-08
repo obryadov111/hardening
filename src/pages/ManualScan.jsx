@@ -7,6 +7,7 @@ import SeverityBadge from "../components/ui/SeverityBadge";
 import { Skeleton } from "../components/ui/Skeleton";
 import { useOrganization } from "../context/OrganizationContext";
 import { getManualPacks, submitManualScan } from "../api/manualScans";
+import RunPicker from "../components/RunPicker";
 import { getCurrentUserRoleInOrganization } from "../api/users";
 
 const INPUT = "w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500";
@@ -56,6 +57,7 @@ export default function ManualScan() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [result, setResult] = useState(null);
+  const [scanRunId, setScanRunId] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -118,6 +120,7 @@ export default function ManualScan() {
         environment: form.environment.trim() || "network",
         criticality: form.criticality,
         scan_label: form.scan_label.trim() || null,
+        scan_run_id: scanRunId || null,
         firmware_version: form.firmware_version.trim() || null,
         answers: payload,
       });
@@ -270,6 +273,7 @@ export default function ManualScan() {
                     />
                   </label>
                 ) : null}
+                <RunPicker organizationId={selectedOrganizationId} value={scanRunId} onChange={setScanRunId} disabled={!canSubmit} />
                 <label>
                   <span className={LABEL}>Метка скана</span>
                   <input className={INPUT} value={form.scan_label} onChange={(e) => setField("scan_label", e.target.value)} placeholder="опрос от 16.10" maxLength={200} />

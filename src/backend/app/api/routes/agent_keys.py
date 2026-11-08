@@ -15,7 +15,7 @@ import hmac
 import json
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.exc import DataError
 from sqlalchemy.orm import Session
@@ -143,6 +143,7 @@ def _canonical(payload: dict) -> bytes:
 async def upload_agent_report(
     organization_id: str,
     file: UploadFile = File(...),
+    scan_run_id: str | None = Form(None),
     current_user: User = Depends(require_org_admin),
     db: Session = Depends(get_db),
     registry: PackRegistry = Depends(get_pack_registry),
@@ -199,4 +200,7 @@ async def upload_agent_report(
         "file_sha256": hashlib.sha256(content).hexdigest(),
         "uploaded_name": (file.filename or "")[:255],
     }
-    return ingest_payload(db, registry, organization_id, payload, collection=collection, source="agent-report-file")
+    return ingest_payload(
+        db, registry, organization_id, payload, collection=collection, source="agent-report-file",
+        scan_run_id=scan_run_id or None,
+    )

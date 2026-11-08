@@ -40,7 +40,10 @@ test('опрос: Континент 4 — ответы, подтвержден�
   await expect(page.getByText('Снимок создан: проверок 3, соблюдено 1, нарушений 1, не проверено 1')).toBeVisible()
 
   await page.getByRole('link', { name: 'Открыть сканирования' }).click()
-  const row = page.locator('tbody tr').first()
+  await page.locator('tbody tr').first().getByRole('link', { name: /Открыть прогон/ }).click()
+  await page.getByLabel('Поиск').fill('ub-e2e-01')
+  await page.getByRole('button', { name: 'Найти' }).click()
+  const row = page.getByRole('table', { name: 'Хосты прогона' }).locator('tbody tr').first()
   await expect(row).toContainText('E2E опрос')
   await expect(row).toContainText('ub-e2e-01')
   await expect(row).toContainText(/по опросу/i)

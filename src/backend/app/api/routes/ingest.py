@@ -34,6 +34,7 @@ from app.services.hardening_engine import (
 from app.services.packs.evaluate import evaluate_pack
 from app.services.packs.registry import PackRegistry
 from app.services.risk_exceptions import active_exceptions, apply_exceptions, record_org_report
+from app.services.scan_runs import ScanRunError, attach_snapshot
 
 router = APIRouter(tags=["ingest"])
 
@@ -195,6 +196,7 @@ def ingest_payload(
     payload: IngestRequest,
     collection: dict | None = None,
     source: str = "agent",
+    scan_run_id: str | None = None,
 ) -> IngestResponse:
     """Запись прогона: снимок, текущее состояние актива, отчёт организации. Общая для агента
     (POST /ingest), для выгрузки, загруженной через интерфейс (source="offline-upload"), и для опроса (source="manual").
@@ -336,9 +338,20 @@ def ingest_payload(
         total_assets=1,
         total_software=len(payload.software),
         created_at=now,
+        asset_id=asset.id,
     )
     db.add(snapshot)
     db.flush()
+    # Номер скана уже взят под блокировкой организации. Прогон берёт свою блокировку следом,
+    # всегда в этом порядке: иначе приём и ручное открытие прогона могли бы встать друг на друга.
+    try:
+        run = attach_snapshot(
+            db, organization_id=organization_id, environment_id=str(environment.id),
+            asset_id=str(asset.id), collected_at=now, snapshot=snapshot, scan_run_id=scan_run_id,
+        )
+    except ScanRunError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     for r in results:
         db.add(
@@ -382,4 +395,5 @@ def ingest_payload(
         coverage=IngestCoverage(**compute_coverage(results)),
         packs=pack_summaries,
         report_id=str(report.id),
+        scan_run_id=str(snapshot.run_id) if snapshot.run_id else None,
     )

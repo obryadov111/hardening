@@ -1,4 +1,4 @@
-// «Сканирования» (PDF, Excel, выбор двух сканов, фильтр хоста), «Сравнение сканов», «Проверка по выгрузке».
+// «Сканирования» (прогоны: PDF, Excel, выбор двух), «Сравнение сканов» (снимки), «Проверка по выгрузке».
 import { test, expect } from '@playwright/test'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -18,81 +18,101 @@ async function snapshotsApi(request, params = '') {
   return (await request.get(`/api/organizations/${s.orgs.main.id}/snapshots?limit=500${params}`, { headers: h })).json()
 }
 
-test('сканы: таблица и сводка как на сервере, хосты в строке, фильтр по хосту', async ({ page, request }) => {
-  const body = await snapshotsApi(request)
+async function runsApi(request) {
+  const s = seed()
+  const h = await apiAs(request, 'viewer')
+  return (await request.get(`/api/organizations/${s.orgs.main.id}/scan-runs?limit=50`, { headers: h })).json()
+}
+
+test('прогоны: таблица как на сервере, последний собирает несколько хостов', async ({ page, request }) => {
+  const body = await runsApi(request)
   await loginAs(page, 'viewer')
   await page.goto('/scans')
   const rows = page.locator('tbody tr')
   await expect(rows).toHaveCount(body.total)
-  await expect(page.locator('div.text-sm.text-zinc-400', { hasText: /^Всего сканов$/ }).locator('xpath=following-sibling::*[1]'))
-    .toHaveText(String(body.summary.total))
-  const first = body.items[0]
-  await expect(rows.first()).toContainText(first.snapshot_label)
-  await expect(rows.first()).toContainText(first.hosts.join(', '))
-  await expect(rows.first()).toContainText(`${Math.round(first.compliance_score)}%`)
+  await expect(page.locator('div.text-sm.text-zinc-400', { hasText: /^Всего прогонов$/ }).locator('xpath=following-sibling::*[1]'))
+    .toHaveText(String(body.total))
+  const latest = body.items[0]
+  await expect(rows.first()).toContainText(latest.label)
+  await expect(rows.first()).toContainText(String(latest.hosts))
+  await expect(rows.first()).toContainText(`${Math.round(latest.compliance_score)}%`)
+  expect(latest.hosts).toBeGreaterThan(1)
 
-  const web = await snapshotsApi(request, '&host=web-01')
-  await page.getByLabel('Хост').selectOption('web-01')
-  await expect(rows).toHaveCount(web.total)
-  await expect(rows.filter({ hasNotText: 'web-01' })).toHaveCount(0)
+  await rows.first().getByRole('link', { name: `Открыть прогон №${latest.run_number}` }).click()
+  await expect(page).toHaveURL(new RegExp(`/scans/${latest.id}$`))
+  const hostRows = page.getByRole('table', { name: 'Хосты прогона' }).locator('tbody tr')
+  await expect(hostRows).toHaveCount(latest.hosts)
+  await page.getByLabel('Поиск').fill('web-01')
+  await page.getByRole('button', { name: 'Найти' }).click()
+  await expect(hostRows).toHaveCount(1)
+  await expect(hostRows.first()).toContainText('web-01')
+  await hostRows.first().getByRole('link', { name: 'web-01' }).click()
+  await expect(page).toHaveURL(/\/assets\//)
 })
 
-test('сканы: PDF и Excel скачиваются и это настоящие файлы', async ({ page }) => {
+test('прогоны: PDF и Excel скачиваются и это настоящие файлы', async ({ page, request }) => {
+  const body = await runsApi(request)
+  const latest = body.items[0]
   await loginAs(page, 'viewer')
   await page.goto('/scans')
-  const row = page.locator('tbody tr', { hasText: 'web-01' }).first()
-  const number = (await row.getByRole('checkbox').getAttribute('aria-label')).match(/№(\d+)/)[1]
 
-  const [pdf] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: `Скачать PDF скана №${number}` }).click()])
+  const [pdf] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: `Скачать PDF прогона №${latest.run_number}` }).click(),
+  ])
   expect(pdf.suggestedFilename()).toMatch(/\.pdf$/)
   expect(fs.readFileSync(await pdf.path()).subarray(0, 5).toString()).toBe('%PDF-')
 
-  const [xlsx] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: `Скачать Excel скана №${number}` }).click()])
+  const [xlsx] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: `Скачать Excel прогона №${latest.run_number}` }).click(),
+  ])
   expect(xlsx.suggestedFilename()).toMatch(/\.xlsx$/)
   expect(fs.readFileSync(await xlsx.path()).subarray(0, 2).toString()).toBe('PK')
 })
 
-test('сканы: ошибка экспорта показывается и закрывается', async ({ page }) => {
+test('прогоны: ошибка экспорта показывается и закрывается', async ({ page }) => {
   await loginAs(page, 'viewer')
-  await page.route((u) => u.pathname.includes('/api/exports/'), (r) => r.fulfill({ status: 404, json: { detail: 'Снимок не найден' } }))
+  await page.route((u) => u.pathname.includes('/api/exports/'), (r) => r.fulfill({ status: 404, json: { detail: 'Прогон не найден' } }))
   await page.goto('/scans')
   await page.locator('tbody tr').first().getByRole('button', { name: /Скачать PDF/ }).click()
-  await expect(page.getByText('Не удалось сформировать PDF: Снимок не найден')).toBeVisible()
+  await expect(page.getByText('Не удалось сформировать PDF: Прогон не найден')).toBeVisible()
   await page.getByRole('button', { name: 'Закрыть' }).click()
   await expect(page.getByText(/Не удалось сформировать PDF/)).toHaveCount(0)
 })
 
-test('сканы: выбрать два, третий вытесняет первый, «сбросить», «Сравнить выбранные» — было раньше, стало позже', async ({ page, request }) => {
-  const body = await snapshotsApi(request, '&host=web-01')
-  const [newest, middle, oldest] = body.items  // у web-01 три скана
+test('прогоны: выбрать два, третий вытесняет первый, «сбросить», сравнение идёт от раннего к позднему', async ({ page, request }) => {
+  const body = await runsApi(request)
+  const [newest, middle, oldest] = body.items
   await loginAs(page, 'viewer')
   await page.goto('/scans')
-  const box = (s) => page.getByRole('checkbox', { name: `Выбрать скан №${s.scan_number} для сравнения` })
+  const box = (run) => page.getByRole('checkbox', { name: `Выбрать прогон №${run.run_number} для сравнения` })
   const compare = page.getByRole('button', { name: 'Сравнить выбранные' })
   await expect(compare).toBeDisabled()
   await box(newest).check()
   await expect(page.getByText('выбрано 1 из 2')).toBeVisible()
   await box(middle).check()
-  await box(oldest).check()  // вытесняет newest
+  await box(oldest).check()
   await expect(box(newest)).not.toBeChecked()
   await expect(page.getByText('выбрано 2 из 2')).toBeVisible()
   await page.getByRole('button', { name: 'сбросить' }).click()
   await expect(page.getByText('выбрано 0 из 2')).toBeVisible()
 
-  await box(newest).check()  // отмечаем в обратном порядке — сравнение всё равно «старый → новый»
+  await box(newest).check()
   await box(oldest).check()
   await compare.click()
-  await expect(page).toHaveURL(new RegExp(`/scan-compare\\?before=${oldest.id}&after=${newest.id}$`))
-  await expect(page.getByText(`Скан №${oldest.scan_number} → скан №${newest.scan_number}`)).toBeVisible()
+  await expect(page).toHaveURL(new RegExp(`/scan-runs/compare\\?before=${oldest.id}&after=${newest.id}$`))
+  await expect(page.getByText(`Прогон №${oldest.run_number} → прогон №${newest.run_number}`)).toBeVisible()
+  await expect(page.getByText('Добавились').or(page.getByText('Исправлено')).first()).toBeVisible()
 })
 
-test('сканы: «Сравнить» с предыдущим сканом того же актива', async ({ page, request }) => {
-  const body = await snapshotsApi(request, '&host=web-01')
-  const [newest, middle] = body.items
+test('прогоны: «Сравнить» с предыдущим прогоном', async ({ page, request }) => {
+  const body = await runsApi(request)
+  const [newest, previous] = body.items
   await loginAs(page, 'viewer')
   await page.goto('/scans')
-  await page.getByRole('link', { name: `Сравнить скан №${newest.scan_number} с предыдущим` }).click()
-  await expect(page).toHaveURL(new RegExp(`before=${middle.id}&after=${newest.id}`))
+  await page.getByRole('link', { name: `Сравнить прогон №${newest.run_number} с предыдущим` }).click()
+  await expect(page).toHaveURL(new RegExp(`before=${previous.id}&after=${newest.id}`))
 })
 
 test('сравнение: по умолчанию последний и предыдущий того же актива; итоги и таблица изменений', async ({ page, request }) => {
@@ -173,9 +193,13 @@ test('выгрузка: один журнал сессии, снимок соз�
   await submit.click()
   await expect(page.getByText(/Снимок создан: проверок \d+, соблюдено \d+, нарушений [1-9]\d*/)).toBeVisible()
   await page.getByRole('link', { name: 'Открыть сканирования' }).click()
-  await expect(page.locator('tbody tr').first()).toContainText('E2E выгрузка')
-  await expect(page.locator('tbody tr').first()).toContainText('sw-e2e-01')
-  await expect(page.locator('tbody tr').first()).toContainText(/выгрузк/i)
+  await page.locator('tbody tr').first().getByRole('link', { name: /Открыть прогон/ }).click()
+  await page.getByLabel('Поиск').fill('sw-e2e-01')
+  await page.getByRole('button', { name: 'Найти' }).click()
+  const host = page.getByRole('table', { name: 'Хосты прогона' }).locator('tbody tr').first()
+  await expect(host).toContainText('E2E выгрузка')
+  await expect(host).toContainText('sw-e2e-01')
+  await expect(host).toContainText(/выгрузк/i)
 })
 
 test('выгрузка: только конфигурация узнаётся по version; чужой журнал — ошибка', async ({ page }) => {

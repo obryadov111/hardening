@@ -40,6 +40,7 @@ class ManualScanIn(BaseModel):
     scan_label: str | None = Field(default=None, max_length=200)
     answers: dict[str, ManualAnswer] = Field(default_factory=dict, max_length=200)
     firmware_version: str | None = Field(default=None, max_length=100)
+    scan_run_id: str | None = Field(default=None, description="Открытый прогон; нет — автоокно расписания")
 
 
 @router.get("/organizations/{organization_id}/manual-scans/packs")
@@ -90,4 +91,7 @@ def submit_manual_scan(
                              probe_results={k: IngestProbeResult(**v) for k, v in results.items()})],
         scan_label=body.scan_label,
     )
-    return ingest_payload(db, registry, organization_id, payload, collection=collection, source="manual")
+    return ingest_payload(
+        db, registry, organization_id, payload, collection=collection, source="manual",
+        scan_run_id=body.scan_run_id or None,
+    )

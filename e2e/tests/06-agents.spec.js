@@ -175,8 +175,13 @@ test('отчёт из файла: подписанный принимается;
   await submit.click()
   await expect(page.getByText(/Снимок создан: проверок \d+/)).toBeVisible()
   await page.getByRole('link', { name: 'Открыть сканирования' }).click()
-  await expect(page.locator('tbody tr').first()).toContainText('e2e отчёт из файла')
-  await expect(page.locator('tbody tr').first()).toContainText('air-gap-01')
+  await page.locator('tbody tr').first().getByRole('link', { name: /Открыть прогон/ }).click()
+  await page.getByLabel('Поиск').fill('air-gap-01')
+  await page.getByRole('button', { name: 'Найти' }).click()
+  const host = page.getByRole('table', { name: 'Хосты прогона' }).locator('tbody tr').first()
+  await expect(host).toContainText('e2e отчёт из файла')
+  await expect(host).toContainText('air-gap-01')
+  await expect(host).toContainText(/файлом/i)
 })
 
 test('скачать агент: агент не опубликован — подсказка; опубликован — ссылки, версии, SHA-256, отпечаток в настройках', async ({ page }) => {

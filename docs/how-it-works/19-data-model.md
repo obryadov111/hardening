@@ -6,7 +6,7 @@
 
 Схема меняется только Alembic. При старте контейнера миграции сами не запускаются: их гоняют отдельной командой после копирования базы. Так записано в `docs/project-description.md` и в скриптах выката.
 
-Подсчёт **1 ноября 2026**: в `src/backend/alembic/versions/` **19** файлов. Голова цепочки — `a1d9c4f27e63` (паспорт актива). Она ревизит `c9f2a7e4d815` (индексы поиска ПО). Документ `project-description.md` до этой правки называл головой `c9f2a7e4d815` и не рисовал `asset_inventory`. Это устарело.
+Подсчёт на 8 ноября 2026: в `src/backend/alembic/versions/` **20** файлов. Голова цепочки — `f0c2a7e91b54` (прогоны). Она ревизит `a1d9c4f27e63` (паспорт актива). Документ `project-description.md` до прогонов называл головой `a1d9c4f27e63`. Это устарело.
 
 ## Связи
 
@@ -21,6 +21,8 @@ erDiagram
   client_organizations ||--o{ ingestion_batches : "приём"
   ingestion_batches ||--o| scan_snapshots : "снимок"
   scan_snapshots ||--o{ scan_check_results : "строки"
+  client_organizations ||--o{ scan_runs : "прогоны"
+  scan_runs ||--o{ scan_snapshots : "снимки хостов"
   client_organizations ||--o{ scan_snapshots : "история"
   client_organizations ||--o{ hardening_reports : "процент орг."
   client_organizations ||--o{ risk_exceptions : "риски"
@@ -55,7 +57,9 @@ erDiagram
 | `ingestion_batches` | один приём, `run_id` | приём |
 | `agent_collections` | сырые пробы | приём |
 | `hardening_checks` | текущие статусы актива | приём и смена риска |
-| `scan_snapshots`, `scan_check_results` | история | приём |
+| `scan_runs` | окно многих хостов | приём и администратор |
+| `organization_scan_settings` | daily или weekly | администратор |
+| `scan_snapshots`, `scan_check_results` | история; `run_id` пустой у вытесненного снимка | приём |
 | `hardening_reports` | процент организации | приём и смена риска |
 | `risk_exceptions` | принятый риск | админ организации |
 | `agent_api_keys`, `agent_hosts` | ключи | интерфейс и enroll |
@@ -93,9 +97,12 @@ erDiagram
 | `f1c3d6a8b925` | ожидаемые хосты |
 | `b4e8d1f6a2c9` | сохранённые находки |
 | `c9f2a7e4d815` | поиск ПО, pg_trgm |
-| `a1d9c4f27e63` | паспорт, голова |
+| `a1d9c4f27e63` | паспорт |
+| `f0c2a7e91b54` | прогоны, голова |
 
-Проверить на живой базе: `alembic current` должен показать `a1d9c4f27e63`.
+Проверить на живой базе: `alembic current` должен показать `f0c2a7e91b54`.
+
+Индексы прогона, без которых страница на 500 хостов читает таблицу целиком: частичный `scan_snapshots(run_id)`, уникальный `(run_id, asset_id)` (один хост в прогоне), частичный `scan_check_results(snapshot_id) WHERE status = 'fail'` для сводки нарушений, уникальный один открытый прогон на пару (организация, окружение). Оценка в строку прогона не пишется.
 
 ## Индексы, без которых тысячи хостов встают
 
@@ -116,7 +123,7 @@ erDiagram
 
 ## Вопросы на защите
 
-**Сколько миграций и какая голова?** 19 файлов, голова `a1d9c4f27e63`, паспорт оборудования.
+**Сколько миграций и какая голова?** 20 файлов, голова `f0c2a7e91b54`, прогоны. Паспорт оборудования — предыдущая ревизия `a1d9c4f27e63`.
 
 **Где текущее состояние, а где история?** `hardening_checks` и `scan_check_results`. Вторая не переписывается.
 

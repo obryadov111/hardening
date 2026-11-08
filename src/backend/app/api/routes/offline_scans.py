@@ -81,6 +81,7 @@ async def upload_offline_scan(
     criticality: str = Form("medium"),
     scan_label: str | None = Form(None, max_length=200),
     exported_at: datetime | None = Form(None, description="Когда снята выгрузка; по умолчанию неизвестно"),
+    scan_run_id: str | None = Form(None, description="Открытый прогон; пусто — автоокно расписания"),
     current_user: User = Depends(require_org_admin),
     db: Session = Depends(get_db),
     registry: PackRegistry = Depends(get_pack_registry),
@@ -148,4 +149,7 @@ async def upload_offline_scan(
         ],
         scan_label=scan_label,
     )
-    return ingest_payload(db, registry, organization_id, payload, collection=collection, source="offline-upload")
+    return ingest_payload(
+        db, registry, organization_id, payload, collection=collection, source="offline-upload",
+        scan_run_id=scan_run_id or None,
+    )

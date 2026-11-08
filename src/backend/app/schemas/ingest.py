@@ -151,3 +151,5 @@ class IngestResponse(BaseModel):
     coverage: IngestCoverage | None = None
     packs: list[IngestPackSummary] = Field(default_factory=list, description="Итоги по каждому паку прогона")
     report_id: str
+    # Прогон организации, в который лёг снимок. Поле новое: агент его не разбирает (лишние ключи JSON игнорирует).
+    scan_run_id: str | None = None

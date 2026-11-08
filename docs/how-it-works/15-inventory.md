@@ -39,7 +39,7 @@ Windows — один сценарий CIM (`WIN_HW_PS` в `collector.py`): те 
 
 Чтение: `GET /api/assets/{id}/inventory` (`get_inventory_by_asset` в `api/routes/data.py`). Доступ — любой, кто видит актив. Страница карточки актива `src/pages/AssetDetails.jsx`.
 
-Миграция, которая создала таблицу: `a1d9c4f27e63_asset_inventory.py`. Это текущая голова Alembic. Она ревизит `c9f2a7e4d815`.
+Миграция, которая создала таблицу: `a1d9c4f27e63_asset_inventory.py`. Она ревизит `c9f2a7e4d815`. Голова цепочки с 8 ноября 2026 — прогоны, `f0c2a7e91b54`.
 
 ## Где хранится
 
