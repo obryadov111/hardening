@@ -621,15 +621,61 @@ class TransientError(Exception):
         self.code, self.retry_after = code, retry_after
 
 
-# Повторы при перегрузке сервера: паузы (с), к каждой — случайная добавка до 50 % — всего до ~10 мин (худший
-# случай нагрузочного теста — 1000 хостов разом за одним NAT — очередь сервера рассасывается за ~9 мин); потом — очередь.
+# Повторы одного запуска: экспонента 15/30/60/120/240/480/900 с (потолок 900) и full jitter —
+# равномерно от 0 до этой границы, а не множитель на паузу. Retry-After — нижняя граница, его не умножаем.
+# code=None (нет связи) повторяется так же, как 429/502/503/504. Бюджет запуска — 30 минут, потом очередь
+# или следующий bootstrap. Ноль подряд ограничен: full jitter имеет право быть нулём, но не крутиться вхолостую.
 RETRY_CODES = (429, 502, 503, 504)
-RETRY_DELAYS = (15, 45, 120, 240)
+RETRY_BASE_SECONDS = 15
+RETRY_CAP_SECONDS = 900
+RETRY_BUDGET_SECONDS = 30 * 60
+RETRY_AFTER_CAP_SECONDS = 300
+ZERO_PAUSE_LIMIT = 8
+INITIAL_JITTER_MAX_SECONDS = 900
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def retry_cap_seconds(attempt: int) -> float:
+    """Верх границы full jitter для попытки 0, 1, …: 15, 30, 60, …, 900."""
+    cap = RETRY_BASE_SECONDS * (2 ** max(0, attempt))
+    if cap > RETRY_CAP_SECONDS:
+        cap = RETRY_CAP_SECONDS
+    return float(cap)
+
+
+def compute_retry_pause(attempt: int, retry_after: "float | None") -> float:
+    """Full jitter U(0, cap). Retry-After — минимум, отдельный от разброса: пауза не равна Retry-After × U(1, 1.5)."""
+    jitter = random.uniform(0.0, retry_cap_seconds(attempt))
+    if retry_after is None:
+        return jitter
+    try:
+        floor = float(retry_after)
+    except (TypeError, ValueError):
+        return jitter
+    if floor < 0:
+        floor = 0.0
+    return max(floor, jitter)
+
+
+def initial_jitter_seconds(max_seconds: float) -> float:
+    """U(0, max) перед первой регистрацией и первым сбором. 0 и меньше — паузы нет."""
+    if max_seconds is None or float(max_seconds) <= 0:
+        return 0.0
+    return random.uniform(0.0, float(max_seconds))
 
 
 def _retry_after(headers) -> "float | None":
     try:
-        return min(float(headers.get("Retry-After")), 300.0)
+        return min(float(headers.get("Retry-After")), float(RETRY_AFTER_CAP_SECONDS))
     except (TypeError, ValueError, AttributeError):
         return None
 
@@ -684,18 +730,127 @@ def normalize_pin(pin: str) -> str:
     return pin[len("sha256//"):] if pin.startswith("sha256//") else pin
 
 
+_DN_SHORT = {
+    "commonName": "CN",
+    "organizationName": "O",
+    "organizationalUnitName": "OU",
+    "countryName": "C",
+    "stateOrProvinceName": "ST",
+    "localityName": "L",
+    "emailAddress": "email",
+}
+
+
+def _dn(seq) -> str:
+    parts = []
+    for rdn in seq or ():
+        for item in rdn:
+            key, value = item[0], item[1]
+            parts.append("{0}={1}".format(_DN_SHORT.get(key, key), value))
+    return ",".join(parts)
+
+
+def cert_metadata(peer: dict) -> dict:
+    """Публичные поля сертификата, который реально видит агент: по ним виден TLS-inspection."""
+    sans = []
+    for entry in (peer or {}).get("subjectAltName") or ():
+        if len(entry) >= 2:
+            sans.append("{0}:{1}".format(entry[0], entry[1]))
+    peer = peer or {}
+    return {
+        "subject": _dn(peer.get("subject")),
+        "issuer": _dn(peer.get("issuer")),
+        "serial": str(peer.get("serialNumber") or ""),
+        "san": ",".join(sans),
+        "notAfter": str(peer.get("notAfter") or ""),
+    }
+
+
+# Подстрока издателя или субъекта (уже в нижнем регистре, «ё» как «е») → как назвать средство в подсказке.
+# Совпадение не меняет список пинов: увиденный ключ в доверенные не добавляется.
+_TLS_INSPECTION_VENDORS = (
+    ("kaspersky", "антивирусом Kaspersky Endpoint Security"),
+    ("касперского", "антивирусом Kaspersky Endpoint Security"),
+    ("dr.web", "антивирусом Dr.Web"),
+    ("drweb", "антивирусом Dr.Web"),
+    ("doctor web", "антивирусом Dr.Web"),
+    ("eset", "антивирусом ESET"),
+    ("континент", "шлюзом Континент"),
+    ("continent", "шлюзом Континент"),
+    ("код безопасности", "шлюзом Континент"),
+    ("security code", "шлюзом Континент"),
+    ("usergate", "шлюзом UserGate"),
+    ("юзергейт", "шлюзом UserGate"),
+)
+
+
+def _fold_cert_text(value: str) -> str:
+    return (value or "").lower().replace("ё", "е")
+
+
+def tls_inspection_hint(cert: dict) -> str:
+    """Если издатель — известная TLS-инспекция, подсказка оператору. Пустая строка — издатель не узнан.
+
+    Доверие при этом не ослабляется: функция только читает subject/issuer.
+    """
+    blob = _fold_cert_text("{0} {1}".format((cert or {}).get("issuer", ""), (cert or {}).get("subject", "")))
+    for needle, who in _TLS_INSPECTION_VENDORS:
+        if needle in blob:
+            return (
+                "сертификат подменён {0}, добавьте домен сервера "
+                "в исключения проверки защищённых соединений"
+            ).format(who)
+    return ""
+
+
+def format_pin_mismatch(expected, received: str, cert: dict) -> str:
+    listed = ",".join("sha256//{0}".format(pin) for pin in expected)
+    text = (
+        "TLS_PIN_MISMATCH expected={expected} received=sha256//{received} "
+        "subject={subject} issuer={issuer} serial={serial} san={san} notAfter={not_after}"
+    ).format(
+        expected=listed,
+        received=received,
+        subject=cert.get("subject", ""),
+        issuer=cert.get("issuer", ""),
+        serial=cert.get("serial", ""),
+        san=cert.get("san", ""),
+        not_after=cert.get("notAfter", ""),
+    )
+    hint = tls_inspection_hint(cert)
+    if hint:
+        text += " hint={0}".format(hint)
+    return text
+
+
+class TlsPinMismatch(Exception):
+    """Закреплённый SPKI не совпал с ключом сертификата на проводе.
+
+    Это не «нет связи»: повторять в том же запуске нельзя и подставлять увиденный ключ вместо
+    закреплённого тоже нельзя. Полученный pin и поля сертификата — только для журнала.
+    """
+
+    def __init__(self, expected, received: str, cert: dict):
+        self.expected = tuple(expected)
+        self.received = received
+        self.cert = dict(cert)
+        super().__init__(format_pin_mismatch(self.expected, self.received, self.cert))
+
+
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
     pins: "tuple[str, ...]" = ()
     seen: "list[str]" = []
 
     def connect(self):
         super().connect()
-        pin = spki_pin(self.sock.getpeercert(binary_form=True))
+        der = self.sock.getpeercert(binary_form=True)
+        peer = self.sock.getpeercert() or {}
+        pin = spki_pin(der)
         self.seen.append(pin)
         if self.pins and pin not in self.pins:
             self.close()
-            # OSError → urllib.error.URLError: тот же путь, что у любой ошибки соединения
-            raise ssl.SSLError(f"открытый ключ сервера не совпал с закреплённым (получен sha256//{pin})")
+            # Не OSError: urllib не завернёт это в «нет связи», и пин в self.pins не дописывается.
+            raise TlsPinMismatch(self.pins, pin, cert_metadata(peer))
 
 
 class _HTTPSHandler(urllib.request.HTTPSHandler):
@@ -718,31 +873,51 @@ class ServerConnection:
     """Соединение агента с сервером: URL, ключ агента, TLS-контекст, закреплённые ключи, прокси."""
 
     def __init__(self, api_url: str, api_key: "str | None", ca_file: "str | None" = None, pins=(), proxy: "str | None" = None,
-                 allow_http: bool = False, timeout: int = 30):
+                 allow_http: bool = False, timeout: int = 30, retry_budget: "float | None" = None):
         check_api_url(api_url, allow_http)
         self.api_url, self.api_key, self.timeout = api_url.rstrip("/"), api_key, timeout
+        self.retry_budget = RETRY_BUDGET_SECONDS if retry_budget is None else max(0.0, float(retry_budget))
         context = ssl.create_default_context(cafile=ca_file)
         if hasattr(ssl, "TLSVersion"):
             context.minimum_version = ssl.TLSVersion.TLSv1_2
         self.seen_pins: "list[str]" = []
-        handlers = [_HTTPSHandler(context, tuple(normalize_pin(p) for p in pins), self.seen_pins)]
+        # Пустые элементы отбрасываются. Список после этого не пополняется увиденным ключом.
+        self.pins = tuple(normalize_pin(p) for p in pins if p and normalize_pin(p))
+        handlers = [_HTTPSHandler(context, self.pins, self.seen_pins)]
         # Без --proxy — прокси из окружения (HTTPS_PROXY), как у любой программы; с --proxy — только он.
         handlers.append(urllib.request.ProxyHandler({"https": proxy, "http": proxy} if proxy else None))
         self.opener = urllib.request.build_opener(*handlers)
 
     def request(self, method: str, path: str, payload: "dict | None" = None) -> dict:
-        """Запрос к серверу. Перегрузка (429, 502–504: лимит запросов, перезапуск сервера) — несколько
-        повторов с паузой и случайным разбросом: тысяча хостов, получивших отказ одновременно, не должна
-        повторить запрос одновременно. Не помогло — TransientError, прогон уходит в очередь."""
-        for attempt, delay in enumerate((*RETRY_DELAYS, None)):
+        """Запрос к серверу. 429/502/503/504 и отсутствие связи (code=None) повторяются в бюджете запуска:
+        full jitter, Retry-After — нижняя граница. Несовпадение пина — выход 76, без повтора и без смены пина.
+        Бюджет исчерпан — TransientError, прогон уходит в очередь."""
+        started = time.monotonic()
+        attempt = 0
+        zeros = 0
+        while True:
             try:
                 return self._request_once(method, path, payload)
+            except TlsPinMismatch as exc:
+                print(f"Ошибка безопасности: {exc}", file=sys.stderr)
+                raise SystemExit(76)
             except TransientError as exc:
-                if delay is None or exc.code not in RETRY_CODES:
+                if exc.code is not None and exc.code not in RETRY_CODES:
                     raise
-                pause = max(exc.retry_after or 0, delay) * random.uniform(1.0, 1.5)
-                print(f"сервер занят (HTTP {exc.code}) — повтор через {pause:.0f} с ({attempt + 1}/{len(RETRY_DELAYS)})",
-                      file=sys.stderr)
+                elapsed = time.monotonic() - started
+                remaining = self.retry_budget - elapsed
+                pause = compute_retry_pause(attempt, exc.retry_after)
+                if remaining <= 0 or pause > remaining:
+                    raise
+                if pause <= 0:
+                    zeros += 1
+                    if zeros > ZERO_PAUSE_LIMIT:
+                        raise
+                else:
+                    zeros = 0
+                attempt += 1
+                label = "None" if exc.code is None else str(exc.code)
+                print(f"stage=retry code={label} pause_s={pause:.0f} attempt={attempt}", file=sys.stderr)
                 time.sleep(pause)
 
     def _request_once(self, method: str, path: str, payload: "dict | None" = None) -> dict:
@@ -768,8 +943,12 @@ class ServerConnection:
             if exc.code in (408, 429) or exc.code >= 500:
                 raise TransientError(f"HTTP {exc.code} — {detail}", exc.code, _retry_after(exc.headers)) from None
             raise RejectedError(exc.code, detail) from None
+        except TlsPinMismatch:
+            raise
         except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
             reason = getattr(exc, "reason", exc)
+            if isinstance(reason, TlsPinMismatch) or isinstance(exc, TlsPinMismatch):
+                raise reason if isinstance(reason, TlsPinMismatch) else exc
             if isinstance(reason, ssl.SSLError) and "закреплённым" in str(reason):
                 # Подмена сервера — событие безопасности, а не «сервер недоступен»: в очередь не откладывается.
                 raise SystemExit(f"Ошибка безопасности: {reason.args[0] if reason.args else reason}") from None
@@ -915,6 +1094,27 @@ def forget_host_registration(state_dir: str) -> None:
         os.remove(os.path.join(state_dir, HOST_FILE))
     except FileNotFoundError:
         pass
+
+
+def apply_initial_jitter(state_dir: str, kind: str, max_seconds: float, log) -> float:
+    """Один раз на каталог состояния: U(0, max) перед первой регистрацией (kind=enroll) или первым сбором
+    (kind=collect). Маркер пишется до паузы, повторный запуск ту же паузу не добавляет."""
+    if max_seconds is None or float(max_seconds) <= 0:
+        return 0.0
+    marker = os.path.join(state_dir, "jitter-{0}.done".format(kind))
+    if os.path.exists(marker):
+        return 0.0
+    make_private_dir(state_dir)
+    try:
+        fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return 0.0
+    os.close(fd)
+    delay = initial_jitter_seconds(max_seconds)
+    log(f"stage=jitter code=INITIAL_JITTER kind={kind} delay_s={delay:.0f}")
+    if delay > 0:
+        time.sleep(delay)
+    return delay
 
 
 class EnrollmentConflict(Exception):
@@ -1159,6 +1359,12 @@ def parse_args(argv: "list[str]") -> argparse.Namespace:
                      help="Каталог очереди: неотправленные прогоны досылаются при следующем запуске")
     net.add_argument("--no-spool", action="store_true", help="Не откладывать прогон в очередь, если сервер недоступен")
     net.add_argument("--show-server-pin", action="store_true", help="Показать отпечаток ключа сервера для --pin-sha256 и выйти")
+    net.add_argument("--initial-jitter-max", type=float, default=_env_float("HARDENING_INITIAL_JITTER_MAX", 0),
+                     help="Случайная пауза U(0, N) секунд перед первой регистрацией и первым сбором "
+                          "(или HARDENING_INITIAL_JITTER_MAX). 0 — без паузы. GPO передаёт 900")
+    net.add_argument("--retry-budget-seconds", type=float, default=_env_float("HARDENING_RETRY_BUDGET_SECONDS", RETRY_BUDGET_SECONDS),
+                     help="Сколько секунд один запуск повторяет сеть и 429/502/503/504 "
+                          "(или HARDENING_RETRY_BUDGET_SECONDS). По умолчанию 1800")
     packs = parser.add_argument_group("режим паков", "Подписанные манифесты с сервера; нужен probes.py рядом со скриптом")
     packs.add_argument("--use-packs", action="store_true", help="Собирать по манифестам паков вместо встроенных проверок")
     packs.add_argument("--pack-public-key", default=os.environ.get("HARDENING_PACK_PUBLIC_KEY"),
@@ -1201,7 +1407,8 @@ def main(argv: "list[str] | None" = None) -> int:
     offline = args.dry_run or args.manifests_file and args.out
     conn = None
     if args.show_server_pin or not offline or (args.use_packs and not args.manifests_file):
-        conn = ServerConnection(args.api_url, args.api_key, args.ca_file, args.pin_sha256, args.proxy, args.allow_http)
+        conn = ServerConnection(args.api_url, args.api_key, args.ca_file, args.pin_sha256, args.proxy, args.allow_http,
+                                retry_budget=args.retry_budget_seconds)
     if args.show_server_pin:
         try:
             conn.request("GET", "/health")
@@ -1228,6 +1435,7 @@ def main(argv: "list[str] | None" = None) -> int:
             print(f"Хост уже зарегистрирован: {os.path.join(args.state_dir, HOST_FILE)}")
             return 0
         hostname = args.hostname or args.ssh_host or socket.gethostname()  # то же имя, что в отчёте
+        apply_initial_jitter(args.state_dir, "enroll", args.initial_jitter_max, log)
         try:
             enroll_host(conn, args.api_key, args.state_dir, hostname, get_os_pretty_name(), log)
         except (EnrollmentConflict, RejectedError, TransientError, OSError) as exc:
@@ -1260,6 +1468,8 @@ def main(argv: "list[str] | None" = None) -> int:
 
     try:
         try:
+            if not args.dry_run and not args.out:
+                apply_initial_jitter(args.state_dir, "collect", args.initial_jitter_max, log)
             payload = collect()
         except RejectedError:  # 401 на манифесты: ключ хоста отозван или регистрация удалена
             if not (host_key and args.api_key):
@@ -1304,6 +1514,7 @@ def main(argv: "list[str] | None" = None) -> int:
     asset = payload.get("asset") or {}
     try:
         if not host_key:
+            apply_initial_jitter(args.state_dir, "enroll", args.initial_jitter_max, log)
             enroll_host(conn, args.api_key, args.state_dir, asset.get("hostname") or socket.gethostname(), asset.get("os"), log)
         try:
             result = deliver()

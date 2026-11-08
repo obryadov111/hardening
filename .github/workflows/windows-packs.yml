@@ -152,13 +152,46 @@ jobs:
             if (-not ($sids -contains "S-1-5-18") -or -not ($sids -contains "S-1-5-32-544")) { Write-Output "нет SYSTEM или Администраторов"; exit 1 }
           }
 
-      # Сценарий запуска компьютера для GPO (Windows PowerShell 5.1, как в GPO): .exe из общей папки со сверкой
-      # SHA-256, регистрация, задача от SYSTEM и первый прогон сразу после регистрации; повторный запуск ничего не
-      # меняет; -Schedule Weekly переводит задачу на еженедельную; подменённый файл не ставится; задача от SYSTEM
-      # читает ключ хоста и отправляет отчёт.
+      # Сценарий запуска компьютера для GPO (Windows PowerShell 5.1, как в GPO): автозагрузка только
+      # ставит задачу bootstrap и сразу выходит (сервер недоступен — не код 1 и не ожидание следующей загрузки).
+      # Задача от SYSTEM с одним экземпляром доводит установку: SHA-256, регистрация, задача сбора и первый прогон.
+      # Повторный запуск ничего не меняет; -Schedule Weekly переводит задачу на еженедельную; подменённый файл
+      # не ставится; задача от SYSTEM читает ключ хоста и отправляет отчёт. Ключ площадки не попадает в журнал
+      # и в аргументы задачи bootstrap.
       - name: GPO startup script
         shell: pwsh
         run: |
+          function Wait-GpoCount([string]$Path, [string]$Pattern, [int]$Count, [int]$Seconds = 120) {
+            for ($i = 0; $i -lt $Seconds; $i++) {
+              if ((Test-Path $Path) -and (@(Select-String -Path $Path -Pattern $Pattern -Encoding UTF8).Count -ge $Count)) { return $true }
+              Start-Sleep -Seconds 1
+            }
+            return $false
+          }
+          $fast = @("-InitialJitterMaxSeconds", "0", "-RetryBudgetSeconds", "20", "-BootstrapRandomDelayMinutes", "0")
+          # Сервер ещё не слушает: автозагрузка не блокирует вход и уже создаёт постоянную задачу.
+          $failState = "C:\ProgramData\HardeningAgentGpoFail"
+          $failClock = [Diagnostics.Stopwatch]::StartNew()
+          $fail = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "agent\deploy\windows\gpo-startup.ps1",
+                    "-Server", "http://127.0.0.1:9", "-SiteKey", "ci-site-key", "-InstallDir", "C:\HardeningGpoFail",
+                    "-StateDir", $failState, "-AllowHttp") + $fast
+          powershell.exe @fail
+          $failClock.Stop()
+          if ($LASTEXITCODE -ne 0) { Get-Content "$failState\gpo-startup.log" -ErrorAction SilentlyContinue; Write-Output "автозагрузка вернула $($LASTEXITCODE)"; exit 1 }
+          if ($failClock.Elapsed.TotalSeconds -gt 20) { Write-Output "автозагрузка блокировала запуск $($failClock.Elapsed.TotalSeconds) с"; exit 1 }
+          $boot = Get-ScheduledTask -TaskName "Hardening agent bootstrap"
+          Write-Output "bootstrap: $($boot.Principal.UserId) instances=$($boot.Settings.MultipleInstances) limit=$($boot.Settings.ExecutionTimeLimit)"
+          if ($boot.Principal.UserId -notmatch "SYSTEM|S-1-5-18") { Write-Output "задача не от SYSTEM"; exit 1 }
+          if ($boot.Actions[0].Arguments -match "ci-site-key" -or $boot.Actions[0].Arguments -match "-SiteKey") { Write-Output "секрет в аргументах задачи"; exit 1 }
+          if (-not (Wait-GpoCount "$failState\gpo-startup.log" "stage=done" 1 45)) { Get-Content "$failState\gpo-startup.log"; Write-Output "worker не завершился"; exit 1 }
+          if (-not (Select-String -Path "$failState\gpo-startup.log" -Pattern "code=VERSION_UNAVAILABLE" -Quiet)) { Get-Content "$failState\gpo-startup.log"; Write-Output "нет кода VERSION_UNAVAILABLE"; exit 1 }
+          if (Select-String -Path "$failState\gpo-startup.log" -Pattern "ci-site-key" -Quiet) { Write-Output "секрет в журнале"; exit 1 }
+          if (-not (Select-String -Path "$failState\gpo-startup.log" -Pattern "stage=startup code=TASK_SCHEDULED" -Quiet)) { Write-Output "нет стадии постановки задачи"; exit 1 }
+          $instances = [string]$boot.Settings.MultipleInstances
+          if ($instances -ne "IgnoreNew" -and $instances -ne "2") { Write-Output "нет single-instance: $instances"; exit 1 }
+          Stop-ScheduledTask -TaskName "Hardening agent bootstrap" -ErrorAction SilentlyContinue
+          Unregister-ScheduledTask -TaskName "Hardening agent bootstrap" -Confirm:$false
+          Start-Sleep -Seconds 2
           $state = "C:\ProgramData\HardeningAgentGPO"; $install = "C:\HardeningGPO"; $share = "C:\share"
           New-Item -ItemType Directory -Force -Path $share | Out-Null
           Copy-Item dist\hardening-agent.exe "$share\hardening-agent.exe"
@@ -167,12 +200,15 @@ jobs:
           Start-Sleep -Seconds 3
           $edPublic = Get-Content ci-ed-public.txt -Raw
           $gpo = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "agent\deploy\windows\gpo-startup.ps1", "-Server", "http://127.0.0.1:8799",
-                   "-SiteKey", "ci-site-key", "-PackPublicKey", $edPublic, "-Share", $share, "-InstallDir", $install, "-StateDir", $state, "-AllowHttp")
+                   "-SiteKey", "ci-site-key", "-PackPublicKey", $edPublic, "-Share", $share, "-InstallDir", $install, "-StateDir", $state, "-AllowHttp") + $fast
           powershell.exe @gpo
           if ($LASTEXITCODE -ne 0) { Get-Content "$state\gpo-startup.log"; exit 1 }
+          if (-not (Wait-GpoCount "$state\gpo-startup.log" "stage=done code=OK" 1)) { Get-Content "$state\gpo-startup.log"; exit 1 }
           powershell.exe @gpo   # повторный запуск при следующей загрузке
           if ($LASTEXITCODE -ne 0) { Get-Content "$state\gpo-startup.log"; exit 1 }
+          if (-not (Wait-GpoCount "$state\gpo-startup.log" "stage=done code=OK" 2)) { Get-Content "$state\gpo-startup.log"; exit 1 }
           Get-Content "$state\gpo-startup.log"
+          if (Select-String -Path "$state\gpo-startup.log" -Pattern "ci-site-key" -Quiet) { Write-Output "секрет в журнале"; exit 1 }
           $enrolls = @(Get-Content ci-requests.jsonl | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.path -eq "/api/agent/enroll" })
           if ($enrolls.Count -ne 1) { Write-Output "регистраций: $($enrolls.Count), ожидалась одна"; exit 1 }
           if (@(Select-String -Path "$state\gpo-startup.log" -Pattern "установлен агент").Count -ne 1) { Write-Output "агент ставился повторно"; exit 1 }
@@ -203,16 +239,19 @@ jobs:
           # -Schedule Weekly: задача пересоздаётся еженедельной, без новой регистрации и внепланового прогона
           powershell.exe @gpo -Schedule Weekly
           if ($LASTEXITCODE -ne 0) { Get-Content "$state\gpo-startup.log"; exit 1 }
+          if (-not (Wait-GpoCount "$state\gpo-startup.log" "расписание Weekly" 1)) { Get-Content "$state\gpo-startup.log"; exit 1 }
           $trigger = (Get-ScheduledTask -TaskName "Hardening agent").Triggers[0]
           Write-Output "еженедельно: $($trigger.CimClass.CimClassName), дни $($trigger.DaysOfWeek), разброс $($trigger.RandomDelay)"
           if ($trigger.CimClass.CimClassName -ne "MSFT_TaskWeeklyTrigger" -or $trigger.RandomDelay -ne "PT1H") { exit 1 }
           $requests = @(Get-Content ci-requests.jsonl | ForEach-Object { $_ | ConvertFrom-Json })
           if (@($requests | Where-Object { $_.path -eq "/api/agent/enroll" }).Count -ne 1 -or (Get-Ingests).Count -ne 2) { Write-Output "лишняя регистрация или прогон"; exit 1 }
-          # подменённый файл в общей папке не ставится
+          # подменённый файл в общей папке не ставится; автозагрузка при этом уже вышла 0, ошибка — в журнале worker
           Remove-Item "$install\hardening-agent.exe"
           Set-Content -Path "$share\hardening-agent.exe" -Value "подделка"
           powershell.exe @gpo
-          if ($LASTEXITCODE -eq 0 -or (Test-Path "$install\hardening-agent.exe")) { Write-Output "подменённый агент установлен"; exit 1 }
+          if ($LASTEXITCODE -ne 0) { Get-Content "$state\gpo-startup.log"; Write-Output "автозагрузка не должна ждать сверку SHA"; exit 1 }
+          if (-not (Wait-GpoCount "$state\gpo-startup.log" "code=SHA256_MISMATCH" 1)) { Get-Content "$state\gpo-startup.log"; exit 1 }
+          if (Test-Path "$install\hardening-agent.exe") { Write-Output "подменённый агент установлен"; exit 1 }
           Select-String -Path "$state\gpo-startup.log" -Pattern "SHA-256" | Select-Object -Last 1
           Stop-Process -Id $server.Id
           exit 0

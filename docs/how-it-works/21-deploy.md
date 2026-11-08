@@ -30,7 +30,7 @@
 
 `publish_agent.sh` снимает пин SPKI с этого же сертификата.
 
-Заголовки в `deploy/nginx/app.conf`: HSTS, CSP, `X-Frame-Options`, `nosniff`, `Referrer-Policy`. Журнал доступа уходит в journald, по нему работает fail2ban (`deploy/enable_fail2ban.sh`, фильтр `deploy/fail2ban/hardening-login.*`). Отдельный кусок `deploy/nginx/admin-allow.conf` ограничивает, откуда открывается административный контур, если он подключён.
+Заголовки в `deploy/nginx/app.conf`: HSTS, CSP, `X-Frame-Options`, `nosniff`, `Referrer-Policy`. Журнал доступа уходит в journald, по нему работает fail2ban (`deploy/enable_fail2ban.sh`, фильтр `deploy/fail2ban/hardening-login.*`). Формат `hardening` в `deploy/nginx/log-format.conf` добавляет `rt=$request_time`, `urt=$upstream_response_time`, `ust=$upstream_status`, `cr=$connection_requests`. Начала строки это не меняет: фильтр входа по-прежнему видит `POST /api/auth/login`. В формате нет `X-Agent-Api-Key` и нет тела запроса. Отдельный кусок `deploy/nginx/admin-allow.conf` ограничивает, откуда открывается административный контур, если он подключён.
 
 Лимиты запросов — `deploy/nginx/limits.conf` и привязка в `app.conf`. Разбор для тысячи хостов — следующая глава. Кратко: ключ агента 30 запросов в минуту, ключ на регистрации 600 в минуту, IP агентов 3000 в минуту, одновременных приёмов 6, телo ingest до 10 МБ. Занятый лимит соединений отвечает 503 и `Retry-After: 15`.
 
@@ -49,6 +49,7 @@
 | HTTP | `deploy/nginx.conf` |
 | HTTPS | `deploy/enable_https.sh`, `deploy/nginx-tls.conf.template` |
 | Лимиты | `deploy/nginx/limits.conf`, `deploy/nginx/app.conf` |
+| Журнал доступа | `deploy/nginx/log-format.conf` |
 | БДУ | `deploy/update_bdu.sh` |
 | Агент для скачивания | `deploy/publish_agent.sh` |
 | Fail2ban | `deploy/enable_fail2ban.sh` |

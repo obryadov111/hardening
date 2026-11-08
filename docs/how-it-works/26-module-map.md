@@ -46,6 +46,7 @@
 | `deploy/nginx/admin-allow.conf` | 21, 22 |
 | `deploy/nginx/app.conf` | 21, 22 |
 | `deploy/nginx/limits.conf` | 21, 22 |
+| `deploy/nginx/log-format.conf` | 21 |
 | `deploy/publish_agent.sh` | 04 |
 | `deploy/restart_backend.sh` | 21 |
 | `deploy/restart_frontend.sh` | 21 |
