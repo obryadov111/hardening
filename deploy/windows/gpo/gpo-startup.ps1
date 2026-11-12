@@ -376,10 +376,8 @@ function Register-CollectTask([string]$ExePath, [string]$Arguments) {
 
 function Register-SpoolTask([string]$ExePath, [string]$Arguments) {
     $action = New-ScheduledTaskAction -Execute $ExePath -Argument $Arguments
-    $trigger = New-ScheduledTaskTrigger -Daily -At $CollectTime `
-        -RepetitionInterval (New-TimeSpan -Minutes $SpoolEveryMinutes) `
-        -RepetitionDuration (New-TimeSpan -Hours $SpoolWindowHours) `
-        -RandomDelay (New-TimeSpan -Minutes $SpoolRandomDelayMinutes)
+    # В Windows PowerShell 5.1 повтор есть только у -Once. Дневному триггеру его дописывает XML.
+    $trigger = New-ScheduledTaskTrigger -Daily -At $CollectTime -RandomDelay (New-TimeSpan -Minutes $SpoolRandomDelayMinutes)
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes $SpoolExecutionMinutes)
     Register-ScheduledTask -TaskName $SpoolTaskName -Action $action -Trigger $trigger -Settings $settings `

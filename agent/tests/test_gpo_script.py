@@ -97,16 +97,29 @@ def test_daytime_collect_and_spool_flush_are_defined_once():
     assert "-CollectTime" in builder
     assert "-CollectRandomDelayHours" in builder
     assert "-SiteKey" not in builder
+    # Windows PowerShell 5.1 не принимает -RepetitionInterval у -Daily: повтор дописывается в XML.
+    spool_task = text.split("function Register-SpoolTask", 1)[1].split("function Update-CollectTask", 1)[0]
+    assert "-RepetitionInterval" not in spool_task
+    assert "-RepetitionDuration" not in spool_task
+    assert "Repair-SpoolTaskXml" in spool_task
 
 
 def test_manual_installer_matches_the_daytime_schedule():
-    for rel in ("src/pages/AgentKeys.jsx", "docs/agent-install.md", "agent/README.md"):
-        with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
+    # README лежит в каталоге агента и есть и в полном дереве, и в прогоне Rocky,
+    # куда копируют только agent/ и сценарий GPO. src/ и docs/ там нет.
+    paths = [os.path.join(os.path.dirname(__file__), "..", "README.md")]
+    for rel in ("src/pages/AgentKeys.jsx", "docs/agent-install.md"):
+        candidate = os.path.join(ROOT, rel)
+        if os.path.isfile(candidate):
+            paths.append(candidate)
+    assert paths
+    for path in paths:
+        with open(path, encoding="utf-8") as fh:
             body = fh.read()
-        assert "03:00" not in body, rel
-        assert "07:30" in body, rel
-        assert "flush-spool" in body, rel
-        assert "Hardening agent spool" in body, rel
+        assert "03:00" not in body, path
+        assert "07:30" in body, path
+        assert "flush-spool" in body, path
+        assert "Hardening agent spool" in body, path
 
 
 def test_downloads_use_a_minute_timeout_and_skip_same_sha256():
