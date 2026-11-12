@@ -96,7 +96,7 @@ function windowsSetup(key, publicKey, downloads) {
     "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 1)",
     `$action = New-ScheduledTaskAction -Execute "${exe}" -Argument "--api-url ${url} --environment prod --use-packs"`,
     'Register-ScheduledTask -TaskName "Hardening agent" -Action $action -Trigger (New-ScheduledTaskTrigger -Daily -At 07:30 -RandomDelay (New-TimeSpan -Hours 2)) -Settings $settings -User SYSTEM -RunLevel Highest -Force | Out-Null',
-    `$flush = New-ScheduledTaskAction -Execute "${exe}" -Argument "flush-spool --api-url ${url} --environment prod --state-dir \`\"C:\\ProgramData\\HardeningAgent\`\""`,
+    `$flush = New-ScheduledTaskAction -Execute "${exe}" -Argument "flush-spool --api-url ${url} --environment prod --state-dir \`"C:\\ProgramData\\HardeningAgent\`""`,
     "$flushSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 15)",
     'Register-ScheduledTask -TaskName "Hardening agent spool" -Action $flush -Trigger (New-ScheduledTaskTrigger -Daily -At 07:30 -RandomDelay (New-TimeSpan -Minutes 30) -RepetitionInterval (New-TimeSpan -Minutes 30) -RepetitionDuration (New-TimeSpan -Hours 10)) -Settings $flushSettings -User SYSTEM -RunLevel Highest -Force | Out-Null',
     'Start-ScheduledTask -TaskName "Hardening agent"',
