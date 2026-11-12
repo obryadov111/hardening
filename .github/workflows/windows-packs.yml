@@ -204,10 +204,10 @@ jobs:
                    "-SiteKey", "ci-site-key", "-PackPublicKey", $edPublic, "-Share", $share, "-InstallDir", $install, "-StateDir", $state, "-AllowHttp") + $fast
           powershell.exe @gpo
           if ($LASTEXITCODE -ne 0) { Get-Content "$state\gpo-startup.log"; exit 1 }
-          if (-not (Wait-GpoCount "$state\gpo-startup.log" "stage=done code=OK" 1)) { Get-Content "$state\gpo-startup.log"; exit 1 }
+          if (-not (Wait-GpoCount "$state\gpo-startup.log" "stage=done code=OK" 1 240)) { Get-Content "$state\gpo-startup.log"; exit 1 }
           powershell.exe @gpo   # повторный запуск при следующей загрузке
           if ($LASTEXITCODE -ne 0) { Get-Content "$state\gpo-startup.log"; exit 1 }
-          if (-not (Wait-GpoCount "$state\gpo-startup.log" "stage=done code=OK" 2)) { Get-Content "$state\gpo-startup.log"; exit 1 }
+          if (-not (Wait-GpoCount "$state\gpo-startup.log" "stage=done code=OK" 2 240)) { Get-Content "$state\gpo-startup.log"; exit 1 }
           Get-Content "$state\gpo-startup.log"
           if (Select-String -Path "$state\gpo-startup.log" -Pattern "ci-site-key" -Quiet) { Write-Output "секрет в журнале"; exit 1 }
           $enrolls = @(Get-Content ci-requests.jsonl | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.path -eq "/api/agent/enroll" })
@@ -216,9 +216,32 @@ jobs:
           # ответ агента (UTF-8) в журнале читается, а не кракозябрами кодовой страницы консоли
           if (-not (Select-String -Path "$state\gpo-startup.log" -Pattern "зарегистрирован на сервере" -Encoding UTF8 -Quiet)) { Write-Output "ответ агента в журнале нечитаем"; exit 1 }
           $task = Get-ScheduledTask -TaskName "Hardening agent"
-          Write-Output "задача: $($task.Principal.UserId) $($task.Actions[0].Execute) $($task.Actions[0].Arguments); разброс $($task.Triggers[0].RandomDelay); $($task.Triggers[0].CimClass.CimClassName)"
-          if ($task.Actions[0].Execute -ne "$install\hardening-agent.exe" -or $task.Triggers[0].RandomDelay -ne "PT1H" -or
+          Write-Output "задача: $($task.Principal.UserId) $($task.Actions[0].Execute) $($task.Actions[0].Arguments); разброс $($task.Triggers[0].RandomDelay); старт $($task.Triggers[0].StartBoundary); $($task.Triggers[0].CimClass.CimClassName)"
+          if ($task.Actions[0].Execute -ne "$install\hardening-agent.exe" -or $task.Triggers[0].RandomDelay -ne "PT2H" -or
+              [string]$task.Triggers[0].StartBoundary -notmatch "T07:30" -or
               $task.Triggers[0].CimClass.CimClassName -ne "MSFT_TaskDailyTrigger") { exit 1 }
+          if (-not $task.Settings.StartWhenAvailable) { Write-Output "сбор без StartWhenAvailable"; exit 1 }
+          $collectInstances = [string]$task.Settings.MultipleInstances
+          if ($collectInstances -ne "IgnoreNew" -and $collectInstances -ne "2") { Write-Output "сбор не IgnoreNew: $collectInstances"; exit 1 }
+          if ($task.Principal.UserId -notmatch "SYSTEM|S-1-5-18") { Write-Output "сбор не от SYSTEM"; exit 1 }
+          if (@(Select-String -Path "$state\gpo-startup.log" -Pattern "code=TASK_UPDATED" -Encoding UTF8).Count -ne 1) { Write-Output "TASK_UPDATED не один раз"; Get-Content "$state\gpo-startup.log"; exit 1 }
+          if (@(Select-String -Path "$state\gpo-startup.log" -Pattern "code=TASK_UNCHANGED" -Encoding UTF8).Count -lt 1) { Write-Output "повтор не увидел ту же задачу"; Get-Content "$state\gpo-startup.log"; exit 1 }
+          if (@(Select-String -Path "$state\gpo-startup.log" -Pattern "code=SPOOL_UPDATED" -Encoding UTF8).Count -ne 1) { Write-Output "SPOOL_UPDATED не один раз"; Get-Content "$state\gpo-startup.log"; exit 1 }
+          $spoolTask = Get-ScheduledTask -TaskName "Hardening agent spool"
+          $spoolXml = Export-ScheduledTask -TaskName "Hardening agent spool"
+          if ($spoolXml -is [System.Array]) { $spoolXml = $spoolXml -join "`n" }
+          Write-Output "досылка: $($spoolTask.Principal.UserId) $($spoolTask.Actions[0].Arguments); delay=$($spoolTask.Triggers[0].RandomDelay); interval=$($spoolTask.Triggers[0].Repetition.Interval); duration=$($spoolTask.Triggers[0].Repetition.Duration)"
+          if ($spoolTask.Actions[0].Execute -ne "$install\hardening-agent.exe") { exit 1 }
+          if ($spoolTask.Actions[0].Arguments -notmatch "flush-spool" -or $spoolTask.Actions[0].Arguments -match "--use-packs") { Write-Output "досылка запускает полный сбор"; exit 1 }
+          if ($spoolTask.Principal.UserId -notmatch "SYSTEM|S-1-5-18") { Write-Output "досылка не от SYSTEM"; exit 1 }
+          $spoolInstances = [string]$spoolTask.Settings.MultipleInstances
+          if ($spoolInstances -ne "IgnoreNew" -and $spoolInstances -ne "2") { Write-Output "досылка не IgnoreNew: $spoolInstances"; exit 1 }
+          if (-not $spoolTask.Settings.StartWhenAvailable) { Write-Output "досылка без StartWhenAvailable"; exit 1 }
+          if ([string]$spoolTask.Triggers[0].StartBoundary -notmatch "T07:30") { Write-Output "досылка не в 07:30"; exit 1 }
+          if ($spoolXml -notmatch "<Interval>PT30M</Interval>" -or $spoolXml -notmatch "<Duration>PT10H</Duration>" -or $spoolXml -notmatch "<StopAtDurationEnd>true</StopAtDurationEnd>") {
+            Write-Output $spoolXml; Write-Output "повтор досылки не PT30M/PT10H"; exit 1
+          }
+          if ($spoolXml -notmatch "<RandomDelay>PT30M</RandomDelay>") { Write-Output "нет разброса досылки"; exit 1 }
           function Get-Ingests { @(Get-Content ci-requests.jsonl | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.path -eq "/api/ingest" }) }
           function Wait-Task([int]$expected) {
             for ($i = 0; $i -lt 90 -and ((Get-Ingests).Count -lt $expected -or (Get-ScheduledTask -TaskName "Hardening agent").State -eq "Running"); $i++) { Start-Sleep -Seconds 2 }
@@ -237,15 +260,43 @@ jobs:
           $ingests = Get-Ingests
           Write-Output "задача завершилась с кодом $($info.LastTaskResult); отчётов: $($ingests.Count), ключи $($ingests.key -join ', ')"
           if ($info.LastTaskResult -ne 0 -or $ingests.Count -ne 2 -or @($ingests | Where-Object { $_.key -ne "ci-host-key" }).Count) { exit 1 }
+          # Досылка очереди: один готовый файл уходит, нового сбора нет. Пустая очередь — код 0 и без запроса.
+          $spoolDir = Join-Path $env:ProgramData "HardeningAgent\spool"
+          New-Item -ItemType Directory -Force -Path $spoolDir | Out-Null
+          Get-ChildItem $spoolDir -Filter *.json -ErrorAction SilentlyContinue | Remove-Item -Force
+          $spoolFile = Join-Path $spoolDir "20261112T040000-spool-flush-ci.json"
+          Set-Content -Path $spoolFile -Value '{"run_id":"spool-flush-ci","collected_at":"2026-11-12T04:00:00+00:00","marker":"queued-only"}' -Encoding ascii
+          $beforeFlush = (Get-Ingests).Count
+          Start-ScheduledTask -TaskName "Hardening agent spool"
+          for ($i = 0; $i -lt 60 -and ((Get-Ingests).Count -le $beforeFlush -or (Get-ScheduledTask -TaskName "Hardening agent spool").State -eq "Running"); $i++) { Start-Sleep -Seconds 1 }
+          $flushed = @(@(Get-Ingests) | Select-Object -Skip $beforeFlush)
+          Write-Output "досылка прислала $($flushed.Count)"
+          if ($flushed.Count -ne 1 -or $flushed[0].body.marker -ne "queued-only" -or $flushed[0].key -ne "ci-host-key") {
+            Write-Output ($flushed | ConvertTo-Json -Compress -Depth 6)
+            Get-ScheduledTaskInfo -TaskName "Hardening agent spool" | Format-List
+            exit 1
+          }
+          if (Test-Path $spoolFile) { Write-Output "файл очереди остался"; exit 1 }
+          $beforeEmpty = (Get-Ingests).Count
+          Start-ScheduledTask -TaskName "Hardening agent spool"
+          for ($i = 0; $i -lt 40 -and (Get-ScheduledTask -TaskName "Hardening agent spool").State -eq "Running"; $i++) { Start-Sleep -Seconds 1 }
+          $emptyInfo = Get-ScheduledTaskInfo -TaskName "Hardening agent spool"
+          if ($emptyInfo.LastTaskResult -ne 0 -or (Get-Ingests).Count -ne $beforeEmpty) {
+            Write-Output "пустая досылка: код $($emptyInfo.LastTaskResult), отчётов $((Get-Ingests).Count) было $beforeEmpty"
+            exit 1
+          }
           # -Schedule Weekly: задача пересоздаётся еженедельной, без новой регистрации и внепланового прогона
           powershell.exe @gpo -Schedule Weekly
           if ($LASTEXITCODE -ne 0) { Get-Content "$state\gpo-startup.log"; exit 1 }
           if (-not (Wait-GpoCount "$state\gpo-startup.log" "расписание Weekly" 1)) { Get-Content "$state\gpo-startup.log"; exit 1 }
           $trigger = (Get-ScheduledTask -TaskName "Hardening agent").Triggers[0]
           Write-Output "еженедельно: $($trigger.CimClass.CimClassName), дни $($trigger.DaysOfWeek), разброс $($trigger.RandomDelay)"
-          if ($trigger.CimClass.CimClassName -ne "MSFT_TaskWeeklyTrigger" -or $trigger.RandomDelay -ne "PT1H") { exit 1 }
+          if ($trigger.CimClass.CimClassName -ne "MSFT_TaskWeeklyTrigger" -or $trigger.RandomDelay -ne "PT2H" -or
+              [string]$trigger.StartBoundary -notmatch "T07:30") { exit 1 }
           $requests = @(Get-Content ci-requests.jsonl | ForEach-Object { $_ | ConvertFrom-Json })
-          if (@($requests | Where-Object { $_.path -eq "/api/agent/enroll" }).Count -ne 1 -or (Get-Ingests).Count -ne 2) { Write-Output "лишняя регистрация или прогон"; exit 1 }
+          if (@($requests | Where-Object { $_.path -eq "/api/agent/enroll" }).Count -ne 1 -or (Get-Ingests).Count -ne 3) { Write-Output "лишняя регистрация или прогон"; exit 1 }
+          $spoolAfterWeekly = Get-ScheduledTask -TaskName "Hardening agent spool"
+          if ($spoolAfterWeekly.Actions[0].Arguments -notmatch "flush-spool") { Write-Output "недельное расписание сняло досылку"; exit 1 }
           # подменённый файл в общей папке не ставится; автозагрузка при этом уже вышла 0, ошибка — в журнале worker
           Remove-Item "$install\hardening-agent.exe"
           Set-Content -Path "$share\hardening-agent.exe" -Value "подделка"

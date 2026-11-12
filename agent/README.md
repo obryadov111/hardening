@@ -33,6 +33,7 @@ subprocess.run — без capture_output/text: иначе агент не зап
 | `--retry-budget-seconds` (`HARDENING_RETRY_BUDGET_SECONDS`) | бюджет повторов одного запуска, по умолчанию 1800; full jitter до 900 с, в том числе при обрыве связи |
 | `--proxy` (`HARDENING_PROXY`) | корпоративный прокси; без него — `HTTPS_PROXY` из окружения |
 | `--spool-dir` (`HARDENING_SPOOL_DIR`), `--no-spool` | очередь: сервер недоступен — прогон сохраняется (0600) и досылается при следующем запуске раньше нового, код выхода 75; до 50 прогонов и 30 дней |
+| `flush-spool` | только дослать очередь и выйти. Полный сбор не выполняется. Пустая очередь и недоступный сервер — код 0, без повторов на полчаса |
 | `--out <файл>` | изолированный сегмент: прогон в файл, подписанный ключом хоста (или площадки), — загрузка через интерфейс |
 | `--enroll` | только зарегистрировать хост ключом площадки и выйти (установка через GPO, Ansible) |
 | `--state-dir <каталог>` | каталог состояния: ключ хоста `host.json` (по умолчанию `/var/lib/hardening-agent`, на Windows `C:\ProgramData\HardeningAgent`) |
@@ -322,11 +323,25 @@ $env:HARDENING_PACK_PUBLIC_KEY = '<открытый ключ подписи па
 пробелом и аргументы передаются отдельно — вложенные кавычки PowerShell передаёт `schtasks` неправильно:
 
 ```powershell
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+  -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 1)
 $action = New-ScheduledTaskAction -Execute "C:\Program Files\Hardening\hardening-agent.exe" `
   -Argument "--api-url https://hardening.example.com --environment prod --use-packs"
-Register-ScheduledTask -TaskName "Hardening agent" -Action $action -Trigger (New-ScheduledTaskTrigger -Daily -At 03:00 -RandomDelay (New-TimeSpan -Hours 1)) `
-  -User SYSTEM -RunLevel Highest -Force | Out-Null
+Register-ScheduledTask -TaskName "Hardening agent" -Action $action `
+  -Trigger (New-ScheduledTaskTrigger -Daily -At 07:30 -RandomDelay (New-TimeSpan -Hours 2)) `
+  -Settings $settings -User SYSTEM -RunLevel Highest -Force | Out-Null
+$flush = New-ScheduledTaskAction -Execute "C:\Program Files\Hardening\hardening-agent.exe" `
+  -Argument "flush-spool --api-url https://hardening.example.com --environment prod --state-dir `"C:\ProgramData\HardeningAgent`""
+$flushSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+  -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
+Register-ScheduledTask -TaskName "Hardening agent spool" -Action $flush `
+  -Trigger (New-ScheduledTaskTrigger -Daily -At 07:30 -RandomDelay (New-TimeSpan -Minutes 30) -RepetitionInterval (New-TimeSpan -Minutes 30) -RepetitionDuration (New-TimeSpan -Hours 10)) `
+  -Settings $flushSettings -User SYSTEM -RunLevel Highest -Force | Out-Null
 ```
+
+Время 07:30 и разброс до 2 часов совпадают с `-CollectTime` и `-CollectRandomDelayHours` в
+`deploy/windows/gpo/gpo-startup.ps1`. Задача «Hardening agent spool» вызывает `flush-spool`: в очередь
+уходят только уже собранные отчёты, новый сбор не стартует. Пустая очередь и недоступный сервер — код 0.
 
 Что читает агент на Windows и почему не `net accounts` / `netsh` / `auditpol /get`: на русской Windows их
 вывод русский, разбор ломается. Источники, не зависящие от языка:

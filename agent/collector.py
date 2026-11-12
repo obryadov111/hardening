@@ -15,6 +15,9 @@ pip install и запускается на целевом хосте как ес
         --api-key <ключ, выданный create_agent_key.py> \\
         --environment prod
 
+Досылка очереди без нового сбора (задача Windows «Hardening agent spool»):
+    hardening-agent.exe flush-spool --api-url https://hardening.example.com --state-dir C:\\ProgramData\\HardeningAgent
+
 Ключ агента передаётся через --api-key либо переменную окружения
 HARDENING_AGENT_API_KEY (предпочтительно — не остаётся в истории shell).
 """
@@ -974,6 +977,14 @@ def send_ingest(conn: ServerConnection, payload: dict) -> dict:
 
 SPOOL_MAX_FILES = 50
 SPOOL_MAX_AGE_DAYS = 30
+# Досылка без нового сбора (задача «Hardening agent spool»): одна попытка и короткий таймаут.
+# Бюджет полного прогона (HARDENING_RETRY_BUDGET_SECONDS, обычно 1800) здесь не используется —
+# иначе задача, которая должна выйти сразу, ждала бы сервер полчаса.
+FLUSH_SPOOL_TIMEOUT = 10
+FLUSH_SPOOL_RETRY_BUDGET = 0
+SPOOL_LOCK_NAME = ".flush.lock"
+SPOOL_LOCK_STALE_SECONDS = 20 * 60
+_LOCK_BUSY = object()
 
 
 def default_state_dir() -> str:
@@ -1019,7 +1030,48 @@ def spool_trim(spool_dir: str) -> None:
         os.remove(path)
 
 
-def spool_flush(conn: ServerConnection, spool_dir: str, log) -> int:
+def _acquire_spool_lock(spool_dir: str):
+    """Один процесс досылает очередь. None — замок не поставился, досылку всё равно делаем.
+    _LOCK_BUSY — замок держит другой запуск, этот выходит без отправки."""
+    path = os.path.join(spool_dir, SPOOL_LOCK_NAME)
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    try:
+        return os.open(path, flags, 0o600), path
+    except FileExistsError:
+        pass
+    except OSError:
+        return None
+    try:
+        age = time.time() - os.path.getmtime(path)
+    except OSError:
+        return _LOCK_BUSY
+    if age <= SPOOL_LOCK_STALE_SECONDS:
+        return _LOCK_BUSY
+    try:
+        os.remove(path)
+    except OSError:
+        return _LOCK_BUSY
+    try:
+        return os.open(path, flags, 0o600), path
+    except FileExistsError:
+        return _LOCK_BUSY
+    except OSError:
+        return None
+
+
+def _release_spool_lock(lock) -> None:
+    fd, path = lock
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _spool_flush_unlocked(conn: ServerConnection, spool_dir: str, log) -> int:
     """Досылает очередь по порядку. Сервер снова недоступен — TransientError, остаток ждёт следующего
     запуска. Отказ по существу (кроме ключа) — файл переименовывается в .rejected и больше не шлётся."""
     if os.path.isdir(spool_dir):
@@ -1032,16 +1084,63 @@ def spool_flush(conn: ServerConnection, spool_dir: str, log) -> int:
             send_ingest(conn, payload)
         except RejectedError as exc:
             if exc.code == 409:  # уже принят раньше — ответ тогда потерялся
-                os.remove(path)
+                try:
+                    os.remove(path)
+                except FileNotFoundError:
+                    pass
                 continue
             if exc.code in (401, 403):
                 raise  # ключ отозван или просрочен: очередь сохраняется до нового ключа
             os.replace(path, path[:-5] + ".rejected")
             log(f"прогон {os.path.basename(path)} отклонён сервером ({exc}) — оставлен как .rejected")
             continue
-        os.remove(path)
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
         sent += 1
     return sent
+
+
+def spool_flush(conn: ServerConnection, spool_dir: str, log) -> int:
+    """Досылка под замком: полный сбор и задача «Hardening agent spool» не отправляют один файл дважды.
+    Замок занят — 0, файлы остаются до следующего запуска."""
+    if not os.path.isdir(spool_dir):
+        return 0
+    lock = _acquire_spool_lock(spool_dir)
+    if lock is _LOCK_BUSY:
+        return 0
+    try:
+        return _spool_flush_unlocked(conn, spool_dir, log)
+    finally:
+        if lock is not None:
+            _release_spool_lock(lock)
+
+
+def run_flush_spool(args, log) -> int:
+    """Только очередь, без проб и без нового отчёта. Пустая очередь и недоступный сервер — код 0 и тишина:
+    дневная задача повторит досылку сама и не должна шуметь каждые полчаса."""
+    if not spool_files(args.spool_dir):
+        return 0
+    host_key = load_host_key(args.state_dir)
+    api_key = host_key or args.api_key
+    if not api_key:
+        log("очередь не отправлена: нет ключа хоста")
+        return 1
+    conn = ServerConnection(
+        args.api_url, api_key, args.ca_file, args.pin_sha256, args.proxy, args.allow_http,
+        timeout=FLUSH_SPOOL_TIMEOUT, retry_budget=FLUSH_SPOOL_RETRY_BUDGET,
+    )
+    try:
+        sent = spool_flush(conn, args.spool_dir, log)
+    except TransientError:
+        return 0
+    except RejectedError as exc:
+        log(f"очередь не отправлена: {exc}")
+        return 1
+    if sent:
+        log(f"дослано из очереди: {sent}")
+    return 0
 
 
 # --- регистрация хоста --------------------------------------------------------------
@@ -1424,7 +1523,14 @@ def build_pack_payload(args: argparse.Namespace, probes_module, conn: "ServerCon
 
 
 def parse_args(argv: "list[str]") -> argparse.Namespace:
+    argv = list(argv)
+    # `hardening-agent.exe flush-spool ...` — подкоманда, не флаг: полный сбор при этом не стартует.
+    flush_spool = bool(argv) and argv[0] == "flush-spool"
+    if flush_spool:
+        argv = argv[1:]
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--flush-spool", action="store_true",
+                        help="Только дослать очередь и выйти. Полный сбор не выполняется")
     parser.add_argument("--api-url", required=True, help="Базовый URL бэкенда, например https://hardening.example.com")
     parser.add_argument("--api-key", default=os.environ.get("HARDENING_AGENT_API_KEY"),
                         help="Ключ площадки из интерфейса «Агенты» (или HARDENING_AGENT_API_KEY): при первом запуске агент "
@@ -1433,7 +1539,9 @@ def parse_args(argv: "list[str]") -> argparse.Namespace:
                         help="Только зарегистрировать хост (установка через GPO, Ansible, образ ОС) и выйти")
     parser.add_argument("--state-dir", default=os.environ.get("HARDENING_STATE_DIR") or default_state_dir(),
                         help="Каталог состояния: ключ хоста (host.json) — доступ только у агента и администраторов")
-    parser.add_argument("--environment", required=True, help="Имя окружения (prod/staging/…), создаётся автоматически при первом прогоне")
+    parser.add_argument("--environment", required=not flush_spool,
+                        help="Имя окружения (prod/staging/…), создаётся автоматически при первом прогоне. "
+                             "Для flush-spool не нужно: отчёт уже лежит в очереди")
     parser.add_argument("--hostname", default=None, help="По умолчанию — hostname хоста")
     parser.add_argument("--ip-address", default=None, help="По умолчанию — определяется автоматически")
     parser.add_argument("--asset-type", default="server", help="Тип актива (по умолчанию: server)")
@@ -1485,7 +1593,10 @@ def parse_args(argv: "list[str]") -> argparse.Namespace:
                        help="Один файл выгрузки вместо каталога: журнал сессии, бэкап Oxidized/RANCID, "
                             "архив файлов --offline-dir или JSON Континент 4. Нужен --hostname; "
                             "если платформа по файлу не узнана — ещё --pack")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if flush_spool:
+        args.flush_spool = True
+    return args
 
 
 def _utf8_console() -> None:
@@ -1505,6 +1616,10 @@ def main(argv: "list[str] | None" = None) -> int:
 
     def log(message: str) -> None:
         print(message, file=sys.stderr)
+
+    if args.flush_spool:
+        # Раньше сбора, джиттера и повторов на полчаса: задача досылки должна выйти сразу.
+        return run_flush_spool(args, log)
 
     offline = args.dry_run or args.manifests_file and args.out
     conn = None

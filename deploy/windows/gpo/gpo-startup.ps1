@@ -16,6 +16,10 @@
   -InitialJitterMaxSeconds 900 — U(0, N) перед первой регистрацией и первым сбором (делает агент).
   -RetryBudgetSeconds 1800 — бюджет повторов одного запуска.
   -BootstrapEveryMinutes 15 и -BootstrapRandomDelayMinutes 15 — период повтора 15–30 минут.
+  -CollectTime 07:30 и -CollectRandomDelayHours 2 — единственное место, где заданы время сбора и разброс.
+  Сервер площадки ночью выключен (примерно 18:30–07:00, Екатеринбург), поэтому сбор днём.
+  Задача «Hardening agent spool» в это же окно досылает очередь командой flush-spool:
+  каждые 30 минут плюс случайные 0–30 минут, 10 часов, без нового полного сбора.
 
 Журнал — C:\ProgramData\HardeningAgent\gpo-startup.log, строки stage=… code=….
 Ключ площадки в параметрах GPO виден пользователям домена (SYSVOL) — короткий срок на время раскатки.
@@ -38,11 +42,20 @@ param(
     [int]$RetryBudgetSeconds = 1800,
     [int]$BootstrapEveryMinutes = 15,
     [int]$BootstrapRandomDelayMinutes = 15,
+    # Время сбора и разброс. Триггеры читают эти параметры, отдельной константы времени в коде нет.
+    [string]$CollectTime = "07:30",
+    [ValidateRange(0, 12)][int]$CollectRandomDelayHours = 2,
     [switch]$Library
 )
 $ErrorActionPreference = "Stop"
 $BootstrapTaskName = "Hardening agent bootstrap"
 $CollectTaskName = "Hardening agent"
+$SpoolTaskName = "Hardening agent spool"
+# Досылка очереди. Интервал, случайная добавка и длина дневного окна задаются только здесь.
+$SpoolEveryMinutes = 30
+$SpoolRandomDelayMinutes = 30
+$SpoolWindowHours = 10
+$SpoolExecutionMinutes = 15
 $script:Secret = $SiteKey
 $script:Pins = @()
 $script:Mutex = $null
@@ -147,7 +160,8 @@ function Get-BootstrapArguments {
             "-Server", (Format-TaskArg $Server), "-Environment", (Format-TaskArg $Environment),
             "-Schedule", $Schedule, "-InstallDir", (Format-TaskArg $InstallDir), "-StateDir", (Format-TaskArg $StateDir),
             "-InitialJitterMaxSeconds", "$InitialJitterMaxSeconds", "-RetryBudgetSeconds", "$RetryBudgetSeconds",
-            "-BootstrapEveryMinutes", "$BootstrapEveryMinutes", "-BootstrapRandomDelayMinutes", "$BootstrapRandomDelayMinutes"
+            "-BootstrapEveryMinutes", "$BootstrapEveryMinutes", "-BootstrapRandomDelayMinutes", "$BootstrapRandomDelayMinutes",
+            "-CollectTime", (Format-TaskArg $CollectTime), "-CollectRandomDelayHours", "$CollectRandomDelayHours"
         )) { [void]$parts.Add($token) }
     if ($Share) { [void]$parts.Add("-Share"); [void]$parts.Add((Format-TaskArg $Share)) }
     if ($Proxy) { [void]$parts.Add("-Proxy"); [void]$parts.Add((Format-TaskArg $Proxy)) }
@@ -184,6 +198,49 @@ function Register-BootstrapTask {
     Register-ScheduledTask -TaskName $BootstrapTaskName -Xml $xml -Force | Out-Null
 }
 
+function ConvertTo-CollectClock([string]$Value) {
+    if ($Value -notmatch '^(\d{1,2}):(\d{2})$') { throw "CollectTime должен быть ЧЧ:ММ, получено: $Value" }
+    $hour = [int]$Matches[1]
+    $minute = [int]$Matches[2]
+    if ($hour -gt 23 -or $minute -gt 59) { throw "CollectTime вне суток: $Value" }
+    return "{0:D2}:{1:D2}" -f $hour, $minute
+}
+
+function Get-TriggerClock([string]$Boundary) {
+    if ($Boundary -match 'T(\d{1,2}):(\d{2})') {
+        return "{0:D2}:{1:D2}" -f [int]$Matches[1], $Matches[2]
+    }
+    return ""
+}
+
+function ConvertTo-HourDelay([int]$Hours) {
+    if ($Hours -le 0) { return "PT0S" }
+    return "PT{0}H" -f $Hours
+}
+
+function ConvertTo-MinuteDelay([int]$Minutes) {
+    if ($Minutes -le 0) { return "PT0S" }
+    return "PT{0}M" -f $Minutes
+}
+
+function Test-IgnoreNew($Settings) {
+    $instances = [string]$Settings.MultipleInstances
+    return ($instances -eq "IgnoreNew" -or $instances -eq "2")
+}
+
+function Get-TaskXml([string]$Name) {
+    $task = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+    if (-not $task) { return "" }
+    $xml = Export-ScheduledTask -TaskName $Name
+    if ($xml -is [System.Array]) { $xml = $xml -join "`n" }
+    return [string]$xml
+}
+
+function Initialize-CollectClock {
+    $script:CollectTime = ConvertTo-CollectClock $CollectTime
+    if ($script:CollectRandomDelayHours -lt 0) { $script:CollectRandomDelayHours = 0 }
+}
+
 function Get-CollectArguments {
     $arguments = "--api-url $Server --environment $Environment --use-packs --state-dir `"$StateDir`""
     if ($AllowHttp -and $Server.StartsWith("http://")) { $arguments += " --allow-http" }
@@ -191,29 +248,170 @@ function Get-CollectArguments {
     return $arguments
 }
 
-function Update-CollectTask([string]$ExePath) {
-    $arguments = Get-CollectArguments
-    $triggerClass = if ($Schedule -eq "Weekly") { "MSFT_TaskWeeklyTrigger" } else { "MSFT_TaskDailyTrigger" }
-    $existing = Get-ScheduledTask -TaskName $CollectTaskName -ErrorAction SilentlyContinue
-    $limit = ""
-    if ($existing) { $limit = [string]$existing.Settings.ExecutionTimeLimit }
-    $same = $existing -and $existing.Actions[0].Execute -eq $ExePath -and $existing.Actions[0].Arguments -eq $arguments -and
-        $existing.Triggers[0].CimClass.CimClassName -eq $triggerClass -and $limit -eq "PT1H"
-    if ($same) {
-        Write-Stage "schedule" "TASK_UNCHANGED" "schedule=$Schedule"
-        return
-    }
-    $action = New-ScheduledTaskAction -Execute $ExePath -Argument $arguments
+function Get-SpoolArguments {
+    # flush-spool не собирает факты и не запрашивает манифесты.
+    $arguments = "flush-spool --api-url $Server --environment $Environment --state-dir `"$StateDir`""
+    if ($AllowHttp -and $Server.StartsWith("http://")) { $arguments += " --allow-http" }
+    return $arguments
+}
+
+function New-CollectTrigger {
+    $delay = New-TimeSpan -Hours $CollectRandomDelayHours
     if ($Schedule -eq "Weekly") {
-        $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday -At 03:00 -RandomDelay (New-TimeSpan -Hours 1)
-    } else {
-        $trigger = New-ScheduledTaskTrigger -Daily -At 03:00 -RandomDelay (New-TimeSpan -Hours 1)
+        return New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday -At $CollectTime -RandomDelay $delay
     }
+    return New-ScheduledTaskTrigger -Daily -At $CollectTime -RandomDelay $delay
+}
+
+function Test-CollectTaskCurrent([string]$ExePath, [string]$Arguments) {
+    $existing = Get-ScheduledTask -TaskName $CollectTaskName -ErrorAction SilentlyContinue
+    if (-not $existing -or $existing.Actions.Count -lt 1 -or $existing.Triggers.Count -lt 1) { return $false }
+    $triggerClass = if ($Schedule -eq "Weekly") { "MSFT_TaskWeeklyTrigger" } else { "MSFT_TaskDailyTrigger" }
+    $trigger = $existing.Triggers[0]
+    $available = $false
+    try { $available = [bool]$existing.Settings.StartWhenAvailable } catch { $available = $false }
+    return ($existing.Actions[0].Execute -eq $ExePath -and $existing.Actions[0].Arguments -eq $Arguments -and
+        $trigger.CimClass.CimClassName -eq $triggerClass -and
+        [string]$existing.Settings.ExecutionTimeLimit -eq "PT1H" -and
+        [string]$trigger.RandomDelay -eq (ConvertTo-HourDelay $CollectRandomDelayHours) -and
+        (Get-TriggerClock ([string]$trigger.StartBoundary)) -eq $CollectTime -and
+        $available -and (Test-IgnoreNew $existing.Settings))
+}
+
+function Test-SpoolRepetition($Trigger) {
+    $interval = ConvertTo-MinuteDelay $SpoolEveryMinutes
+    $duration = "PT{0}H" -f [int]$SpoolWindowHours
+    $rep = $Trigger.Repetition
+    $gotInterval = ""
+    $gotDuration = ""
+    $stop = ""
+    if ($rep) {
+        $gotInterval = [string]$rep.Interval
+        $gotDuration = [string]$rep.Duration
+        $stop = [string]$rep.StopAtDurationEnd
+    }
+    $durationOk = ($gotDuration -eq $duration) -or ($gotDuration.StartsWith($duration))
+    $stopOk = ($stop -eq "True") -or ($stop -eq "true")
+    if ($gotInterval -eq $interval -and $durationOk -and $stopOk) { return $true }
+    # CIM иногда не заполняет длительность, хотя в XML она записана.
+    $xml = Get-TaskXml $SpoolTaskName
+    return ($xml -match "<Interval>$interval</Interval>" -and $xml -match "<Duration>$duration</Duration>" -and
+        $xml -match "<StopAtDurationEnd>true</StopAtDurationEnd>")
+}
+
+function Test-SpoolTaskCurrent([string]$ExePath, [string]$Arguments) {
+    $existing = Get-ScheduledTask -TaskName $SpoolTaskName -ErrorAction SilentlyContinue
+    if (-not $existing -or $existing.Actions.Count -lt 1 -or $existing.Triggers.Count -lt 1) { return $false }
+    $trigger = $existing.Triggers[0]
+    $available = $false
+    try { $available = [bool]$existing.Settings.StartWhenAvailable } catch { $available = $false }
+    return ($existing.Actions[0].Execute -eq $ExePath -and $existing.Actions[0].Arguments -eq $Arguments -and
+        $trigger.CimClass.CimClassName -eq "MSFT_TaskDailyTrigger" -and
+        [string]$existing.Settings.ExecutionTimeLimit -eq (ConvertTo-MinuteDelay $SpoolExecutionMinutes) -and
+        [string]$trigger.RandomDelay -eq (ConvertTo-MinuteDelay $SpoolRandomDelayMinutes) -and
+        (Get-TriggerClock ([string]$trigger.StartBoundary)) -eq $CollectTime -and
+        $available -and (Test-IgnoreNew $existing.Settings) -and (Test-SpoolRepetition $trigger))
+}
+
+function Test-FlushSpoolSupported([string]$ExePath) {
+    if (-not (Test-Path $ExePath)) { return $false }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $ExePath flush-spool --help *> $null
+        return ($LASTEXITCODE -eq 0)
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
+function Repair-SpoolTaskXml {
+    $interval = ConvertTo-MinuteDelay $SpoolEveryMinutes
+    $duration = "PT{0}H" -f [int]$SpoolWindowHours
+    $delay = ConvertTo-MinuteDelay $SpoolRandomDelayMinutes
+    $xml = Get-TaskXml $SpoolTaskName
+    if (-not $xml) { return }
+    try {
+    if ($xml -notmatch '<Repetition>') {
+        $block = "      <Repetition><Interval>$interval</Interval><Duration>$duration</Duration><StopAtDurationEnd>true</StopAtDurationEnd></Repetition>"
+        $xml = $xml -replace '</CalendarTrigger>', ($block + '</CalendarTrigger>')
+    } else {
+        if ($xml -match '<Interval>') {
+            $xml = $xml -replace '<Interval>.*?</Interval>', "<Interval>$interval</Interval>"
+        } else {
+            $xml = $xml -replace '<Repetition>', "<Repetition><Interval>$interval</Interval>"
+        }
+        if ($xml -match '<Duration>') {
+            $xml = $xml -replace '<Duration>.*?</Duration>', "<Duration>$duration</Duration>"
+        } else {
+            $xml = $xml -replace '</Interval>', "</Interval><Duration>$duration</Duration>"
+        }
+        if ($xml -match '<StopAtDurationEnd>') {
+            $xml = $xml -replace '<StopAtDurationEnd>.*?</StopAtDurationEnd>', '<StopAtDurationEnd>true</StopAtDurationEnd>'
+        } else {
+            $xml = $xml -replace '</Repetition>', '<StopAtDurationEnd>true</StopAtDurationEnd></Repetition>'
+        }
+    }
+    if ($xml -notmatch '<RandomDelay>') {
+        $xml = $xml -replace '</StartBoundary>', "</StartBoundary><RandomDelay>$delay</RandomDelay>"
+    } else {
+        $xml = $xml -replace '<RandomDelay>.*?</RandomDelay>', "<RandomDelay>$delay</RandomDelay>"
+    }
+    Register-ScheduledTask -TaskName $SpoolTaskName -Xml $xml -Force | Out-Null
+    } catch {
+        Write-Stage "schedule" "SPOOL_XML" (Redact $_.Exception.Message)
+    }
+}
+
+function Register-CollectTask([string]$ExePath, [string]$Arguments) {
+    $action = New-ScheduledTaskAction -Execute $ExePath -Argument $Arguments
+    $trigger = New-CollectTrigger
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 1)
     Register-ScheduledTask -TaskName $CollectTaskName -Action $action -Trigger $trigger -Settings $settings `
         -User "SYSTEM" -RunLevel Highest -Force | Out-Null
-    Write-Stage "schedule" "TASK_UPDATED" "задача планировщика «Hardening agent» создана (расписание $Schedule)"
+    $delay = ConvertTo-HourDelay $CollectRandomDelayHours
+    Write-Stage "schedule" "TASK_UPDATED" ("задача планировщика «Hardening agent» создана (расписание {0}, время {1}, разброс {2})" -f $Schedule, $CollectTime, $delay)
+}
+
+function Register-SpoolTask([string]$ExePath, [string]$Arguments) {
+    $action = New-ScheduledTaskAction -Execute $ExePath -Argument $Arguments
+    # В Windows PowerShell 5.1 повтор есть только у -Once. Дневному триггеру его дописывает XML.
+    $trigger = New-ScheduledTaskTrigger -Daily -At $CollectTime -RandomDelay (New-TimeSpan -Minutes $SpoolRandomDelayMinutes)
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes $SpoolExecutionMinutes)
+    Register-ScheduledTask -TaskName $SpoolTaskName -Action $action -Trigger $trigger -Settings $settings `
+        -User "SYSTEM" -RunLevel Highest -Force | Out-Null
+    Repair-SpoolTaskXml
+    Write-Stage "schedule" "SPOOL_UPDATED" ("задача «{0}»: flush-spool каждые {1} мин, окно {2} ч, с {3}" -f $SpoolTaskName, $SpoolEveryMinutes, $SpoolWindowHours, $CollectTime)
+}
+
+function Update-CollectTask([string]$ExePath) {
+    Initialize-CollectClock
+    $arguments = Get-CollectArguments
+    $collectSame = Test-CollectTaskCurrent $ExePath $arguments
+    if (-not $collectSame) { Register-CollectTask $ExePath $arguments }
+    $spoolArguments = Get-SpoolArguments
+    $spoolSame = Test-SpoolTaskCurrent $ExePath $spoolArguments
+    if ($spoolSame) {
+        if ($collectSame) {
+            Write-Stage "schedule" "TASK_UNCHANGED" ("schedule={0} collect={1} delay={2}" -f $Schedule, $CollectTime, (ConvertTo-HourDelay $CollectRandomDelayHours))
+        }
+        return
+    }
+    if (-not (Test-FlushSpoolSupported $ExePath)) {
+        $stale = Get-ScheduledTask -TaskName $SpoolTaskName -ErrorAction SilentlyContinue
+        if ($stale) { Unregister-ScheduledTask -TaskName $SpoolTaskName -Confirm:$false }
+        Write-Stage "schedule" "SPOOL_SKIPPED" "exe без команды flush-spool: дневной сбор уже обновлён, досылка появится вместе с новым exe"
+        if ($collectSame) {
+            Write-Stage "schedule" "TASK_UNCHANGED" ("schedule={0} collect={1} delay={2}" -f $Schedule, $CollectTime, (ConvertTo-HourDelay $CollectRandomDelayHours))
+        }
+        return
+    }
+    Register-SpoolTask $ExePath $spoolArguments
+    if ($collectSame) {
+        Write-Stage "schedule" "TASK_UNCHANGED" ("schedule={0} collect={1} delay={2}" -f $Schedule, $CollectTime, (ConvertTo-HourDelay $CollectRandomDelayHours))
+    }
 }
 
 function Get-HttpStatus($ErrorRecord) {
@@ -412,6 +610,7 @@ function Complete-IfEnrolled([string]$ExePath) {
 }
 
 function Invoke-BootstrapWorker {
+    Initialize-CollectClock
     $hostFile = Join-Path $StateDir "host.json"
     $already = Test-Path $hostFile
     $published = $null
@@ -468,6 +667,7 @@ function Enter-WorkerLock {
 }
 
 function Invoke-Startup {
+    Initialize-CollectClock
     if (-not $SiteKey) {
         Write-Stage "startup" "SITE_KEY_MISSING" ""
         return 1
