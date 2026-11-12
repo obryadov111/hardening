@@ -563,8 +563,10 @@ sequenceDiagram
 ### 7.8 Агент на Windows
 
 Один файл `hardening-agent.exe` (PyInstaller, собирается в CI на Windows Server). Запуск — Планировщик
-заданий от SYSTEM, 03:00 с `RandomDelay` 1 ч и `StartWhenAvailable`. Параметр GPO `-Schedule Weekly`
-ставит задачу на понедельник вместо каждого дня. Агент читает нелокализуемые
+заданий от SYSTEM: сбор в 07:30 с `RandomDelay` до 2 ч, `StartWhenAvailable` и `IgnoreNew`. Сервер
+площадки ночью выключен (примерно 18:30–07:00, Екатеринбург), поэтому отчёт уходит утром. Задача
+«Hardening agent spool» каждые 30–60 минут в течение 10 часов вызывает `flush-spool` и только досылает
+очередь. Параметр GPO `-Schedule Weekly` ставит сбор на понедельник в то же время. Агент читает нелокализуемые
 источники (реестр, экспорт `secedit`, `auditpol /backup` по GUID, `sc query`) — на русской Windows
 вывод `net accounts`/`netsh` переведён. Ключ хоста — `C:\ProgramData\HardeningAgent` (наследование
 прав снято, доступ — SYSTEM и «Администраторы» по SID).

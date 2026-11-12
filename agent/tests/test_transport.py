@@ -6,6 +6,7 @@ import json
 import os
 import ssl
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
@@ -198,6 +199,98 @@ def test_spool_is_kept_when_key_is_revoked(server, tmp_path):
     server.status = 401
     with pytest.raises(RejectedError):
         collector.spool_flush(ServerConnection(server.url, "k", ca_file=CERT), spool, print)
+    assert len(collector.spool_files(spool)) == 1
+
+
+def test_flush_spool_sends_the_queue_without_collecting(server, tmp_path, monkeypatch):
+    def boom(*_args, **_kwargs):
+        raise AssertionError("полный сбор не должен запускаться")
+
+    monkeypatch.setattr(collector, "build_payload", boom)
+    monkeypatch.setattr(collector, "build_pack_payload", boom)
+    monkeypatch.setattr(collector, "apply_initial_jitter", boom)
+    state, spool = str(tmp_path / "state"), str(tmp_path / "spool")
+    collector.save_host_registration(state, {"key": "k", "hostname": "pc"})
+    collector.spool_save(spool, _payload(1))
+    code = collector.main([
+        "flush-spool", "--api-url", server.url, "--ca-file", CERT,
+        "--state-dir", state, "--spool-dir", spool,
+    ])
+    assert code == 0
+    assert [item["n"] for item in server.received] == [1]
+    assert collector.spool_files(spool) == []
+
+
+def test_flush_spool_empty_is_quiet(server, tmp_path, capsys):
+    state, spool = str(tmp_path / "state"), str(tmp_path / "spool")
+    collector.save_host_registration(state, {"key": "k", "hostname": "pc"})
+    code = collector.main([
+        "flush-spool", "--api-url", server.url, "--ca-file", CERT,
+        "--state-dir", state, "--spool-dir", spool,
+    ])
+    assert code == 0 and server.received == []
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == ""
+
+
+def test_flush_spool_unreachable_is_quiet_and_keeps_the_file(tmp_path, monkeypatch, capsys):
+    sleeps = []
+    monkeypatch.setattr(collector.time, "sleep", lambda seconds: sleeps.append(seconds))
+    state, spool = str(tmp_path / "state"), str(tmp_path / "spool")
+    collector.save_host_registration(state, {"key": "k", "hostname": "pc"})
+    collector.spool_save(spool, _payload(1))
+    code = collector.main([
+        "flush-spool", "--api-url", "https://127.0.0.1:9",
+        "--state-dir", state, "--spool-dir", spool,
+    ])
+    assert code == 0 and sleeps == []
+    assert len(collector.spool_files(spool)) == 1
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == "" and "stage=retry" not in captured.err
+
+
+def test_flush_spool_keeps_the_queue_when_the_key_is_revoked(server, tmp_path):
+    server.status = 401
+    state, spool = str(tmp_path / "state"), str(tmp_path / "spool")
+    collector.save_host_registration(state, {"key": "k", "hostname": "pc"})
+    collector.spool_save(spool, _payload(1))
+    code = collector.main([
+        "flush-spool", "--api-url", server.url, "--ca-file", CERT,
+        "--state-dir", state, "--spool-dir", spool,
+    ])
+    assert code == 1
+    assert len(collector.spool_files(spool)) == 1
+
+
+def test_flush_spool_does_not_require_environment():
+    args = collector.parse_args(["flush-spool", "--api-url", "https://audit.example.ru"])
+    assert args.flush_spool is True and args.environment is None
+
+
+def test_spool_flush_skips_when_lock_is_held(tmp_path):
+    spool = str(tmp_path / "spool")
+    collector.spool_save(spool, _payload(1))
+    lock = os.path.join(spool, collector.SPOOL_LOCK_NAME)
+    fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    os.close(fd)
+    sent = collector.spool_flush(
+        ServerConnection("https://127.0.0.1:9", "k", timeout=2, retry_budget=0), spool, print)
+    assert sent == 0 and os.path.exists(lock)
+    assert len(collector.spool_files(spool)) == 1
+
+
+def test_stale_spool_lock_is_replaced(tmp_path):
+    spool = str(tmp_path / "spool")
+    collector.spool_save(spool, _payload(1))
+    lock = os.path.join(spool, collector.SPOOL_LOCK_NAME)
+    fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    os.close(fd)
+    stale = time.time() - collector.SPOOL_LOCK_STALE_SECONDS - 5
+    os.utime(lock, (stale, stale))
+    with pytest.raises(TransientError):
+        collector.spool_flush(
+            ServerConnection("https://127.0.0.1:9", "k", timeout=2, retry_budget=0), spool, print)
+    assert not os.path.exists(lock)
     assert len(collector.spool_files(spool)) == 1
 
 

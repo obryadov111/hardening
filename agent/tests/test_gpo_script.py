@@ -67,6 +67,48 @@ def test_parameter_template_uses_the_script_defaults_and_the_live_pin():
     assert "site.key" in text
 
 
+def test_daytime_collect_and_spool_flush_are_defined_once():
+    text = _text()
+    assert '[string]$CollectTime = "07:30"' in text
+    assert "[int]$CollectRandomDelayHours = 2" in text
+    assert "$SpoolEveryMinutes = 30" in text
+    assert "$SpoolRandomDelayMinutes = 30" in text
+    assert "$SpoolWindowHours = 10" in text
+    assert "$SpoolExecutionMinutes = 15" in text
+    assert "03:00" not in text
+    trigger = text.split("function New-CollectTrigger", 1)[1].split("function Test-CollectTaskCurrent", 1)[0]
+    assert "-At $CollectTime" in trigger
+    assert "CollectRandomDelayHours" in trigger
+    assert "PT2H" not in trigger
+    assert "Hardening agent spool" in text
+    assert "flush-spool" in text
+    spool_args = text.split("function Get-SpoolArguments", 1)[1].split("function New-CollectTrigger", 1)[0]
+    assert "--use-packs" not in spool_args
+    assert "TASK_UNCHANGED" in text
+    assert "SPOOL_SKIPPED" in text
+    assert "Test-FlushSpoolSupported" in text
+    assert "IgnoreNew" in text
+    assert "StartWhenAvailable" in text
+    compare = text.split("function Test-CollectTaskCurrent", 1)[1].split("function Test-SpoolRepetition", 1)[0]
+    assert "RandomDelay" in compare
+    assert "Get-TriggerClock" in compare
+    assert "PT1H" in compare
+    builder = text.split("function Get-BootstrapArguments", 1)[1].split("function Register-BootstrapTask", 1)[0]
+    assert "-CollectTime" in builder
+    assert "-CollectRandomDelayHours" in builder
+    assert "-SiteKey" not in builder
+
+
+def test_manual_installer_matches_the_daytime_schedule():
+    for rel in ("src/pages/AgentKeys.jsx", "docs/agent-install.md", "agent/README.md"):
+        with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
+            body = fh.read()
+        assert "03:00" not in body, rel
+        assert "07:30" in body, rel
+        assert "flush-spool" in body, rel
+        assert "Hardening agent spool" in body, rel
+
+
 def test_downloads_use_a_minute_timeout_and_skip_same_sha256():
     text = _text()
     assert "TimeoutSec = 60" in text

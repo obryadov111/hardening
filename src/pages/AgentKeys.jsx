@@ -77,21 +77,28 @@ function agentConfig(key, publicKey, downloads) {
 /**
  * Windows (PowerShell от администратора): регистрация хоста ключом площадки — один раз, ключ нигде не
  * сохраняется (в переменных среды его прочитал бы любой пользователь ПК); у хоста свой ключ в
- * C:\ProgramData\HardeningAgent (доступ — SYSTEM и администраторы). Затем — ежедневная задача от SYSTEM.
+ * C:\ProgramData\HardeningAgent (доступ — SYSTEM и администраторы). Затем — ежедневная задача от SYSTEM
+ * в 07:30 с разбросом до 2 часов и отдельная досылка очереди. Канонические значения — параметры
+ * -CollectTime и -CollectRandomDelayHours в gpo-startup.ps1; здесь те же числа для одного ПК без GPO.
  * Открытый ключ паков и отпечаток сервера не секретны — в переменных среды машины.
  */
 function windowsSetup(key, publicKey, downloads) {
   const exe = "C:\\Program Files\\Hardening\\hardening-agent.exe";
   const pin = downloads?.server_pin ? ` --pin-sha256 ${downloads.server_pin}` : "";
+  const url = serverUrl(downloads);
   return [
-    `& "${exe}" --api-url ${serverUrl(downloads)} --environment prod --api-key ${key}${pin} --enroll`,
+    `& "${exe}" --api-url ${url} --environment prod --api-key ${key}${pin} --enroll`,
     publicKey ? `setx /M HARDENING_PACK_PUBLIC_KEY "${publicKey}"` : "# HARDENING_PACK_PUBLIC_KEY — ключ подписи Ed25519 на сервере не настроен",
     downloads?.server_pin ? `setx /M HARDENING_PIN_SHA256 "${downloads.server_pin}"` : PIN_HINT,
     '# прокси: setx /M HARDENING_PROXY "http://proxy.corp:3128"',
     // Register-ScheduledTask, а не schtasks /TR: путь с пробелом и аргументы — отдельно, без вложенных кавычек,
     // которые PowerShell передаёт schtasks неправильно.
-    `$action = New-ScheduledTaskAction -Execute "${exe}" -Argument "--api-url ${serverUrl(downloads)} --environment prod --use-packs"`,
-    'Register-ScheduledTask -TaskName "Hardening agent" -Action $action -Trigger (New-ScheduledTaskTrigger -Daily -At 03:00 -RandomDelay (New-TimeSpan -Hours 1)) -User SYSTEM -RunLevel Highest -Force | Out-Null',
+    "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 1)",
+    `$action = New-ScheduledTaskAction -Execute "${exe}" -Argument "--api-url ${url} --environment prod --use-packs"`,
+    'Register-ScheduledTask -TaskName "Hardening agent" -Action $action -Trigger (New-ScheduledTaskTrigger -Daily -At 07:30 -RandomDelay (New-TimeSpan -Hours 2)) -Settings $settings -User SYSTEM -RunLevel Highest -Force | Out-Null',
+    `$flush = New-ScheduledTaskAction -Execute "${exe}" -Argument "flush-spool --api-url ${url} --environment prod --state-dir \`\"C:\\ProgramData\\HardeningAgent\`\""`,
+    "$flushSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 15)",
+    'Register-ScheduledTask -TaskName "Hardening agent spool" -Action $flush -Trigger (New-ScheduledTaskTrigger -Daily -At 07:30 -RandomDelay (New-TimeSpan -Minutes 30) -RepetitionInterval (New-TimeSpan -Minutes 30) -RepetitionDuration (New-TimeSpan -Hours 10)) -Settings $flushSettings -User SYSTEM -RunLevel Highest -Force | Out-Null',
     'Start-ScheduledTask -TaskName "Hardening agent"',
   ].join("\n");
 }

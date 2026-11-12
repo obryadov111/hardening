@@ -10,5 +10,8 @@
 #
 # Ключ площадки виден в SYSVOL. На ПК сценарий пишет его в site.key (только SYSTEM и администраторы)
 # и удаляет файл после регистрации. В аргументы задачи «Hardening agent bootstrap» ключ не входит.
+#
+# Время сбора в строку не входит: сценарий сам ставит 07:30 и разброс 2 часа
+# (-CollectTime и -CollectRandomDelayHours). Задача досылки очереди включается тем же сценарием.
 
 -Server https://audit.hardening-audit.ru -SiteKey КЛЮЧ_ПЛОЩАДКИ -PackPublicKey КЛЮЧ_ПАКОВ -Pin sha256//F2IS+EuQnazu4oq6kt82+KkSARv4DiztB0hU9vOzdsU= -Share \\ДОМЕН\NETLOGON\Hardening -InitialJitterMaxSeconds 900 -RetryBudgetSeconds 1800 -BootstrapEveryMinutes 15 -BootstrapRandomDelayMinutes 15
