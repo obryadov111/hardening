@@ -100,7 +100,7 @@
 | DELETE | `/api/organizations/{org}/expected-hosts` | очистить список |
 | POST | `/api/organizations/{org}/offline-scans/preview` | разобрать один файл, снимок не создавать |
 | POST | `/api/organizations/{org}/offline-scans` | выгрузка: `commands`+`files` или одно поле `bundle`; необязательное поле `scan_run_id` |
-| POST | `/api/organizations/{org}/manual-scans` | ответы анкеты; необязательное поле `scan_run_id`. Адрес `/manual-scan` открывает сканирования |
+| POST | `/api/organizations/{org}/manual-scans` | ответы анкеты; необязательное поле `scan_run_id`. Страницы нет, адрес `/manual-scan` открывает сканирования |
 | POST | `/api/organizations/{org}/scan-runs` | открыть прогон вручную |
 | POST | `/api/scan-runs/{id}/close` | закрыть прогон |
 | PUT | `/api/organizations/{org}/scan-schedule` | `daily` или `weekly` |

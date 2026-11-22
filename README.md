@@ -14,11 +14,15 @@
 > конфигурации) и проверяет, правильно ли они заданы. Дополнительно версии установленного ПО
 > сопоставляются с Банком данных угроз ФСТЭК.
 
-📖 **Как это работает** — справочник для защиты: откуда данные, что с чем сравнивается, как
-получается оценка: [`docs/how-it-works.md`](docs/how-it-works.md) и каталог
-[`docs/how-it-works/`](docs/how-it-works/README.md).
+📖 **Документация для защиты диплома** (одна точка входа): каталог
+[`docs/how-it-works/README.md`](docs/how-it-works/README.md).
+Тот же текст одной лентой для чтения и печати —
+[`docs/how-it-works/POLNYJ-SPRAVOCHNIK.md`](docs/how-it-works/POLNYJ-SPRAVOCHNIK.md).
+Короткая отсылка — [`docs/how-it-works.md`](docs/how-it-works.md).
 
-📖 **Полное описание проекта** — [`docs/project-description.md`](docs/project-description.md).
+[`docs/project-description.md`](docs/project-description.md) — развёрнутое описание.
+Если число в нём расходится с каталогом, верен каталог: он сверен с `main`
+`1a5997df9bb0573b1265724828be061b6603be20` 22 ноября 2026.
 
 🌐 **Сетевое оборудование и средства защиты** — [`docs/network-devices.md`](docs/network-devices.md).
 
@@ -54,9 +58,11 @@
 
 ## Платформы
 
-Подсчёт актуальных версий **1 ноября 2026**: 26 паков, 353 проверки (ещё 17 файлов — прошлые версии
-тех же паков). Полная таблица с транспортом и тем, где пак подтверждён, —
-[`docs/how-it-works/07-packs.md`](docs/how-it-works/07-packs.md).
+Подсчёт актуальных версий **22 ноября 2026** (PyYAML по `src/backend/app/packs/*.yaml`,
+актуальная версия — максимум semver внутри одного `pack`): 26 паков, 353 проверки
+(всего 43 файла YAML, из них 17 — прошлые версии тех же паков). Матрица «пак / CI / стенд» —
+[`docs/how-it-works/28-evidence-matrix.md`](docs/how-it-works/28-evidence-matrix.md).
+Каталог паков — [`docs/how-it-works/07-packs.md`](docs/how-it-works/07-packs.md).
 
 | Пак | Платформа и сбор | Проверок | Уровень |
 |---|---|---|---|
@@ -178,19 +184,21 @@ npm run lint && npm run test:unit && npm run build                    # инте
 
 # сквозные тесты интерфейса (Playwright): бэкенд и Vite поднимаются сами, БД — своя одноразовая,
 # не та, что у pytest (засев стирает её): каждая страница, кнопка и роль.
-# Подсчёт: 128 тестов после снятия страницы опроса (перед этим было 135; часть test() раскрывается циклами ролей и страниц)
+# Подсчёт 22 ноября 2026 на дереве с 1ec48db: Total: 128 tests in 8 files
+# (сами тесты не запускались: нет одноразового PostgreSQL)
 E2E_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5433/app_e2e_db npm run test:e2e
 ```
 
-Подсчёт тестов на 1 ноября 2026: `pytest --collect-only` дал 629 кейсов бэкенда и 300 кейсов агента,
-`npx playwright test --list` — 128 сквозных, в `utils.test.js` — 7. Подробности —
+Подсчёт на этом дереве: `pytest --collect-only -q` — 670 кейсов бэкенда и 334 кейса агента.
+`npx playwright test --list` — 128 в 8 файлах. `npm run test:unit` — 15. Подробности —
 [`docs/how-it-works/23-tests-ci.md`](docs/how-it-works/23-tests-ci.md).
 
 Нагрузка: `tools/loadtest/ui_load.py` — засев N хостов (ПО как на хосте, настоящие пробы агента) и замер
 API каждой страницы; приём отчётов от 1000 хостов — заметка «Агент на 1000+ хостов» в репозитории диплома.
 
-CI на каждый push: тесты сервера (ruff, pytest) и агента, линтер, юнит-тесты и сборка интерфейса, сквозные
-тесты в Chromium, shellcheck скриптов, агент внутри 16 Linux-систем и на настоящих Windows Server 2022 / 2025.
+CI срабатывает по путям файлов, не на любую правку документации. На коде: тесты сервера (ruff, pytest)
+и агента, линтер и сборка интерфейса, Playwright в Chromium, shellcheck скриптов, агент внутри 16
+Linux-образов и на Windows Server 2022 / 2025. Контейнер в `linux-packs.yml` — не полноценная ОС и не ВМ.
 
 ## Развёртывание
 

@@ -4,7 +4,7 @@
 
 На межсетевой экран и коммутатор нельзя поставить службу так же, как на Ubuntu. Агент стоит на обычном Linux в сети заказчика и читает устройство. Сервер при этом тот же: манифест, пробы `cli_*`, `evaluate_pack`, прошивка как запись ПО для БДУ.
 
-Актуальные ssh-паки на 1 ноября 2026: `cisco-ios`, `eltex-esr`, `eltex-mes`, `qtech-qsw`, `snr-switch`, `vipnet-coordinator`, `s-terra-gate`, `infowatch-arma-ngfw`, `dionis-nx`, `pt-ngfw` (только inventory), `usergate-ngfw`, `kontinent-4`. Опросные: `kontinent-4-local`, `ideco-ngfw`, `pt-ngfw-settings`. Паков Huawei и MikroTik в каталоге нет.
+Актуальные ssh-паки на 22 ноября 2026, коммит `1a5997d`: `cisco-ios`, `eltex-esr`, `eltex-mes`, `qtech-qsw`, `snr-switch`, `vipnet-coordinator`, `s-terra-gate`, `infowatch-arma-ngfw`, `dionis-nx`, `pt-ngfw` (только inventory), `usergate-ngfw`, `kontinent-4`. Опросные: `kontinent-4-local`, `ideco-ngfw`, `pt-ngfw-settings`. Паков Huawei и MikroTik в каталоге нет.
 
 Подробный перечень проверок по вендорам — в `docs/network-devices.md`. Здесь — откуда берётся текст и что с ним делают.
 
@@ -95,7 +95,7 @@ POST, PUT, DELETE, lock, fork, commit, install-policy и set-password агент
 
 Учётка в комментарии пака — роль «Аудитор» комплекса: привилегии просмотра и структуры. На 4.2.1-653 этих прав хватает на три GET, запись отвечает 403. IP хоста агента должен быть в доступе к ЦУС.
 
-Та же выгрузка JSON (`c4_config_exporter` или локальное меню) читается офлайн: `--offline-dir`, один JSON (export или bundle `{export, cgw}`), архив каталога и загрузка через интерфейс. `directory_has_export` узнаёт каталог.
+Та же выгрузка JSON (`c4_config_exporter` или локальное меню) читается офлайн: `--offline-dir`, один JSON (export или bundle `{export, cgw}`), архив каталога и загрузка через интерфейс. `directory_has_export` узнаёт каталог. Разборщик также принимает журнал, в котором уже есть виртуальные `show continent …`: это проверяет `test_session_archive_and_abbreviations_match_multifile` на текстах фикстуры, а не съёмка CLI шлюза. Точная схема, статусы образца и граница «что можно снять с железа» — [глава 34](34-operator-files.md).
 
 Проверки 1.1.0:
 
