@@ -4,7 +4,7 @@
 
 На межсетевой экран и коммутатор нельзя поставить службу так же, как на Ubuntu. Агент стоит на обычном Linux в сети заказчика и читает устройство. Сервер при этом тот же: манифест, пробы `cli_*`, `evaluate_pack`, прошивка как запись ПО для БДУ.
 
-Актуальные ssh-паки на 1 ноября 2026: `cisco-ios`, `eltex-esr`, `eltex-mes`, `qtech-qsw`, `snr-switch`, `vipnet-coordinator`, `s-terra-gate`, `infowatch-arma-ngfw`, `dionis-nx`, `pt-ngfw` (только inventory), `usergate-ngfw`, `kontinent-4`. Опросные: `kontinent-4-local`, `ideco-ngfw`, `pt-ngfw-settings`. Паков Huawei и MikroTik в каталоге нет.
+Актуальные ssh-паки на 22 ноября 2026, коммит `1a5997d`: `cisco-ios`, `eltex-esr`, `eltex-mes`, `qtech-qsw`, `snr-switch`, `vipnet-coordinator`, `s-terra-gate`, `infowatch-arma-ngfw`, `dionis-nx`, `pt-ngfw` (только inventory), `usergate-ngfw`, `kontinent-4`. Опросные: `kontinent-4-local`, `ideco-ngfw`, `pt-ngfw-settings`. Паков Huawei и MikroTik в каталоге нет.
 
 Подробный перечень проверок по вендорам — в `docs/network-devices.md`. Здесь — откуда берётся текст и что с ним делают.
 
