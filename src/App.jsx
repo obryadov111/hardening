@@ -35,7 +35,6 @@ const Report = page(() => import("./pages/Report"));
 const SoftwareInventory = page(() => import("./pages/SoftwareInventory"));
 const Scans = page(() => import("./pages/Scans"));
 const OfflineScan = page(() => import("./pages/OfflineScan"));
-const ManualScan = page(() => import("./pages/ManualScan"));
 const AgentKeys = page(() => import("./pages/AgentKeys"));
 const ScanCompare = page(() => import("./pages/ScanCompare"));
 const ScanRun = page(() => import("./pages/ScanRun"));
@@ -68,7 +67,8 @@ export default function App() {
               <Route path="scans/:runId" element={<ScanRun />} />
               <Route path="scan-runs/compare" element={<ScanRunCompare />} />
               <Route path="offline-scan" element={<OfflineScan />} />
-              <Route path="manual-scan" element={<ManualScan />} />
+              {/* Анкета опроса убрана из интерфейса. Прежние снимки с пометкой «по опросу» остаются в сканированиях. */}
+              <Route path="manual-scan" element={<Navigate to="/scans" replace />} />
               <Route path="agents" element={<AgentKeys />} />
               <Route path="scan-compare" element={<ScanCompare />} />
               <Route path="organization-users" element={<OrganizationUsers />} />

@@ -24,7 +24,7 @@
 | ip_address | Аргумент, адрес устройства или основной адрес интерфейса хоста |
 | os | На живом хосте — pretty name ОС. У сетевого устройства в этом поле пусто, версия уходит в ПО как прошивка |
 | asset_type | Поле пака. Примеры: `linux-server`, `windows-server`, `windows-workstation`, `database-server`, `network-device` |
-| criticality | Аргумент агента или форма опроса: `low`, `medium`, `high`, `critical` |
+| criticality | Аргумент агента или тело запроса опроса: `low`, `medium`, `high`, `critical` |
 | platform_tags | Объединение `tags` всех подошедших паков |
 
 Теги задаёт автор пака в YAML. Код сам тег `internet-facing` никуда не пишет. Он встречается в формуле критичности и в тестах, но не в паках. Подробнее в главе про БДУ.
