@@ -1,0 +1,3 @@
+Name,DNSHostName,OperatingSystem,LastLogonDate,Enabled
+pc-001,pc-001.example.test,Windows 10,2026-11-01,True
+pc-002,pc-002.example.test,Windows 11,2026-11-02,False

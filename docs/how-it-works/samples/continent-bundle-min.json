@@ -1,0 +1,42 @@
+{
+  "export": {
+    "type": "full",
+    "hwserial": "1001",
+    "objects": [
+      {
+        "type": "passwordpolicy",
+        "min_length": 12,
+        "wrong_try_count": 5,
+        "wrong_try_block": 30,
+        "blocked_days": 0
+      },
+      {
+        "type": "admin",
+        "uuid": "admin-1",
+        "login": "auditor",
+        "is_enabled": true,
+        "primary": false,
+        "is_autocreated": false
+      },
+      {
+        "type": "cgw",
+        "hwserial": "1001",
+        "name": "node-a",
+        "mode": "utm"
+      },
+      {"type": "sshaccesscomponent", "is_enabled": false, "uuid": "ssh-1"},
+      {"type": "snmpcomponent", "is_enabled": false, "protocol": "", "auth_type": "", "enc_type": ""},
+      {"type": "logserverremoteuplink", "is_enabled": true, "host": "10.0.0.5"}
+    ]
+  },
+  "cgw": {
+    "data": [
+      {
+        "hwserial": "1001",
+        "name": "node-a",
+        "update_version": "4.2.1-1",
+        "mode": "utm"
+      }
+    ]
+  }
+}
