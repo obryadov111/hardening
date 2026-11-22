@@ -28,7 +28,7 @@ def _question(probe) -> dict:
 
 
 def manual_packs(registry: PackRegistry) -> list[dict]:
-    """Паки для проверки по опросу и их вопросы — для страницы интерфейса."""
+    """Паки для проверки по опросу и их вопросы — для API опроса."""
     result = []
     for pack in registry.latest("manual"):
         result.append({
