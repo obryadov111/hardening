@@ -2,7 +2,7 @@
 
 Проверка полноты на 1 ноября 2026. В таблицу попали исходники бэкенда, агента, интерфейса, паки, фикстуры паков, тесты, скрипты `deploy/` и workflow CI. Бинарные образцы вывода в `agent/tests/fixtures/` в таблицу не включены: их читают тесты UserGate и Континента, глава 09.
 
-Всего строк карты: 332 вместе с `src/backend/.env.example`, контекстом интерфейса, хуком сортировки и главами 00 и 27 (шаблон переменных, глава 21). К прежним 327 добавлены сценарий и шаблон GPO, `gpoPackage.js` с тестом и workflow релиза. Неразнесённых среди исходников, паков, скриптов deploy и workflow: 0. Файл `.env.example` добавлен к сгенерированному списку отдельно, потому что у него нестандартное расширение.
+Всего строк карты: 340, по файлам в таблице ниже. Из неё убраны страница опроса, её клиент и сквозной тест анкеты (`src/pages/ManualScan.jsx`, `src/api/manualScans.js`, `e2e/tests/08-manual-scan.spec.js`). Неразнесённых среди исходников, паков, скриптов deploy и workflow: 0. Файл `.env.example` добавлен к сгенерированному списку отдельно, потому что у него нестандартное расширение.
 
 | Файл | Глава |
 |---|---|
@@ -67,7 +67,6 @@
 | `e2e/tests/05-scans-compare-offline.spec.js` | 23 |
 | `e2e/tests/06-agents.spec.js` | 23 |
 | `e2e/tests/07-users-navigation.spec.js` | 23 |
-| `e2e/tests/08-manual-scan.spec.js` | 23 |
 | `src/App.jsx` | 17 |
 | `src/api/agentKeys.js` | 17, 18 |
 | `src/api/assets.js` | 17, 18 |
@@ -77,7 +76,6 @@
 | `src/api/exports.js` | 17, 18 |
 | `src/api/fstec.js` | 17, 18 |
 | `src/api/hardening.js` | 17, 18 |
-| `src/api/manualScans.js` | 17, 18 |
 | `src/api/offlineScans.js` | 17, 18 |
 | `src/api/organizations.js` | 17, 18 |
 | `src/api/policies.js` | 17, 18 |
@@ -325,7 +323,6 @@
 | `src/pages/FstecCoverage.jsx` | 17 |
 | `src/pages/Hardening.jsx` | 17 |
 | `src/pages/Login.jsx` | 17 |
-| `src/pages/ManualScan.jsx` | 17 |
 | `src/pages/OfflineScan.jsx` | 17 |
 | `src/pages/OrganizationUsers.jsx` | 17 |
 | `src/pages/Policies.jsx` | 17 |

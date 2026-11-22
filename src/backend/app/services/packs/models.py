@@ -344,7 +344,7 @@ class WinAdProbe(StrictModel):
 
 
 class ManualProbe(StrictModel):
-    """Вопрос аудитору (транспорт manual): ответ вводится в интерфейсе по экранам системы управления устройством.
+    """Вопрос аудитору (транспорт manual): ответ приходит в API опроса по экранам системы управления устройством.
     yesno — значение "yes"/"no"; number — число; choice — одно из choices; text — строка (например, версия ПО)."""
 
     type: Literal["manual"]

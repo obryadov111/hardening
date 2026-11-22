@@ -178,12 +178,12 @@ npm run lint && npm run test:unit && npm run build                    # инте
 
 # сквозные тесты интерфейса (Playwright): бэкенд и Vite поднимаются сами, БД — своя одноразовая,
 # не та, что у pytest (засев стирает её): каждая страница, кнопка и роль.
-# Подсчёт 1 ноября 2026: 134 теста (70 вызовов test(), часть раскрывается циклами ролей и страниц)
+# Подсчёт: 128 тестов после снятия страницы опроса (перед этим было 135; часть test() раскрывается циклами ролей и страниц)
 E2E_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5433/app_e2e_db npm run test:e2e
 ```
 
 Подсчёт тестов на 1 ноября 2026: `pytest --collect-only` дал 629 кейсов бэкенда и 300 кейсов агента,
-`npx playwright test --list` — 134 сквозных, в `utils.test.js` — 7. Подробности —
+`npx playwright test --list` — 128 сквозных, в `utils.test.js` — 7. Подробности —
 [`docs/how-it-works/23-tests-ci.md`](docs/how-it-works/23-tests-ci.md).
 
 Нагрузка: `tools/loadtest/ui_load.py` — засев N хостов (ПО как на хосте, настоящие пробы агента) и замер

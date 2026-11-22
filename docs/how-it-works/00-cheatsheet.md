@@ -45,7 +45,7 @@ V = Icvss × (0,5·K + 0,2·L + 0,3·P) × (Iat + Iimp)
 
 ## 15 цифр
 
-Подсчёт 1 ноября 2026: pytest `--collect-only` и `npx playwright test --list`.
+Подсчёт 1 ноября 2026: pytest `--collect-only` и `npx playwright test --list`. Число Playwright пересчитано после снятия страницы опроса.
 
 | | |
 |---|---|
@@ -56,7 +56,7 @@ V = Icvss × (0,5·K + 0,2·L + 0,3·P) × (Iat + Iimp)
 | Пунктов методики | 70 = 44 проверки + 10 БДУ + 16 вне модели |
 | Операторов сравнения | 13 в коде, `lt` и `gt` в паках не используются |
 | Статусов движка | 3: `pass`, `fail`, `error` |
-| Тесты бэкенда / агента / Playwright / утилиты UI | 629 / 300 / 134 / 7 |
+| Тесты бэкенда / агента / Playwright / утилиты UI | 629 / 300 / 128 / 7 |
 | Образов Linux в CI | 16, плюс Windows Server 2022 и 2025 |
 | `baseline` | 3 пака: Ubuntu, Docker, Windows Server |
 | Лабораторные стенды, уровень всё ещё `draft` | UserGate 7.4.1 и Континент 4.2.1 |

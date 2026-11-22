@@ -183,8 +183,9 @@ test('навигация: каждый пункт бокового меню от
   await page.goto('/dashboard')
   const nav = page.getByRole('navigation', { name: 'Разделы' }).first()
   const links = nav.getByRole('link')
-  await expect(links).toHaveCount(13)
-  for (let i = 0; i < 13; i++) {
+  await expect(links).toHaveCount(12)
+  await expect(nav.getByRole('link', { name: 'Проверка по опросу' })).toHaveCount(0)
+  for (let i = 0; i < 12; i++) {
     const link = links.nth(i)
     const href = await link.getAttribute('href')
     await link.click()
@@ -192,9 +193,13 @@ test('навигация: каждый пункт бокового меню от
     await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible()
     await expect(link).toHaveAttribute('aria-current', 'page')
   }
-  // старый адрес /project ведёт на «Активы», неизвестный — на «Обзор»
+  // старые адреса: /project — «Активы», /manual-scan — «Сканирования» (анкета убрана, снимки опроса там),
+  // неизвестный — на «Обзор»
   await page.goto('/project')
   await expect(page).toHaveURL(/\/assets$/)
+  await page.goto('/manual-scan')
+  await expect(page).toHaveURL(/\/scans$/)
+  await expect(page.getByRole('heading', { level: 1, name: 'Сканирования' })).toBeVisible()
   await page.goto('/нет-такой-страницы')
   await expect(page).toHaveURL(/\/dashboard$/)
 })

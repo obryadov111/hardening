@@ -2,7 +2,7 @@
 
 ## Зачем нужно
 
-Часть настроек не лежит в файле и не отдаётся командой. Для них пак объявляет `transport: manual` и пробы типа `manual`. Агент такие паки не получает: `list_manifests` их отфильтровывает. Отвечает человек в браузере. Сравнение с `assert` всё равно делает сервер, тем же `evaluate_pack`.
+Часть настроек не лежит в файле и не отдаётся командой. Для них пак объявляет `transport: manual` и пробы типа `manual`. Агент такие паки не получает: `list_manifests` их отфильтровывает. Ответ принимает API опроса. Сравнение с `assert` всё равно делает сервер, тем же `evaluate_pack`. Страницы анкеты в интерфейсе нет: адрес `/manual-scan` открывает «Сканирования», где лежат уже сохранённые снимки с пометкой «по опросу».
 
 Актуальные паки: `kontinent-4-local` (3), `ideco-ngfw` (6), `pt-ngfw-settings` (5). Вместе 14 вопросов.
 
@@ -30,13 +30,13 @@
 
 Версия ПО, если в паке есть `firmware` с вопросом, становится записью `software` (`firmware_software`) и потом участвует в БДУ.
 
-## Что делает интерфейс
+## Как принимаются ответы
 
-Страница `src/pages/ManualScan.jsx`.
+Отдельной страницы нет. Пункт меню «Проверка по опросу» убран. `GET` и `POST` ниже остаются: ими пользуются тесты и любой клиент API. Старый адрес `/manual-scan` в `src/App.jsx` делает `Navigate` на `/scans`.
 
 1. `GET /api/organizations/{org}/manual-scans/packs` — список паков и вопросов (`manual_packs`). Читать может любой участник организации.
-2. Человек выбирает пак, имя хоста, окружение, при желании IP, критичность, метку и отвечает.
-3. Отправка — `POST /api/organizations/{org}/manual-scans`. Функция `submit_manual_scan` в `api/routes/manual_scans.py` требует `require_org_admin`. Наблюдатель и аудитор видят вопросы: `ManualScan.jsx` читает `GET …/my-role` и включает кнопку только при `role === "admin"`. Иначе на странице текст «Сохранять ответы может только администратор организации».
+2. Тело запроса задаёт пак, имя хоста, окружение, при желании IP, критичность, метку и ответы.
+3. Отправка — `POST /api/organizations/{org}/manual-scans`. Функция `submit_manual_scan` в `api/routes/manual_scans.py` требует `require_org_admin`.
 4. Сервер вызывает `ingest_payload` с источником `manual`. В `collection` пишутся `answered_by`, `answered_at` и список `unanswered`.
 
 Дальше это обычный снимок: те же статусы, тот же процент, тот же принятый риск. В отчёте PDF и Excel источник подписан как опрос, а не как живой хост (`source_label` в `services/snapshot_export.py`).
@@ -62,7 +62,7 @@
 |---|---|
 | Нормализация | `normalize_answer`, `probe_results` в `services/manual_scan.py` |
 | Ручки | `api/routes/manual_scans.py` |
-| Страница | `src/pages/ManualScan.jsx`, клиент `src/api/manualScans.js` |
+| Старый адрес | `/manual-scan` → `/scans` в `src/App.jsx` |
 | Паки | `kontinent-4-local-1.0.0.yaml`, `ideco-ngfw-1.0.0.yaml`, `pt-ngfw-settings-1.0.0.yaml` |
 
 ## Ограничения

@@ -22,6 +22,7 @@ on:
       - "src/backend/app/commands/pack.py"
       - ".github/scripts/agent-in-container.sh"
       - ".github/workflows/linux-packs.yml"
+      - "deploy/certs/**"
   workflow_dispatch:
 
 env:
@@ -71,12 +72,50 @@ jobs:
           head -c 32 /dev/urandom | base64 > ../../work/key
           python -m app.commands.pack manifests --key-file ../../work/key --out ../../work/manifests.json
 
-      # Реестр РЕД ОС подписан Russian Trusted Root CA (Минцифры), которого нет у раннера GitHub
+      # Реестр registry.red-soft.ru: лист подписан Russian Trusted Sub CA 2024
+      # (gu-st.ru/.../russian_trusted_sub_ca_2024_pem.crt), а в рукопожатии сервер присылает
+      # промежуточный 2022 года (russian_trusted_sub_ca_pem.crt) — им лист не подписан.
+      # Корень — russian_trusted_root_ca_pem.crt. Оба нужных сертификата уже в
+      # deploy/certs/russian-trusted-ca.pem; их подписи сходятся и в OpenSSL, и в Go.
+      # С ноября 2026 ubuntu-latest — Ubuntu 26.04, Docker тянет образ через containerd.
+      # Запрос токена реестра берёт системное хранилище, а не только /etc/docker/certs.d
+      # (moby/moby#52600). Поэтому цепочку ставим в системное хранилище и перезапускаем dockerd.
       - name: Russian Trusted CA for registry.red-soft.ru
         if: startsWith(matrix.image, 'registry.red-soft.ru/')
         run: |
+          sudo cp deploy/certs/russian-trusted-ca.pem /usr/local/share/ca-certificates/russian-trusted-ca.crt
+          sudo update-ca-certificates
           sudo mkdir -p /etc/docker/certs.d/registry.red-soft.ru
           sudo cp deploy/certs/russian-trusted-ca.pem /etc/docker/certs.d/registry.red-soft.ru/ca.crt
+          printf '%s\n' \
+            'server = "https://registry.red-soft.ru"' \
+            '' \
+            '[host."https://registry.red-soft.ru"]' \
+            '  capabilities = ["pull", "resolve"]' \
+            '  ca = "/etc/docker/certs.d/registry.red-soft.ru/ca.crt"' \
+            | sudo tee /etc/docker/certs.d/registry.red-soft.ru/hosts.toml >/dev/null
+          # Отпечатки официальных файлов gu-st.ru: корень и Sub CA 2024. Лист реестра подписан именно этим Sub CA.
+          root_fp=d26d2d0231b7c39f92cc738512ba54103519e4405d68b5bd703e9788ca8ecf31
+          sub_fp=2155785036c900dbb5f1bb2a1569c80c55595bd6bf94867a29bbddbc7d88a3f2
+          awk 'BEGIN{n=0} /-----BEGIN CERTIFICATE-----/{n++; close(f); f=sprintf("/tmp/ci-ca-%d.pem", n)} n{print > f}' /etc/ssl/certs/ca-certificates.crt
+          seen_root=0
+          seen_sub=0
+          for f in /tmp/ci-ca-*.pem; do
+            fp=$(openssl x509 -in "$f" -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f') || continue
+            [ "$fp" = "$root_fp" ] && seen_root=1
+            [ "$fp" = "$sub_fp" ] && seen_sub=1
+          done
+          if [ "$seen_root" != 1 ] || [ "$seen_sub" != 1 ]; then
+            echo "в системном хранилище нет корня Минцифры или Sub CA 2024" >&2
+            exit 1
+          fi
+          sudo systemctl restart docker
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            docker info >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "docker не поднялся после перезапуска" >&2
+          exit 1
 
       # Реестры вне GitHub (Astra, РЕД ОС) иногда не отвечают — три попытки скачать образ
       - name: Pull ${{ matrix.image }}

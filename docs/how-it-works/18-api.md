@@ -78,7 +78,7 @@
 | GET | `/api/exports/snapshots/{id}/download` | `format=excel` или `pdf` |
 | GET | `/api/organizations/{org}/policies` | список политик |
 | GET | `/api/organizations/{org}/risk-exceptions` | список рисков |
-| GET | `/api/organizations/{org}/manual-scans/packs` | вопросы анкет |
+| GET | `/api/organizations/{org}/manual-scans/packs` | вопросы анкеты; страницы опроса в интерфейсе нет |
 | GET | `/api/organizations/{org}/offline-scans/packs` | какие ssh-паки ждут выгрузку |
 | GET | `/api/organizations/{org}/agent-keys` | список ключей площадки, сами ключи не возвращаются |
 
@@ -100,7 +100,7 @@
 | DELETE | `/api/organizations/{org}/expected-hosts` | очистить список |
 | POST | `/api/organizations/{org}/offline-scans/preview` | разобрать один файл, снимок не создавать |
 | POST | `/api/organizations/{org}/offline-scans` | выгрузка: `commands`+`files` или одно поле `bundle`; необязательное поле `scan_run_id` |
-| POST | `/api/organizations/{org}/manual-scans` | ответы анкеты; необязательное поле `scan_run_id` |
+| POST | `/api/organizations/{org}/manual-scans` | ответы анкеты; необязательное поле `scan_run_id`. Адрес `/manual-scan` открывает сканирования |
 | POST | `/api/organizations/{org}/scan-runs` | открыть прогон вручную |
 | POST | `/api/scan-runs/{id}/close` | закрыть прогон |
 | PUT | `/api/organizations/{org}/scan-schedule` | `daily` или `weekly` |
