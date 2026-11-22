@@ -45,6 +45,7 @@ CHAPTERS = [
     "30-diploma-show.md",
     "31-diagnostics.md",
     "32-proposed-changes.md",
+    "33-proposed-pr23.md",
 ]
 
 HEADER = """<!-- Сгенерировано docs/how-it-works/assemble_full.py. Не редактировать вручную. -->
