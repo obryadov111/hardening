@@ -72,15 +72,28 @@ setx /M HARDENING_PACK_PUBLIC_KEY "<открытый ключ>"
 setx /M HARDENING_PIN_SHA256 "sha256//<отпечаток>"
 # при прокси: setx /M HARDENING_PROXY "http://proxy.corp:3128"
 # Register-ScheduledTask, а не schtasks /TR: PowerShell неправильно передаёт schtasks вложенные кавычки пути с пробелом
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+  -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 1)
 $action = New-ScheduledTaskAction -Execute "C:\Program Files\Hardening\hardening-agent.exe" `
   -Argument "--api-url https://audit.<домен> --environment prod --use-packs"
-Register-ScheduledTask -TaskName "Hardening agent" -Action $action -Trigger (New-ScheduledTaskTrigger -Daily -At 03:00 -RandomDelay (New-TimeSpan -Hours 1)) `
-  -User SYSTEM -RunLevel Highest -Force | Out-Null
+Register-ScheduledTask -TaskName "Hardening agent" -Action $action `
+  -Trigger (New-ScheduledTaskTrigger -Daily -At 07:30 -RandomDelay (New-TimeSpan -Hours 2)) `
+  -Settings $settings -User SYSTEM -RunLevel Highest -Force | Out-Null
+$flush = New-ScheduledTaskAction -Execute "C:\Program Files\Hardening\hardening-agent.exe" `
+  -Argument "flush-spool --api-url https://audit.<домен> --environment prod --state-dir `"C:\ProgramData\HardeningAgent`""
+$flushSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+  -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
+Register-ScheduledTask -TaskName "Hardening agent spool" -Action $flush `
+  -Trigger (New-ScheduledTaskTrigger -Daily -At 07:30 -RandomDelay (New-TimeSpan -Minutes 30) -RepetitionInterval (New-TimeSpan -Minutes 30) -RepetitionDuration (New-TimeSpan -Hours 10)) `
+  -Settings $flushSettings -User SYSTEM -RunLevel Highest -Force | Out-Null
 Start-ScheduledTask -TaskName "Hardening agent"
 ```
 
-`-RandomDelay` — разброс запуска до часа: тысяча хостов не обращается к серверу в одну минуту (на Linux то же
-делает `RandomizedDelaySec=1h` таймера). Если нет связи или сервер занят (429, 502, 503, 504), агент повторяет
+Время 07:30 и разброс 2 часа — те же значения, что параметры `-CollectTime` и `-CollectRandomDelayHours`
+в `gpo-startup.ps1`. Сервер площадки ночью выключен, поэтому сбор днём. `-RandomDelay` размазывает
+тысячу хостов по двум часам (на Linux по-прежнему `RandomizedDelaySec=1h`, таймер не менялся).
+Задача «Hardening agent spool» только досылает очередь (`flush-spool`) и не повторяет полный сбор.
+Если нет связи или сервер занят (429, 502, 503, 504), полный прогон повторяет
 запрос с full jitter до 900 секунд, не дольше 30 минут на один запуск, и только потом откладывает прогон в
 очередь. Несовпадение пина не повторяется.
 
@@ -106,10 +119,11 @@ Start-ScheduledTask -TaskName "Hardening agent"
 3. регистрирует хост ключом площадки, если он ещё не зарегистрирован. Первая регистрация и первый сбор
    ждут случайную паузу до 15 минут. Ошибка сети повторяется в этом запуске до 30 минут, затем — следующим
    циклом bootstrap, без перезагрузки. Несовпадение пина в цикле не повторяется;
-4. создаёт задачу от SYSTEM: 03:00 с разбросом до часа, `StartWhenAvailable` — ПК, выключенный
-   ночью, выполнит прогон после включения утром. По умолчанию ежедневно; `-Schedule Weekly` — по понедельникам
-   (аудит как проект: прогон после исправлений, без постоянного мониторинга). Смена параметра пересоздаёт задачу
-   при следующей загрузке;
+4. создаёт задачу от SYSTEM: 07:30 с разбросом до 2 часов (`-CollectTime`, `-CollectRandomDelayHours`),
+   `StartWhenAvailable` и `IgnoreNew`. Рядом — задача «Hardening agent spool»: с того же времени каждые
+   30 минут плюс случайные 0–30 минут, 10 часов, команда `flush-spool`. Она досылает уже собранные файлы
+   и не запускает полный сбор. По умолчанию сбор ежедневный; `-Schedule Weekly` — по понедельникам в то же
+   время. Смена параметров пересоздаёт задачу при следующем запуске сценария;
 5. сразу после регистрации запускает первый прогон — отчёт появляется в день установки, а не ночью.
 
 Шаги администратора домена:

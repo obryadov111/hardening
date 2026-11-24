@@ -117,7 +117,9 @@ gpo-startup.ps1 и hardening-agent.exe из этого архива (или за
 Проверка
 --------
 Журнал: C:\\ProgramData\\HardeningAgent\\gpo-startup.log
-Задача планировщика: «Hardening agent bootstrap» (после регистрации её снимает сценарий, остаётся «Hardening agent»).
+Задача планировщика: «Hardening agent bootstrap» (после регистрации её снимает сценарий).
+Остаются «Hardening agent» (сбор в 07:30, разброс до 2 часов) и «Hardening agent spool»
+(досылка очереди днём, без нового сбора). Время задаёт сценарий, в строку параметров его можно не писать.
 Файл C:\\ProgramData\\HardeningAgent\\host.json появляется после регистрации.
 ПК виден на сайте в «Агенты» → «Хосты» и в текущем прогоне.
 
@@ -141,6 +143,7 @@ gpo-startup.ps1 и hardening-agent.exe из этого архива (или за
 Уберите ПК из области действия политики, затем в PowerShell от администратора:
 
 Unregister-ScheduledTask -TaskName 'Hardening agent bootstrap' -Confirm:$false -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName 'Hardening agent spool' -Confirm:$false -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName 'Hardening agent' -Confirm:$false
 Remove-Item -Recurse -Force 'C:\\Program Files\\Hardening','C:\\ProgramData\\HardeningAgent'
 

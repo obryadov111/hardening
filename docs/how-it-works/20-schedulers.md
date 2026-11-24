@@ -12,9 +12,10 @@
 |---|---|---|
 | Прогон агента Linux | `hardening-agent@.timer`, `OnCalendar=daily`, сдвиг до 1 часа | запускает `collector.py` |
 | Раз в неделю | drop-in Ansible `OnCalendar=weekly` | заменяет ежедневный календарь у экземпляра |
-| Прогон Windows | задача «Hardening agent», 03:00, `RandomDelay` 1 час, либо понедельник при `-Schedule Weekly` | запускает exe |
-| Регистрация Windows | задача «Hardening agent bootstrap», каждые 15–30 минут, пока нет `host.json` | ставится автозагрузкой GPO сразу, до успешного enroll |
-| Досылка очереди | тот же запуск агента, `spool_flush` | не отдельный демон |
+| Прогон Windows | задача «Hardening agent», `-CollectTime` 07:30, `RandomDelay` до 2 часов, либо понедельник при `-Schedule Weekly` | запускает exe, полный сбор |
+| Досылка Windows | задача «Hardening agent spool», каждые 30–60 минут, окно 10 часов от того же времени | `flush-spool`, без нового сбора |
+| Регистрация Windows | задача «Hardening agent bootstrap», каждые 15–30 минут, пока нет `host.json` | ставится автозагрузкой GPO сразу, до успешного enroll; на уже зарегистрированном ПК появляется снова при запуске сценария и после сверки задач снимается |
+| Досылка очереди Linux | тот же запуск агента, `spool_flush` | не отдельный демон |
 | Обновление БДУ | `deploy/update_bdu.sh` вручную | скачивает zip и OVAL, грузит в базу |
 | Публикация агента | `deploy/publish_agent.sh` вручную | архив, exe из CI, `version.json` |
 | Пересчёт находок | первый GET уязвимостей или методики после нового отчёта или новой БДУ | внутри запроса, под advisory-блокировкой |
@@ -35,7 +36,11 @@ Fail2ban и ротация журналов — службы хоста, не к
 - `deploy/publish_agent.sh` и `python -m app.commands.bdu` — команды человека. В репозитории нет unit-файла, который вызывал бы их по cron.
 - `seed_demo_data` — разовая команда засева, не фон.
 
-Таймер Linux читается целиком из `agent/deploy/hardening-agent@.timer`: `OnCalendar=daily`, `RandomizedDelaySec=1h`, `Persistent=yes`. Неделя не прописана в этом файле. Её добавляет drop-in Ansible, и drop-in перебивает календарь. Задача сбора Windows задаётся в `gpo-startup.ps1`: ежедневно или `-Schedule Weekly`, 03:00, `RandomDelay` один час, лимит 1 час, `StartWhenAvailable`, один экземпляр. До регистрации живёт вторая задача, «Hardening agent bootstrap»: её автозагрузка создаёт сразу и выходит, не дожидаясь сети. Повтор — 15 минут плюс случайные 0–15 минут. После `host.json` bootstrap снимается.
+Таймер Linux читается целиком из `agent/deploy/hardening-agent@.timer`: `OnCalendar=daily`, `RandomizedDelaySec=1h`, `Persistent=yes`. Неделя не прописана в этом файле. Её добавляет drop-in Ansible, и drop-in перебивает календарь. Linux этим изменением расписания не затронут.
+
+Задачи Windows задаются в `gpo-startup.ps1`. Время сбора и разброс — только параметры `-CollectTime` (по умолчанию 07:30) и `-CollectRandomDelayHours` (по умолчанию 2, в планировщике это `PT2H`). Сервер площадки выключен примерно с 18:30 до 07:00 по Екатеринбургу, поэтому сбор днём, а не ночью. Задача «Hardening agent»: ежедневно или `-Schedule Weekly` (понедельник, то же время), лимит 1 час, `StartWhenAvailable`, `IgnoreNew`, учётная запись SYSTEM. Задача «Hardening agent spool»: ежедневно с того же часа, повтор `PT30M` плюс `RandomDelay` `PT30M` (то есть 30–60 минут), длительность `PT10H`, `StopAtDurationEnd`, лимит 15 минут, тот же SYSTEM и `IgnoreNew`. Команда — `flush-spool`. Интервал, добавка и длина окна записаны один раз в начале сценария (`$SpoolEveryMinutes`, `$SpoolRandomDelayMinutes`, `$SpoolWindowHours`).
+
+До регистрации живёт третья задача, «Hardening agent bootstrap»: автозагрузка создаёт её сразу и выходит, не дожидаясь сети. Повтор — 15 минут плюс случайные 0–15 минут. После `host.json` bootstrap снимается. Следующий запуск сценария (немедленная задача политики или загрузка ПК) создаёт bootstrap снова. Тот видит регистрацию, сравнивает определение задач и переписывает их, если время, разброс или задача досылки не совпали, затем снова снимает себя. Так уже включённые в домен ПК получают новое расписание без ручного удаления задач.
 
 ## Ограничения
 
